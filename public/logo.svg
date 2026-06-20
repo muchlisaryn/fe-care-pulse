@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="25 55 300 135" width="900" height="405">
+  <defs>
+    <linearGradient id="tg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#22c55e"/>
+      <stop offset="1" stop-color="#2563eb"/>
+    </linearGradient>
+  </defs>
+  <path d="M80,70 L125,85 V124 C125,150 106,166 80,177 C54,166 35,150 35,124 V85 Z" fill="none" stroke="url(#tg)" stroke-width="6.5" stroke-linejoin="round"/>
+  <rect x="61" y="98" width="14" height="47" rx="3" fill="url(#tg)"/>
+  <rect x="47" y="114" width="42" height="14" rx="3" fill="url(#tg)"/>
+  <path d="M89,121 L96,121 L100.5,109 L107,132 L112,117 L114.5,121 L118.5,121" fill="none" stroke="#2563eb" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round"/>
+  <text x="140" y="135" font-family="Poppins, 'Segoe UI', Arial, sans-serif" font-size="32" font-weight="600" fill="#2563eb">Care</text>
+  <text x="221" y="135" font-family="Poppins, 'Segoe UI', Arial, sans-serif" font-size="32" font-weight="600" fill="#16a34a">Pulse</text>
+</svg>
