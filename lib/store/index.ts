@@ -14,6 +14,10 @@ import sterilizationReducer from "./slices/sterilizationSlice"
 import bmhpReducer from "./slices/bmhpSlice"
 import notifReducer from "./slices/notifSlice"
 import monitoringReducer from "./slices/monitoringSlice"
+import icd10Reducer from "./slices/icd10Slice"
+import categoriCPReducer from "./slices/categoriClinicalPathwaySlice"
+import templateCPReducer from "./slices/templateClinicalPathwaySlice"
+import asesmenCPReducer from "./slices/asesmenClinicalPathwaySlice"
 
 export const store = configureStore({
   reducer: {
@@ -32,6 +36,10 @@ export const store = configureStore({
     bmhps: bmhpReducer,
     notif: notifReducer,
     monitoring: monitoringReducer,
+    icd10: icd10Reducer,
+    categoriCP: categoriCPReducer,
+    templateCP: templateCPReducer,
+    asesmenCP: asesmenCPReducer,
   },
 })
 

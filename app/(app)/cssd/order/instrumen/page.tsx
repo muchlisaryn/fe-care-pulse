@@ -13,6 +13,7 @@ import { DataTable, type Column } from "@/components/molecules/DataTable"
 import { Modal } from "@/components/molecules/Modal"
 import { ConfirmDialog } from "@/components/molecules/ConfirmDialog"
 import { Pagination } from "@/components/molecules/Pagination"
+import { OrderTimeline } from "@/components/molecules/OrderTimeline"
 import { useAppDispatch, useAppSelector } from "@/lib/store/hooks"
 import {
   fetchOrders,
@@ -540,13 +541,21 @@ export default function OrderInstrumenPage() {
 
   const columns: Column<Order>[] = [
     {
-      header: "Kode Order",
+      header: "Kode",
       cell: (row) => (
-        <span className="font-mono text-xs font-semibold text-[#075489] bg-[#075489]/8 px-2 py-1 rounded">
-          {row.code}
-        </span>
+        <div className="flex flex-col gap-1">
+          <span className="font-mono text-xs font-semibold text-[#075489] bg-[#075489]/8 px-2 py-1 rounded w-fit">
+            {row.code}
+          </span>
+          {/* Kode transaksi barcode muncul setelah order diterima (status ≠ diajukan). */}
+          {row.status !== "diajukan" && row.code_transaction && (
+            <span className="font-mono text-[11px] font-semibold text-[#4ba69d] bg-[#4ba69d]/10 px-2 py-0.5 rounded w-fit">
+              {row.code_transaction}
+            </span>
+          )}
+        </div>
       ),
-      className: "w-32",
+      className: "w-36",
     },
     {
       header: "Dipinjam Oleh",
@@ -1084,6 +1093,9 @@ export default function OrderInstrumenPage() {
                 <p className="text-sm text-gray-700">{detail.note}</p>
               </div>
             )}
+
+            {/* Riwayat Peminjaman: timeline tracking order (dibuat → diterima → dipinjam → dst.) */}
+            <OrderTimeline events={detail.timeline} />
 
             {detail.request_items && detail.request_items.length > 0 && (
               <div>

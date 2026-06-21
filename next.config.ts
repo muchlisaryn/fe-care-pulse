@@ -1,5 +1,9 @@
 import type { NextConfig } from "next";
 
+// Origin backend Laravel (tanpa trailing slash). Diatur lewat env BACKEND_API_URL
+// agar gampang ganti antar lingkungan (lokal / staging / produksi).
+const BACKEND_API_URL = (process.env.BACKEND_API_URL ?? "http://127.0.0.1:8000").replace(/\/$/, "");
+
 const nextConfig: NextConfig = {
   // Izinkan akses dev server dari perangkat lain di LAN (mis. HP via IP).
   // Tanpa ini, Next 16 memblokir request cross-origin saat development.
@@ -10,7 +14,7 @@ const nextConfig: NextConfig = {
     return [
       {
         source: "/api/:path*",
-        destination: "http://127.0.0.1:8000/api/:path*",
+        destination: `${BACKEND_API_URL}/api/:path*`,
       },
     ];
   },

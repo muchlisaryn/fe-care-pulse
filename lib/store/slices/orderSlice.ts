@@ -1,5 +1,6 @@
 import { createAsyncThunk, createSlice, type PayloadAction } from "@reduxjs/toolkit"
 import api from "@/lib/axios"
+import type { TimelineEvent } from "@/components/molecules/OrderTimeline"
 
 // Status order sesuai PRD §4.6 (order.status)
 export const ORDER_STATUSES = [
@@ -56,6 +57,8 @@ export type OrderRequestItem = {
 export type Order = {
   id: number
   code: string
+  // Kode transaksi barcode — null sampai order diterima CSSD (status keluar dari "diajukan").
+  code_transaction: string | null
   room_id: number
   user_id: number | null
   order_date: string | null
@@ -81,6 +84,8 @@ export type Order = {
   deleted_by: string | null
   created_at: string
   updated_at: string
+  // Riwayat peminjaman (timeline event) — hanya tersedia dari endpoint detail/scan.
+  timeline?: TimelineEvent[]
 }
 
 type OrderState = {

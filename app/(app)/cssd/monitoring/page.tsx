@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import {
   Search,
   Package,
@@ -18,7 +18,6 @@ import { Input } from "@/components/atoms/Input"
 import { Button } from "@/components/atoms/Button"
 import { Badge } from "@/components/atoms/Badge"
 import { Barcode } from "@/components/atoms/Barcode"
-import { Checkbox } from "@/components/atoms/Checkbox"
 import { Label } from "@/components/atoms/Label"
 import { SelectSearch } from "@/components/atoms/SelectSearch"
 import { Card } from "@/components/molecules/Card"
@@ -27,6 +26,7 @@ import { RoomDistributionCard } from "@/components/molecules/RoomDistributionCar
 import { PageHeader } from "@/components/molecules/PageHeader"
 import { Modal } from "@/components/molecules/Modal"
 import { Pagination } from "@/components/molecules/Pagination"
+import { OrderTimeline, type TimelineEvent } from "@/components/molecules/OrderTimeline"
 import { useAppDispatch, useAppSelector } from "@/lib/store/hooks"
 import { invalidateOrders } from "@/lib/store/slices/orderSlice"
 import { fetchIncomingCount } from "@/lib/store/slices/notifSlice"
@@ -111,16 +111,6 @@ type ReturnUnit = {
   condition_out: { id: number; name: string } | null
   condition_in: { id: number; name: string } | null
 }
-// Satu peristiwa di timeline tracking order (dari endpoint scan).
-type TimelineEvent = {
-  id: number
-  type: "dibuat" | "diterima" | "dipinjam" | "dikembalikan" | "dipindah" | "dibatalkan"
-  room: string | null
-  actor: string | null
-  borrowed_by: string | null
-  note: string | null
-  created_at: string | null
-}
 type ReturnOrder = {
   id: number
   code: string
@@ -140,45 +130,6 @@ function formatDate(value: string | null) {
   const d = new Date(value)
   if (Number.isNaN(d.getTime())) return value
   return d.toLocaleDateString("id-ID", { day: "2-digit", month: "short", year: "numeric" })
-}
-
-function formatDateTime(value: string | null) {
-  if (!value) return "—"
-  const d = new Date(value)
-  if (Number.isNaN(d.getTime())) return value
-  return d.toLocaleString("id-ID", {
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  })
-}
-
-// Tampilan event timeline tracking order.
-const TIMELINE_LABEL: Record<string, string> = {
-  dibuat: "Order Dibuat",
-  diterima: "Diterima CSSD",
-  dipinjam: "Dipinjam",
-  dipindah: "Dipinjam Unit Lain",
-  dikembalikan: "Dikembalikan",
-  dibatalkan: "Dibatalkan",
-}
-const TIMELINE_VARIANT: Record<string, "info" | "success" | "danger" | "warning" | "default"> = {
-  dibuat: "warning",
-  diterima: "info",
-  dipinjam: "info",
-  dipindah: "default",
-  dikembalikan: "success",
-  dibatalkan: "danger",
-}
-const TIMELINE_DOT: Record<string, string> = {
-  dibuat: "bg-amber-400",
-  diterima: "bg-[#075489]",
-  dipinjam: "bg-[#4ba69d]",
-  dipindah: "bg-purple-400",
-  dikembalikan: "bg-green-500",
-  dibatalkan: "bg-red-500",
 }
 
 const startOfToday = () => {
@@ -213,6 +164,13 @@ type CombinedRow =
   | { kind: "incoming"; order: IncomingOrder }
   | { kind: "borrowed"; group: OrderGroup }
   | { kind: "returned"; order: ReturnedOrder }
+
+// Status order untuk satu baris daftar gabungan — dipakai filter legenda.
+function rowStatus(row: CombinedRow): string {
+  if (row.kind === "incoming") return "diajukan"
+  if (row.kind === "borrowed") return "dipinjam"
+  return "dikembalikan"
+}
 
 // Kelompokkan daftar instrumen dipinjam per order, lalu per paket / satuan.
 // `roomFallback` dipakai saat item tidak membawa nama ruangan sendiri (mis. di
@@ -267,17 +225,21 @@ export default function MonitoringCssdPage() {
   const incomingLoading = useAppSelector((s) => s.monitoring.incomingLoading)
   const returnedLoading = useAppSelector((s) => s.monitoring.returnedLoading)
   const roomsLoaded = useAppSelector((s) => s.monitoring.roomsLoaded)
-  const incomingLoaded = useAppSelector((s) => s.monitoring.incomingLoaded)
-  const returnedLoaded = useAppSelector((s) => s.monitoring.returnedLoaded)
 
-  // Muat data saat mount bila store masih kosong. Navigasi balik ke halaman ini
-  // tidak memicu fetch lagi karena data sudah tersimpan di store.
+  // Distribusi per Ruangan (data rooms): pakai cache — hanya di-fetch saat store
+  // masih kosong (refresh halaman / pertama dibuka), TIDAK saat kembali ke menu.
+  // Refetch hanya dipicu terima pesanan (refreshMonitoring) atau event real-time.
   useEffect(() => {
     if (!roomsLoaded) dispatch(fetchMonitoringRooms())
-    if (!incomingLoaded) dispatch(fetchMonitoringIncoming())
-    if (!returnedLoaded) dispatch(fetchMonitoringReturned())
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  // Daftar Order (order masuk + dikembalikan): selalu muat ulang tiap halaman
+  // dibuka, termasuk saat user kembali ke menu ini — dengan loading.
+  useEffect(() => {
+    dispatch(fetchMonitoringIncoming())
+    dispatch(fetchMonitoringReturned())
+  }, [dispatch])
 
   // Real-time: segarkan daftar monitoring/tracking saat ada order baru atau
   // permintaan pinjam-alih masuk — lewat Pusher, tanpa polling. Memakai
@@ -331,10 +293,15 @@ export default function MonitoringCssdPage() {
   const [searchInput, setSearchInput] = useState("")
   const [searchQuery, setSearchQuery] = useState("")
   const [page, setPage] = useState(1)
+  // Filter status via legenda (klik). Kosong = tampilkan semua status.
+  const [statusFilter, setStatusFilter] = useState<Set<string>>(new Set())
   // Mode scan (sekali-pakai): diaktifkan lewat tombol scan. Saat barcode order
   // terbaca, langsung buka modal Pengembalian untuk order itu. Pencarian manual
   // tetap perlu tekan "Cari".
   const [scanArmed, setScanArmed] = useState(false)
+  // Buffer karakter dari barcode scanner saat mode scan aktif (input modal
+  // disabled, jadi ketikan scanner ditangkap lewat listener keydown global).
+  const scanBufferRef = useRef("")
   // Sedang menelusuri ke database (scan barcode/kode order ke endpoint scan).
   const [scanLoading, setScanLoading] = useState(false)
   // Pencarian manual dengan debounce sedang berlangsung (indikator visual).
@@ -393,14 +360,13 @@ export default function MonitoringCssdPage() {
   const [returnedBy, setReturnedBy] = useState("")
   const [returnDate, setReturnDate] = useState("")
   const [returnCondById, setReturnCondById] = useState<Record<number, string>>({})
-  // Unit yang dicentang untuk dikembalikan dalam satu kali simpan (bukan satu-satu).
-  const [returnSelected, setReturnSelected] = useState<Set<number>>(new Set())
   const [returnSaving, setReturnSaving] = useState(false)
 
-  // Muat daftar kondisi (untuk pilihan kondisi masuk saat pengembalian).
+  // Muat daftar kondisi (pilihan kondisi masuk) hanya saat modal Pengembalian
+  // dibuka — bukan saat halaman dimuat — agar tidak mem-fetch sebelum dibutuhkan.
   useEffect(() => {
-    dispatch(fetchConditions())
-  }, [dispatch])
+    if (returnOpen) dispatch(fetchConditions())
+  }, [returnOpen, dispatch])
 
   function openReturn() {
     setReturnOpen(true)
@@ -409,7 +375,6 @@ export default function MonitoringCssdPage() {
     setReturnedBy("")
     setReturnDate(todayInput())
     setReturnCondById({})
-    setReturnSelected(new Set())
   }
 
   // Cari order dari kode (nomor order ORD-xxx atau kode unit alat).
@@ -426,7 +391,6 @@ export default function MonitoringCssdPage() {
         setReturnError(`Order ${order.code} berstatus "${order.status}", bukan order yang sedang dipinjam.`)
       } else {
         setReturnOrder(order)
-        setReturnSelected(new Set())
         setReturnDate(order.return_actual_date?.slice(0, 10) || todayInput())
         setReturnedBy(order.returned_by ?? order.borrowed_by ?? "")
       }
@@ -445,13 +409,20 @@ export default function MonitoringCssdPage() {
     runLookup(code)
   }
 
-  // Scan barcode order (mode scan): cari ordernya, lalu langsung buka modal
-  // Pengembalian. Jika order tidak dikenal / bukan order dipinjam → tampilkan notif.
+  // Scan barcode transaksi (mode scan): cari ordernya. Order dipinjam → buka modal
+  // Pengembalian; sudah dikembalikan → buka modal Riwayat. Modal scan hanya
+  // ditutup saat sukses; saat gagal modal tetap terbuka + tampilkan error agar
+  // bisa scan/ketik ulang (jangan menutup modal & jangan clear di awal supaya
+  // ketikan tidak hilang).
+  // Kosongkan buffer & tampilan input scan (dipakai saat reset/clear scan).
+  function clearScanInput() {
+    scanBufferRef.current = ""
+    setSearchInput("")
+  }
+
   async function runScanReturn(raw: string) {
     const code = raw.trim()
-    if (!code) return
-    setScanArmed(false)
-    setSearchInput("")
+    if (!code || scanLoading) return
     setScanNotice(null)
     setScanLoading(true)
     try {
@@ -459,29 +430,35 @@ export default function MonitoringCssdPage() {
       const order: ReturnOrder = res.data.data
       if (order.status === "dipinjam") {
         // Masih dipinjam → buka modal Pengembalian dengan order hasil scan.
+        setScanArmed(false)
+        clearScanInput()
         setReturnOpen(true)
         setReturnError(null)
         setReturnCondById({})
-        setReturnSelected(new Set())
         setReturnDate(order.return_actual_date?.slice(0, 10) || todayInput())
         setReturnedBy(order.returned_by ?? order.borrowed_by ?? "")
         setReturnOrder(order)
       } else if (order.status === "dikembalikan") {
         // Sudah dikembalikan → buka modal Riwayat Pengembalian (read-only).
+        setScanArmed(false)
+        clearScanInput()
         setHistoryOpen(true)
         setHistoryLoading(false)
         setHistoryOrder(order)
       } else {
+        // Status lain → tetap di modal scan, bersihkan input untuk scan ulang.
+        clearScanInput()
         setScanNotice({
           type: "error",
-          message: `Order ${order.code} berstatus "${order.status}", bukan order yang sedang dipinjam.`,
+          message: `Order ${order.code} berstatus "${order.status}", bukan order aktif.`,
         })
       }
     } catch (err) {
       const x = err as { response?: { data?: { message?: string } } }
+      clearScanInput()
       setScanNotice({
         type: "error",
-        message: x.response?.data?.message ?? `No. order "${code}" tidak dikenal.`,
+        message: x.response?.data?.message ?? `No. transaksi "${code}" tidak dikenal.`,
       })
     } finally {
       setScanLoading(false)
@@ -495,47 +472,36 @@ export default function MonitoringCssdPage() {
     return () => clearTimeout(t)
   }, [scanNotice])
 
-  // Centang / hapus centang satu unit untuk dikembalikan.
-  function toggleReturnSelect(itemId: number) {
-    setReturnError(null)
-    setReturnSelected((prev) => {
-      const next = new Set(prev)
-      if (next.has(itemId)) next.delete(itemId)
-      else next.add(itemId)
-      return next
-    })
-  }
-
-  // Centang / hapus centang semua unit yang belum dikembalikan sekaligus.
-  function toggleReturnSelectAll(pendingIds: number[], checked: boolean) {
-    setReturnError(null)
-    setReturnSelected(checked ? new Set(pendingIds) : new Set())
-  }
-
-  // Kembalikan semua unit terpilih sekaligus (satu kali simpan) beserta nama
-  // pengembali, tanggal pengembalian, dan kondisi masuk masing-masing. Backend
-  // menutup order otomatis saat semua unit sudah kembali.
+  // Kembalikan unit yang kondisi masuknya sudah diisi. Pengembalian bisa dicicil:
+  // unit tanpa kondisi masuk dibiarkan (belum kembali) dan bisa dikembalikan nanti.
+  // Backend menutup order otomatis saat semua unit sudah kembali.
   async function handleSaveReturns() {
     if (!returnOrder || returnSaving) return
-    const ids = [...returnSelected]
-    if (ids.length === 0) {
-      setReturnError("Pilih minimal satu unit untuk dikembalikan.")
+    const pending = returnOrder.items.filter((u) => !u.is_returned)
+    if (pending.length === 0) {
+      setReturnError("Tidak ada unit yang perlu dikembalikan.")
+      return
+    }
+    // Hanya unit yang sudah dipilih kondisi masuknya yang dikembalikan kali ini.
+    const ready = pending.filter((u) => returnCondById[u.id])
+    if (ready.length === 0) {
+      setReturnError("Isi kondisi masuk minimal satu unit untuk dikembalikan.")
       return
     }
     setReturnSaving(true)
     setReturnError(null)
     try {
-      const items = ids.map((id) => {
-        const condId = returnCondById[id]
-        return { id, is_returned: true, condition_in_id: condId ? Number(condId) : null }
-      })
+      const items = ready.map((u) => ({
+        id: u.id,
+        is_returned: true,
+        condition_in_id: Number(returnCondById[u.id]),
+      }))
       const res = await api.put(`/master/orders/${returnOrder.id}`, {
         returned_by: returnedBy.trim() || null,
         return_actual_date: returnDate || null,
         items,
       })
       setReturnOrder(res.data.data)
-      setReturnSelected(new Set())
       refreshMonitoring() // muat ulang distribusi ruangan & riwayat
       dispatch(invalidateOrders())
     } catch (err) {
@@ -690,7 +656,7 @@ export default function MonitoringCssdPage() {
     setScanArmed(false)
   }
 
-  // Pencarian manual dengan debounce: setelah berhenti mengetik ~400ms, terapkan
+  // Pencarian manual dengan debounce: setelah berhenti mengetik ~1 detik, terapkan
   // filter. Tidak berlaku saat mode scan (scan punya alurnya sendiri ke database).
   useEffect(() => {
     if (scanArmed) return
@@ -701,24 +667,54 @@ export default function MonitoringCssdPage() {
       setSearchQuery(q)
       setPage(1)
       setSearching(false)
-    }, 400)
+    }, 1000)
     return () => clearTimeout(t)
   }, [searchInput, searchQuery, scanArmed])
 
-  // Aktifkan mode scan: kosongkan input & fokuskan agar barcode scanner langsung terbaca.
+  // Aktifkan mode scan: kosongkan buffer + tampilan input & notif.
   useEffect(() => {
     if (!scanArmed) return
-    setSearchInput("")
-    document.getElementById("monitoring-search")?.focus()
+    clearScanInput()
+    setScanNotice(null)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scanArmed])
 
-  // Saat mode scan aktif & ada input dari scanner: setelah input berhenti (debounce
-  // singkat menandai scan selesai), cari ordernya dan buka modal Pengembalian.
+  // Tangkap input barcode scanner secara GLOBAL selama mode scan aktif. Input di
+  // modal sengaja disabled (tidak bisa diketik manual); barcode scanner berperilaku
+  // sebagai keyboard, jadi karakternya ditangkap di sini lalu ditampilkan. Enter
+  // (suffix scanner) langsung memproses.
+  useEffect(() => {
+    if (!scanArmed) return
+    function onKey(e: KeyboardEvent) {
+      if (scanLoading) return
+      if (e.key === "Enter") {
+        e.preventDefault()
+        runScanReturn(scanBufferRef.current)
+        return
+      }
+      if (e.key === "Backspace") {
+        scanBufferRef.current = scanBufferRef.current.slice(0, -1)
+        setSearchInput(scanBufferRef.current)
+        return
+      }
+      // Hanya karakter tunggal yang dapat dicetak (abaikan Shift, Tab, panah, dll.).
+      if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        scanBufferRef.current += e.key
+        setSearchInput(scanBufferRef.current)
+      }
+    }
+    document.addEventListener("keydown", onKey)
+    return () => document.removeEventListener("keydown", onKey)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scanArmed, scanLoading])
+
+  // Auto-find: saat mode scan aktif & buffer berhenti berubah selama 1 detik,
+  // otomatis telusuri (untuk scanner tanpa suffix Enter).
   useEffect(() => {
     if (!scanArmed) return
     const code = searchInput.trim()
     if (!code) return
-    const t = setTimeout(() => runScanReturn(code), 300)
+    const t = setTimeout(() => runScanReturn(code), 1000)
     return () => clearTimeout(t)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scanArmed, searchInput])
@@ -796,14 +792,27 @@ export default function MonitoringCssdPage() {
   }, [returned, q])
 
   // Satu daftar gabungan: order masuk → sedang dipinjam → sudah dikembalikan.
-  const combinedRows = useMemo<CombinedRow[]>(
-    () => [
+  // Disaring lagi oleh filter status legenda (kosong = tampilkan semua).
+  const combinedRows = useMemo<CombinedRow[]>(() => {
+    const all: CombinedRow[] = [
       ...incomingFiltered.map((order) => ({ kind: "incoming" as const, order })),
       ...orderGroups.map((group) => ({ kind: "borrowed" as const, group })),
       ...returnedFiltered.map((order) => ({ kind: "returned" as const, order })),
-    ],
-    [incomingFiltered, orderGroups, returnedFiltered],
-  )
+    ]
+    if (statusFilter.size === 0) return all
+    return all.filter((row) => statusFilter.has(rowStatus(row)))
+  }, [incomingFiltered, orderGroups, returnedFiltered, statusFilter])
+
+  // Klik label legenda untuk filter status (toggle). Selalu balik ke halaman 1.
+  function toggleStatusFilter(status: string) {
+    setPage(1)
+    setStatusFilter((prev) => {
+      const next = new Set(prev)
+      if (next.has(status)) next.delete(status)
+      else next.add(status)
+      return next
+    })
+  }
 
   const totalPages = Math.ceil(combinedRows.length / ITEMS_PER_PAGE)
   const pagedRows = combinedRows.slice((page - 1) * ITEMS_PER_PAGE, page * ITEMS_PER_PAGE)
@@ -880,8 +889,9 @@ export default function MonitoringCssdPage() {
 
   return (
     <div className="space-y-6">
-      {/* Notifikasi hasil scan (mis. order tidak dikenal) */}
-      {scanNotice && (
+      {/* Notifikasi hasil scan (mis. order tidak dikenal) — disembunyikan saat
+          modal scan terbuka karena errornya sudah tampil di dalam modal. */}
+      {scanNotice && !scanArmed && (
         <div
           className={`fixed right-4 top-4 z-[60] max-w-sm rounded-lg px-4 py-3 text-sm shadow-lg ${
             scanNotice.type === "error" ? "bg-red-600 text-white" : "bg-[#075489] text-white"
@@ -966,7 +976,7 @@ export default function MonitoringCssdPage() {
                   scanLoading
                     ? "Mencari ke database..."
                     : scanArmed
-                      ? "Mode scan aktif — pindai barcode order untuk pengembalian..."
+                      ? "Mode scan aktif — pindai barcode transaksi..."
                       : "Cari kode unit, instrumen, ruangan, peminjam, atau order..."
                 }
                 value={searchInput}
@@ -979,7 +989,7 @@ export default function MonitoringCssdPage() {
               <button
                 type="button"
                 onClick={() => setScanArmed((v) => !v)}
-                title={scanArmed ? "Batalkan mode scan" : "Scan barcode order untuk pengembalian"}
+                title={scanArmed ? "Batalkan mode scan" : "Scan barcode transaksi (pengembalian / riwayat)"}
                 className={
                   "absolute right-2 top-1/2 -translate-y-1/2 flex h-7 w-7 items-center justify-center rounded-md transition-colors " +
                   (scanArmed ? "bg-[#4ba69d] text-white" : "text-gray-400 hover:bg-gray-100")
@@ -993,15 +1003,42 @@ export default function MonitoringCssdPage() {
             </Button>
           </form>
 
-          {/* Keterangan warna status (garis kiri kartu) */}
-          <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs text-gray-500">
+          {/* Keterangan warna status — klik untuk memfilter Daftar Order per status */}
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 text-xs text-gray-500">
             <span className="font-medium text-gray-400">Keterangan:</span>
-            {STATUS_LEGEND.map((s) => (
-              <span key={s.status} className="flex items-center gap-1.5">
-                <span className={`h-3 w-1.5 rounded-sm ${s.dot}`} />
-                {s.label}
-              </span>
-            ))}
+            {STATUS_LEGEND.map((s) => {
+              const active = statusFilter.has(s.status)
+              return (
+                <button
+                  key={s.status}
+                  type="button"
+                  onClick={() => toggleStatusFilter(s.status)}
+                  aria-pressed={active}
+                  title={`Filter status ${s.label}`}
+                  className={
+                    "flex items-center gap-1.5 rounded-full border px-2 py-1 transition-colors " +
+                    (active
+                      ? "border-[#075489] bg-[#075489]/10 text-[#075489] font-medium"
+                      : "border-transparent hover:bg-gray-100")
+                  }
+                >
+                  <span className={`h-3 w-1.5 rounded-sm ${s.dot}`} />
+                  {s.label}
+                </button>
+              )
+            })}
+            {statusFilter.size > 0 && (
+              <button
+                type="button"
+                onClick={() => {
+                  setStatusFilter(new Set())
+                  setPage(1)
+                }}
+                className="text-[#075489] underline underline-offset-2 hover:text-[#075489]/80"
+              >
+                Reset filter
+              </button>
+            )}
           </div>
         </div>
 
@@ -1011,7 +1048,9 @@ export default function MonitoringCssdPage() {
           <div className="py-16 text-center text-sm text-gray-400">
             {searchQuery
               ? "Tidak ada order yang cocok dengan pencarian."
-              : "Belum ada order masuk, dipinjam, maupun dikembalikan."}
+              : statusFilter.size > 0
+                ? "Tidak ada order untuk status yang dipilih."
+                : "Belum ada order masuk, dipinjam, maupun dikembalikan."}
           </div>
         ) : (
           <div className="space-y-2 p-4">
@@ -1060,6 +1099,47 @@ export default function MonitoringCssdPage() {
           onPageChange={setPage}
         />
       </Card>
+
+      {/* Mode scan: modal instruksi pindai barcode order */}
+      <Modal
+        open={scanArmed}
+        onClose={() => setScanArmed(false)}
+        title="Scan Barcode Transaksi"
+        size="sm"
+        footer={
+          <Button variant="outline" onClick={() => setScanArmed(false)}>
+            Batal
+          </Button>
+        }
+      >
+        <div className="flex flex-col items-center gap-4 py-2 text-center">
+          <div className="flex h-16 w-16 items-center justify-center rounded-full bg-[#4ba69d]/10">
+            {scanLoading ? (
+              <Loader2 className="h-8 w-8 animate-spin text-[#4ba69d]" />
+            ) : (
+              <BarcodeIcon className="h-8 w-8 text-[#4ba69d]" />
+            )}
+          </div>
+          <div>
+            <p className="text-base font-semibold text-gray-900">
+              {scanLoading ? "Mencari ke database..." : "Silakan pindai barcode transaksi"}
+            </p>
+          </div>
+          <Input
+            id="scan-modal-input"
+            value={searchInput}
+            readOnly
+            disabled
+            placeholder="Menunggu hasil pindai barcode..."
+            className="text-center font-mono tracking-wider"
+          />
+          {scanNotice?.type === "error" && (
+            <p className="w-full rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600">
+              {scanNotice.message}
+            </p>
+          )}
+        </div>
+      </Modal>
 
       {/* Detail unit dipinjam di ruangan terpilih */}
       <Modal
@@ -1395,33 +1475,39 @@ export default function MonitoringCssdPage() {
         onClose={() => setReturnOpen(false)}
         title="Pengembalian Instrumen"
         size="lg"
-        footer={
-          <div className="flex w-full items-center justify-between gap-3">
-            {returnOrder && returnOrder.status !== "dikembalikan" ? (
-              <span className="text-xs text-gray-400">
-                {returnSelected.size > 0
-                  ? `${returnSelected.size} unit dipilih untuk dikembalikan.`
-                  : "Centang unit yang dikembalikan, lalu Simpan."}
-              </span>
-            ) : (
-              <span />
-            )}
-            <div className="flex shrink-0 gap-2">
-              <Button variant="outline" onClick={() => setReturnOpen(false)}>
-                Tutup
-              </Button>
-              {returnOrder && returnOrder.status !== "dikembalikan" && (
-                <Button
-                  onClick={handleSaveReturns}
-                  disabled={returnSaving || returnSelected.size === 0}
-                  className="bg-[#075489] hover:bg-[#075489]/90 text-white"
-                >
-                  {returnSaving ? "Menyimpan..." : "Simpan Pengembalian"}
-                </Button>
+        footer={(() => {
+          // Unit yang siap dikembalikan kali ini = belum kembali & kondisi masuk terisi.
+          const readyCount = returnOrder
+            ? returnOrder.items.filter((u) => !u.is_returned && returnCondById[u.id]).length
+            : 0
+          return (
+            <div className="flex w-full items-center justify-between gap-3">
+              {returnOrder && returnOrder.status !== "dikembalikan" ? (
+                <span className="text-xs text-gray-400">
+                  {readyCount > 0
+                    ? `${readyCount} unit siap dikembalikan. Sisanya bisa dikembalikan nanti.`
+                    : "Isi kondisi masuk unit yang dikembalikan, lalu Simpan."}
+                </span>
+              ) : (
+                <span />
               )}
+              <div className="flex shrink-0 gap-2">
+                <Button variant="outline" onClick={() => setReturnOpen(false)}>
+                  Tutup
+                </Button>
+                {returnOrder && returnOrder.status !== "dikembalikan" && (
+                  <Button
+                    onClick={handleSaveReturns}
+                    disabled={returnSaving || readyCount === 0}
+                    className="bg-[#075489] hover:bg-[#075489]/90 text-white"
+                  >
+                    {returnSaving ? "Menyimpan..." : "Simpan Pengembalian"}
+                  </Button>
+                )}
+              </div>
             </div>
-          </div>
-        }
+          )
+        })()}
       >
         <div className="space-y-5">
           {lookupLoading && (
@@ -1491,91 +1577,71 @@ export default function MonitoringCssdPage() {
                 </p>
               )}
 
-              {(() => {
-                // Hanya unit yang belum dikembalikan yang bisa dicentang & disimpan.
-                const pendingIds = returnOrder.items.filter((u) => !u.is_returned).map((u) => u.id)
-                const allChecked =
-                  pendingIds.length > 0 && pendingIds.every((id) => returnSelected.has(id))
-                const someChecked = pendingIds.some((id) => returnSelected.has(id))
-                return (
-                  <div className="overflow-hidden rounded-lg border border-gray-200">
-                    <table className="w-full text-sm">
-                      <thead>
-                        <tr className="border-b border-gray-100 bg-gray-50">
-                          <th className="py-2.5 px-3 text-center w-10">
-                            <Checkbox
-                              checked={allChecked}
-                              indeterminate={!allChecked && someChecked}
-                              disabled={pendingIds.length === 0}
-                              onChange={(e) => toggleReturnSelectAll(pendingIds, e.target.checked)}
-                              aria-label="Pilih semua unit"
+              <div className="overflow-hidden rounded-lg border border-gray-200">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-gray-100 bg-gray-50">
+                      <th className="py-2.5 px-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-400">
+                        Unit
+                      </th>
+                      <th className="py-2.5 px-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-400">
+                        Kondisi Keluar
+                      </th>
+                      <th className="py-2.5 px-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-400 w-44">
+                        Kondisi Masuk
+                      </th>
+                      <th className="py-2.5 px-3 text-center text-xs font-semibold uppercase tracking-wide text-gray-400 w-24">
+                        Status
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-50">
+                    {returnOrder.items.map((u) => (
+                      <tr key={u.id}>
+                        <td className="py-2.5 px-3">
+                          <span className="font-mono text-xs font-semibold text-[#4ba69d] bg-[#4ba69d]/10 px-2 py-0.5 rounded">
+                            {u.instrument_stock?.code ?? "—"}
+                          </span>
+                          {u.instrument_stock?.instrument?.name && (
+                            <span className="ml-2 text-gray-700">
+                              {u.instrument_stock.instrument.name}
+                            </span>
+                          )}
+                          {u.source === "paket" && u.package_name && (
+                            <span className="ml-2 text-xs text-gray-400">· {u.package_name}</span>
+                          )}
+                        </td>
+                        <td className="py-2.5 px-3 text-gray-700">
+                          {u.condition_out?.name ?? <span className="text-gray-400 text-xs">—</span>}
+                        </td>
+                        <td className="py-2.5 px-3">
+                          {u.is_returned ? (
+                            u.condition_in?.name ?? <span className="text-gray-400 text-xs">—</span>
+                          ) : (
+                            <SelectSearch
+                              options={conditionOptions}
+                              value={returnCondById[u.id] ?? ""}
+                              onChange={(v) =>
+                                setReturnCondById((prev) => ({ ...prev, [u.id]: v }))
+                              }
+                              placeholder="-- Kondisi --"
                             />
-                          </th>
-                          <th className="py-2.5 px-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-400">
-                            Unit
-                          </th>
-                          <th className="py-2.5 px-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-400">
-                            Kondisi Keluar
-                          </th>
-                          <th className="py-2.5 px-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-400 w-44">
-                            Kondisi Masuk
-                          </th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-gray-50">
-                        {returnOrder.items.map((u) => {
-                          const checked = returnSelected.has(u.id)
-                          return (
-                            <tr key={u.id} className={checked ? "bg-[#075489]/5" : ""}>
-                              <td className="py-2.5 px-3 text-center">
-                                {u.is_returned ? (
-                                  <Badge variant="success">Kembali</Badge>
-                                ) : (
-                                  <Checkbox
-                                    checked={checked}
-                                    onChange={() => toggleReturnSelect(u.id)}
-                                    aria-label={`Pilih unit ${u.instrument_stock?.code ?? u.id}`}
-                                  />
-                                )}
-                              </td>
-                              <td className="py-2.5 px-3">
-                                <span className="font-mono text-xs font-semibold text-[#4ba69d] bg-[#4ba69d]/10 px-2 py-0.5 rounded">
-                                  {u.instrument_stock?.code ?? "—"}
-                                </span>
-                                {u.instrument_stock?.instrument?.name && (
-                                  <span className="ml-2 text-gray-700">
-                                    {u.instrument_stock.instrument.name}
-                                  </span>
-                                )}
-                                {u.source === "paket" && u.package_name && (
-                                  <span className="ml-2 text-xs text-gray-400">· {u.package_name}</span>
-                                )}
-                              </td>
-                              <td className="py-2.5 px-3 text-gray-700">
-                                {u.condition_out?.name ?? <span className="text-gray-400 text-xs">—</span>}
-                              </td>
-                              <td className="py-2.5 px-3">
-                                {u.is_returned ? (
-                                  u.condition_in?.name ?? <span className="text-gray-400 text-xs">—</span>
-                                ) : (
-                                  <SelectSearch
-                                    options={conditionOptions}
-                                    value={returnCondById[u.id] ?? ""}
-                                    onChange={(v) =>
-                                      setReturnCondById((prev) => ({ ...prev, [u.id]: v }))
-                                    }
-                                    placeholder="-- Kondisi --"
-                                  />
-                                )}
-                              </td>
-                            </tr>
-                          )
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
-                )
-              })()}
+                          )}
+                        </td>
+                        <td className="py-2.5 px-3 text-center">
+                          {u.is_returned ? (
+                            <Badge variant="success">Kembali</Badge>
+                          ) : returnCondById[u.id] ? (
+                            <Badge variant="info">Akan kembali</Badge>
+                          ) : (
+                            <span className="text-gray-400 text-xs">Belum</span>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             </div>
           )}
         </div>
@@ -2187,42 +2253,3 @@ function DetailField({ label, value }: { label: string; value: string | null | u
 
 // Timeline tracking order: dibuat → diterima CSSD → dipinjam ruangan lain → selesai.
 // Dipakai di modal Riwayat Pengembalian & modal Pengembalian (detail order aktif).
-function OrderTimeline({ events }: { events: TimelineEvent[] | undefined }) {
-  if (!events || events.length === 0) return null
-  return (
-    <div>
-      <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-400">
-        Riwayat Peminjaman
-      </p>
-      <ol>
-        {events.map((ev, i) => {
-          const last = i === events.length - 1
-          return (
-            <li key={ev.id} className="flex gap-3">
-              {/* Kolom penanda: dot + garis penghubung, keduanya rata tengah */}
-              <div className="flex flex-col items-center self-stretch">
-                <span
-                  className={
-                    "mt-1 h-3 w-3 shrink-0 rounded-full " + (TIMELINE_DOT[ev.type] ?? "bg-gray-400")
-                  }
-                />
-                {!last && <span className="w-0.5 flex-1 bg-gray-200" />}
-              </div>
-              <div className={last ? "pb-0" : "pb-4"}>
-                <div className="flex flex-wrap items-center gap-2">
-                  <Badge variant={TIMELINE_VARIANT[ev.type] ?? "default"}>
-                    {TIMELINE_LABEL[ev.type] ?? ev.type}
-                  </Badge>
-                  {ev.room && <span className="text-sm text-gray-700">{ev.room}</span>}
-                  <span className="text-xs text-gray-400">{formatDateTime(ev.created_at)}</span>
-                </div>
-                {ev.note && <p className="mt-0.5 text-xs text-gray-500">{ev.note}</p>}
-                {ev.actor && <p className="mt-0.5 text-xs text-gray-400">oleh {ev.actor}</p>}
-              </div>
-            </li>
-          )
-        })}
-      </ol>
-    </div>
-  )
-}

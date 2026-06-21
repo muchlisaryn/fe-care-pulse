@@ -26,6 +26,8 @@ type DataTableProps<T extends object> = {
   emptyMessage?: string
   isRowLoading?: (row: T) => boolean
   rowNumber?: (row: T, index: number) => ReactNode
+  // Sembunyikan kolom "No" (mis. saat tabel sudah punya kolom urutan sendiri).
+  hideRowNumber?: boolean
 }
 
 export function DataTable<T extends object>({
@@ -38,6 +40,7 @@ export function DataTable<T extends object>({
   emptyMessage = "Tidak ada data.",
   isRowLoading,
   rowNumber,
+  hideRowNumber = false,
 }: DataTableProps<T>) {
   const hasActions = !!(onEdit || onDelete || extraActions?.length)
 
@@ -46,9 +49,11 @@ export function DataTable<T extends object>({
       <table className="w-full text-sm">
         <thead>
           <tr className="border-b border-gray-100">
-            <th className="py-3 pl-4 pr-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-400 w-12">
-              No
-            </th>
+            {!hideRowNumber && (
+              <th className="py-3 pl-4 pr-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-400 w-12">
+                No
+              </th>
+            )}
             {columns.map((col, i) => (
               <th
                 key={i}
@@ -71,7 +76,7 @@ export function DataTable<T extends object>({
           {data.length === 0 ? (
             <tr>
               <td
-                colSpan={columns.length + (hasActions ? 2 : 1)}
+                colSpan={columns.length + (hasActions ? 1 : 0) + (hideRowNumber ? 0 : 1)}
                 className="py-10 text-center text-sm text-gray-400"
               >
                 {emptyMessage}
@@ -88,9 +93,11 @@ export function DataTable<T extends object>({
                     rowLoading ? "bg-gray-50 cursor-wait" : "hover:bg-gray-50"
                   )}
                 >
-                  <td className="py-3 pl-4 pr-3 text-gray-400">
-                    {rowNumber ? rowNumber(row, i) : i + 1}
-                  </td>
+                  {!hideRowNumber && (
+                    <td className="py-3 pl-4 pr-3 text-gray-400">
+                      {rowNumber ? rowNumber(row, i) : i + 1}
+                    </td>
+                  )}
                   {columns.map((col, j) => (
                     <td key={j} className={cn("py-3 px-3 text-gray-700", col.className)}>
                       {col.cell(row, i)}
