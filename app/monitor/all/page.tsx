@@ -90,7 +90,7 @@ function buildOrderGroups(items: RoomInstrument[]): OrderGroup[] {
   })
 }
 
-const GRID = "grid grid-cols-[150px_160px_150px_160px_1fr_90px] items-start gap-3 leading-tight"
+const GRID = "grid grid-cols-[150px_160px_150px_160px_110px_1fr_90px] items-start gap-3 leading-tight"
 
 export default function MonitorAllPage() {
   const dispatch = useAppDispatch()
@@ -211,6 +211,7 @@ export default function MonitorAllPage() {
         <div>Reservation</div>
         <div>Peminjam</div>
         <div>Location</div>
+        <div>Jenis</div>
         <div>Instrument</div>
         <div className="text-right">Qty</div>
       </div>
@@ -232,16 +233,14 @@ export default function MonitorAllPage() {
           </div>
         ) : (
           orderGroups.map((g, gi) => {
-            // Ratakan order jadi daftar baris: header paket → instrumen paket → satuan.
-            const lines: { paket?: string; code?: string; name: string; qty: number; indent?: boolean }[] = []
+            // Satu baris per paket (tampilkan nama paket) dan per instrumen satuan
+            // (tampilkan nama instrumen) — tanpa rincian isi paket / kode.
+            const lines: { jenis: "Paket" | "Satuan"; name: string; qty: number }[] = []
             for (const pk of g.paketGroups) {
-              lines.push({ paket: pk.name, name: pk.name, qty: pk.qty })
-              for (const it of pk.instruments) {
-                lines.push({ code: it.instrument.code, name: it.instrument.name, qty: it.qty, indent: true })
-              }
+              lines.push({ jenis: "Paket", name: pk.name, qty: pk.qty })
             }
             for (const it of g.satuan) {
-              lines.push({ code: it.instrument.code, name: it.instrument.name, qty: it.qty })
+              lines.push({ jenis: "Satuan", name: it.instrument.name, qty: it.qty })
             }
 
             return (
@@ -264,21 +263,14 @@ export default function MonitorAllPage() {
                     </div>
                     <div className="truncate text-white/90">{li === 0 ? g.borrowed_by ?? "—" : null}</div>
                     <div className="truncate text-white/90">{li === 0 ? g.room_name : null}</div>
-                    {/* Instrument / paket */}
-                    {ln.paket !== undefined ? (
-                      <div className="truncate font-semibold">
-                        <span className="mr-2 rounded bg-white/15 px-1.5 py-0.5 text-xs font-bold uppercase">
-                          Paket
-                        </span>
-                        {ln.paket}
-                      </div>
-                    ) : (
-                      <div className={"truncate " + (ln.indent ? "pl-10" : "")}>
-                        <span className="font-mono text-white/60">{ln.code}</span>
-                        <span className="mx-1.5 text-white/40">|</span>
-                        <span className="font-semibold uppercase">{ln.name}</span>
-                      </div>
-                    )}
+                    {/* Jenis: Paket / Satuan */}
+                    <div>
+                      <span className="rounded bg-white/15 px-1.5 py-0.5 text-xs font-bold uppercase">
+                        {ln.jenis}
+                      </span>
+                    </div>
+                    {/* Instrument: hanya nama paket / nama instrumen */}
+                    <div className="truncate font-semibold uppercase">{ln.name}</div>
                     <div className="text-right text-lg font-bold tabular-nums">{ln.qty}</div>
                   </div>
                 ))}

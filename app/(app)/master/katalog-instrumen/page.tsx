@@ -49,19 +49,7 @@ type PickedItem = {
   standard_condition_id: string // "" = mengikuti kondisi standar instrumen
 }
 
-const typeLabel: Record<string, string> = {
-  single: "Satuan",
-  paket: "Paket",
-}
-
-const typeVariant: Record<string, "success" | "info" | "warning" | "danger" | "default"> = {
-  single: "info",
-  paket: "success",
-}
-
-const typeOptions = Object.keys(typeLabel).map((t) => ({ value: t, label: typeLabel[t] }))
-
-const emptyForm = { code: "", name: "", type: "single" as "single" | "paket", description: "" }
+const emptyForm = { code: "", name: "", type: "paket" as "single" | "paket", description: "" }
 
 // Helper tanggal untuk label sterilisasi.
 function toInputDate(d: Date): string {
@@ -480,8 +468,7 @@ function SetManager() {
             {/* Header tabel */}
             <div className="hidden sm:grid grid-cols-12 gap-3 px-5 py-2.5 text-xs font-semibold text-gray-500 bg-gray-50/60">
               <div className="col-span-2">Kode</div>
-              <div className="col-span-3">Nama Set</div>
-              <div className="col-span-1">Tipe</div>
+              <div className="col-span-4">Nama Set</div>
               <div className="col-span-1 text-center">Rincian</div>
               <div className="col-span-5 text-right">Aksi</div>
             </div>
@@ -504,7 +491,7 @@ function SetManager() {
                         {cat.code}
                       </span>
                     </button>
-                    <div className="col-span-3 flex items-center gap-2.5 font-medium text-gray-900">
+                    <div className="col-span-4 flex items-center gap-2.5 font-medium text-gray-900">
                       {cat.image_url ? (
                         <button
                           type="button"
@@ -524,11 +511,6 @@ function SetManager() {
                         </div>
                       )}
                       <span className="truncate">{cat.name}</span>
-                    </div>
-                    <div className="col-span-1">
-                      <Badge variant={typeVariant[cat.type] ?? "default"}>
-                        {typeLabel[cat.type] ?? cat.type}
-                      </Badge>
                     </div>
                     <div className="col-span-1 text-center text-sm font-semibold text-gray-700">
                       {cat.items_count}
@@ -651,19 +633,6 @@ function SetManager() {
                 placeholder="Contoh: Set Bedah Minor"
                 value={form.name}
                 onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
-              />
-            </div>
-            <div className="space-y-1.5">
-              <Label>Tipe</Label>
-              <SelectSearch
-                options={typeOptions}
-                value={form.type}
-                onChange={(v) => {
-                  // Berpindah ke single → sisakan 1 rincian pertama saja.
-                  if (v === "single" && picked.length > 1) setPicked((p) => p.slice(0, 1))
-                  setForm((f) => ({ ...f, type: v as "single" | "paket" }))
-                  setFormError(null)
-                }}
               />
             </div>
             <div className="space-y-1.5 sm:col-span-2">

@@ -21,6 +21,7 @@ type MonitoredRoom = {
 export default function MonitorRoomsPage() {
   const [rooms, setRooms] = useState<MonitoredRoom[]>([])
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
   const [searchInput, setSearchInput] = useState("")
   const [searchQuery, setSearchQuery] = useState("")
 
@@ -45,7 +46,10 @@ export default function MonitorRoomsPage() {
               .filter((r) => r.borrowed_count > 0)
               .sort((a, b) => b.borrowed_count - a.borrowed_count),
           )
+          setError(null)
         }
+      } catch {
+        if (active) setError("Gagal memuat data monitoring ruangan.")
       } finally {
         if (active) setLoading(false)
       }
@@ -90,6 +94,10 @@ export default function MonitorRoomsPage() {
       {loading ? (
         <Card>
           <p className="py-16 text-center text-sm text-gray-400">Memuat data...</p>
+        </Card>
+      ) : error ? (
+        <Card>
+          <p className="py-16 text-center text-sm text-red-500">{error}</p>
         </Card>
       ) : rooms.length === 0 ? (
         <Card>

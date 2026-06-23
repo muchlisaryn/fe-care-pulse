@@ -361,6 +361,7 @@ export default function MonitoringCssdPage() {
   const [returnDate, setReturnDate] = useState("")
   const [returnCondById, setReturnCondById] = useState<Record<number, string>>({})
   const [returnSaving, setReturnSaving] = useState(false)
+  const [returnUnitSearch, setReturnUnitSearch] = useState("")
 
   // Muat daftar kondisi (pilihan kondisi masuk) hanya saat modal Pengembalian
   // dibuka — bukan saat halaman dimuat — agar tidak mem-fetch sebelum dibutuhkan.
@@ -375,6 +376,7 @@ export default function MonitoringCssdPage() {
     setReturnedBy("")
     setReturnDate(todayInput())
     setReturnCondById({})
+    setReturnUnitSearch("")
   }
 
   // Cari order dari kode (nomor order ORD-xxx atau kode unit alat).
@@ -1577,6 +1579,28 @@ export default function MonitoringCssdPage() {
                 </p>
               )}
 
+              {/* Pencarian unit instrumen: filter lokal daftar unit pada order ini */}
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 pointer-events-none" />
+                <Input
+                  placeholder="Cari unit instrumen (kode / nama / paket)..."
+                  value={returnUnitSearch}
+                  onChange={(e) => setReturnUnitSearch(e.target.value)}
+                  className="pl-9"
+                />
+              </div>
+
+              {(() => {
+                const q = returnUnitSearch.trim().toLowerCase()
+                const visibleUnits = q
+                  ? returnOrder.items.filter((u) => {
+                      const code = u.instrument_stock?.code?.toLowerCase() ?? ""
+                      const name = u.instrument_stock?.instrument?.name?.toLowerCase() ?? ""
+                      const pkg = u.package_name?.toLowerCase() ?? ""
+                      return code.includes(q) || name.includes(q) || pkg.includes(q)
+                    })
+                  : returnOrder.items
+                return (
               <div className="overflow-hidden rounded-lg border border-gray-200">
                 <table className="w-full text-sm">
                   <thead>
@@ -1596,7 +1620,14 @@ export default function MonitoringCssdPage() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-50">
-                    {returnOrder.items.map((u) => (
+                    {visibleUnits.length === 0 ? (
+                      <tr>
+                        <td colSpan={4} className="py-8 text-center text-sm text-gray-400">
+                          Tidak ada unit yang cocok dengan pencarian.
+                        </td>
+                      </tr>
+                    ) : (
+                      visibleUnits.map((u) => (
                       <tr key={u.id}>
                         <td className="py-2.5 px-3">
                           <span className="font-mono text-xs font-semibold text-[#4ba69d] bg-[#4ba69d]/10 px-2 py-0.5 rounded">
@@ -1638,10 +1669,13 @@ export default function MonitoringCssdPage() {
                           )}
                         </td>
                       </tr>
-                    ))}
+                      ))
+                    )}
                   </tbody>
                 </table>
               </div>
+                )
+              })()}
             </div>
           )}
         </div>

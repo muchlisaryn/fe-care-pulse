@@ -85,13 +85,18 @@ export default function DistribusiPage() {
     dispatch(fetchRooms())
     let active = true
     ;(async () => {
-      const [bm, us] = await Promise.all([
-        api.get("/master/bmhps"),
-        api.get("/master/users"),
-      ])
-      if (!active) return
-      setBmhps(bm.data.data.data)
-      setUsers(us.data.data.data)
+      try {
+        const [bm, us] = await Promise.all([
+          api.get("/master/bmhps"),
+          api.get("/master/users"),
+        ])
+        if (!active) return
+        setBmhps(bm.data.data.data)
+        setUsers(us.data.data.data)
+      } catch {
+        if (!active) return
+        setFormError("Gagal memuat data referensi BMHP / penerima.")
+      }
     })()
     return () => {
       active = false
