@@ -107,6 +107,7 @@ type BorrowedOrder = {
   borrowedBy: string | null
   room: { id: number; name: string } | null
   orderDate: string | null
+  orderTime: string | null
   returnPlanDate: string | null
   units: BorrowableUnit[]
 }
@@ -148,6 +149,20 @@ function formatDateTime(value: string | null | undefined) {
 // "diterima" = di-ACC & dipinjamkan CSSD). Null bila event belum ada.
 function timelineTimeOf(timeline: TimelineEvent[] | undefined, type: TimelineEvent["type"]) {
   return timeline?.find((e) => e.type === type)?.created_at ?? null
+}
+
+// Jam peminjaman (kolom order_time, format DB "HH:mm:ss") → tampil "HH:mm".
+function formatTime(value: string | null) {
+  if (!value) return null
+  return value.slice(0, 5)
+}
+
+// Gabungan tanggal + jam untuk ditampilkan, mis. "08 Jun 2026, 14:30".
+function formatDateWithTime(date: string | null, time: string | null) {
+  const d = formatDate(date)
+  if (!d) return null
+  const t = formatTime(time)
+  return t ? `${d}, ${t}` : d
 }
 
 export default function OrderInstrumenPage() {
@@ -229,6 +244,7 @@ export default function OrderInstrumenPage() {
         borrowed_by: string | null
         room: { id: number; name: string } | null
         order_date: string | null
+        order_time: string | null
         return_plan_date: string | null
         units: BorrowableUnit[]
       }[]
@@ -239,6 +255,7 @@ export default function OrderInstrumenPage() {
           borrowedBy: o.borrowed_by,
           room: o.room,
           orderDate: o.order_date,
+          orderTime: o.order_time,
           returnPlanDate: o.return_plan_date,
           units: o.units,
         })),
@@ -600,7 +617,7 @@ export default function OrderInstrumenPage() {
     {
       header: "Tanggal Pinjam",
       cell: (row) => {
-        const f = formatDate(row.order_date)
+        const f = formatDateWithTime(row.order_date, row.order_time)
         return f ? <span className="text-sm text-gray-600">{f}</span> : dash
       },
     },
@@ -801,7 +818,7 @@ export default function OrderInstrumenPage() {
                             </span>
                           </div>
                           <div className="mt-1 flex flex-wrap gap-x-4 gap-y-0.5 text-xs text-gray-500">
-                            <span>Pinjam: {formatDate(o.orderDate) ?? "—"}</span>
+                            <span>Pinjam: {formatDateWithTime(o.orderDate, o.orderTime) ?? "—"}</span>
                             <span>Rencana kembali: {formatDate(o.returnPlanDate) ?? "—"}</span>
                           </div>
                         </div>
@@ -1115,6 +1132,7 @@ export default function OrderInstrumenPage() {
               <Field label="Dipinjam Oleh" value={detail.borrowed_by ?? detail.user?.name} />
               <Field label="Ruangan / Unit" value={detail.room?.name} />
               <Field label="Tanggal Pinjam" value={formatDate(detail.order_date)} />
+              <Field label="Jam Pinjam" value={formatTime(detail.order_time)} />
               <Field label="Waktu Diajukan" value={formatDateTime(timelineTimeOf(detail.timeline, "dibuat"))} />
               <Field label="Waktu ACC / Dipinjamkan" value={formatDateTime(timelineTimeOf(detail.timeline, "diterima"))} />
               <Field label="Rencana Kembali" value={formatDate(detail.return_plan_date)} />

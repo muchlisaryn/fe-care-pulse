@@ -38,8 +38,15 @@ export function SelectSearch({
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState("")
   const [pos, setPos] = useState<DropdownPos | null>(null)
+  // Portal hanya boleh dirender setelah mount di client agar hasil render awal
+  // sama dengan server (cegah hydration mismatch).
+  const [mounted, setMounted] = useState(false)
   const triggerRef = useRef<HTMLButtonElement>(null)
   const searchRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    setMounted(true)
+  }, [])
 
   const selected = options.find((o) => o.value === value)
   const filtered = query
@@ -134,7 +141,11 @@ export function SelectSearch({
       <button
         ref={triggerRef}
         type="button"
+        // `disabled` bergantung pada state loading data (di-fetch di client) sehingga
+        // nilainya bisa beda antara HTML SSR dan render pertama client. Nilai client
+        // langsung dipakai setelah hydration — cegah warning mismatch di sini.
         disabled={disabled}
+        suppressHydrationWarning
         onClick={() => (open ? setOpen(false) : openDropdown())}
         className={cn(
           "flex w-full items-center justify-between rounded-lg border px-3 py-2 text-sm outline-none transition-colors bg-white text-left",
@@ -155,7 +166,7 @@ export function SelectSearch({
         </span>
       </button>
 
-      {typeof window !== "undefined" && createPortal(dropdown, document.body)}
+      {mounted && createPortal(dropdown, document.body)}
     </div>
   )
 }

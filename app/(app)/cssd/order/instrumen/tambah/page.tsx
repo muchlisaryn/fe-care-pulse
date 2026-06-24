@@ -65,6 +65,7 @@ export default function TambahOrderInstrumenPage() {
   const [roomId, setRoomId] = useState("")
   const [borrowedBy, setBorrowedBy] = useState("")
   const [orderDate, setOrderDate] = useState("")
+  const [orderTime, setOrderTime] = useState("")
   const [returnPlanDate, setReturnPlanDate] = useState("")
   const [note, setNote] = useState("")
   const [requests, setRequests] = useState<RequestLine[]>([])
@@ -134,6 +135,13 @@ export default function TambahOrderInstrumenPage() {
   useEffect(() => {
     if (currentUserName) setBorrowedBy((prev) => prev || currentUserName)
   }, [currentUserName])
+
+  // Prefill tanggal & jam pinjam dengan waktu sekarang (tetap bisa diubah manual).
+  useEffect(() => {
+    const { date, time } = nowDateAndTime()
+    setOrderDate((prev) => prev || date)
+    setOrderTime((prev) => prev || time)
+  }, [])
 
   // Semua jenis instrumen bisa diorder — unit fisik dialokasikan saat CSSD
   // menerima pesanan, jadi stok tersedia saat ini tidak membatasi pemesanan.
@@ -245,6 +253,7 @@ export default function TambahOrderInstrumenPage() {
         room_id: Number(roomId),
         borrowed_by: borrowedBy.trim() || null,
         order_date: orderDate,
+        order_time: orderTime || null,
         return_plan_date: returnPlanDate || null,
         note: note.trim() || null,
         items: requests.map((r) =>
@@ -316,6 +325,15 @@ export default function TambahOrderInstrumenPage() {
                 type="date"
                 value={orderDate}
                 onChange={(e) => setOrderDate(e.target.value)}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="jam-pinjam">Jam Pinjam</Label>
+              <Input
+                id="jam-pinjam"
+                type="time"
+                value={orderTime}
+                onChange={(e) => setOrderTime(e.target.value)}
               />
             </div>
             <div className="space-y-1.5">
@@ -608,6 +626,16 @@ export default function TambahOrderInstrumenPage() {
       </div>
     </div>
   )
+}
+
+// Tanggal & jam sekarang (zona waktu lokal) untuk prefill input date & time.
+function nowDateAndTime(): { date: string; time: string } {
+  const d = new Date()
+  const pad = (n: number) => String(n).padStart(2, "0")
+  return {
+    date: `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`,
+    time: `${pad(d.getHours())}:${pad(d.getMinutes())}`,
+  }
 }
 
 // Stepper jumlah: tombol −/+ dan input teks yang boleh dikosongkan (hanya digit).
