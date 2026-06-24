@@ -105,6 +105,7 @@ type BorrowedOrder = {
   borrowedBy: string | null
   room: { id: number; name: string } | null
   orderDate: string | null
+  orderTime: string | null
   returnPlanDate: string | null
   units: BorrowableUnit[]
 }
@@ -119,6 +120,20 @@ function formatDate(value: string | null) {
   const d = new Date(value)
   if (Number.isNaN(d.getTime())) return value
   return d.toLocaleDateString("id-ID", { day: "2-digit", month: "short", year: "numeric" })
+}
+
+// Jam peminjaman (kolom order_time, format DB "HH:mm:ss") → tampil "HH:mm".
+function formatTime(value: string | null) {
+  if (!value) return null
+  return value.slice(0, 5)
+}
+
+// Gabungan tanggal + jam untuk ditampilkan, mis. "08 Jun 2026, 14:30".
+function formatDateWithTime(date: string | null, time: string | null) {
+  const d = formatDate(date)
+  if (!d) return null
+  const t = formatTime(time)
+  return t ? `${d}, ${t}` : d
 }
 
 export default function OrderInstrumenPage() {
@@ -200,6 +215,7 @@ export default function OrderInstrumenPage() {
         borrowed_by: string | null
         room: { id: number; name: string } | null
         order_date: string | null
+        order_time: string | null
         return_plan_date: string | null
         units: BorrowableUnit[]
       }[]
@@ -210,6 +226,7 @@ export default function OrderInstrumenPage() {
           borrowedBy: o.borrowed_by,
           room: o.room,
           orderDate: o.order_date,
+          orderTime: o.order_time,
           returnPlanDate: o.return_plan_date,
           units: o.units,
         })),
@@ -571,7 +588,7 @@ export default function OrderInstrumenPage() {
     {
       header: "Tanggal Pinjam",
       cell: (row) => {
-        const f = formatDate(row.order_date)
+        const f = formatDateWithTime(row.order_date, row.order_time)
         return f ? <span className="text-sm text-gray-600">{f}</span> : dash
       },
     },
@@ -772,7 +789,7 @@ export default function OrderInstrumenPage() {
                             </span>
                           </div>
                           <div className="mt-1 flex flex-wrap gap-x-4 gap-y-0.5 text-xs text-gray-500">
-                            <span>Pinjam: {formatDate(o.orderDate) ?? "—"}</span>
+                            <span>Pinjam: {formatDateWithTime(o.orderDate, o.orderTime) ?? "—"}</span>
                             <span>Rencana kembali: {formatDate(o.returnPlanDate) ?? "—"}</span>
                           </div>
                         </div>
@@ -1078,6 +1095,7 @@ export default function OrderInstrumenPage() {
               <Field label="Dipinjam Oleh" value={detail.borrowed_by ?? detail.user?.name} />
               <Field label="Ruangan / Unit" value={detail.room?.name} />
               <Field label="Tanggal Pinjam" value={formatDate(detail.order_date)} />
+              <Field label="Jam Pinjam" value={formatTime(detail.order_time)} />
               <Field label="Rencana Kembali" value={formatDate(detail.return_plan_date)} />
               <Field label="Tanggal Kembali" value={formatDate(detail.return_actual_date)} />
               <Field label="Dikembalikan Oleh" value={detail.returned_by} />

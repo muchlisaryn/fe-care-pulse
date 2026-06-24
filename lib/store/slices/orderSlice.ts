@@ -62,6 +62,7 @@ export type Order = {
   room_id: number
   user_id: number | null
   order_date: string | null
+  order_time: string | null
   return_plan_date: string | null
   return_actual_date: string | null
   borrowed_by: string | null

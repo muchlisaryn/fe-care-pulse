@@ -51,6 +51,7 @@ export type IncomingOrder = {
   borrowed_by: string | null
   room: { id: number; name: string } | null
   order_date: string | null
+  order_time: string | null
   return_plan_date: string | null
   note: string | null
   requested_qty: number

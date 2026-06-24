@@ -94,6 +94,12 @@ function toDateInput(value: string | null): string {
   return value.slice(0, 10)
 }
 
+// Konversi nilai jam dari API ("HH:mm:ss" / "HH:mm") ke format <input type="time"> "HH:mm".
+function toTimeInput(value: string | null): string {
+  if (!value) return ""
+  return value.slice(0, 5)
+}
+
 // Tanggal hari ini (lokal) dalam format "YYYY-MM-DD" untuk <input type="date">.
 function todayInput(): string {
   const d = new Date()
@@ -346,6 +352,7 @@ export default function MonitoringCssdPage() {
   const [selections, setSelections] = useState<Record<string, string[]>>({})
   const [recvBorrowedBy, setRecvBorrowedBy] = useState("")
   const [recvOrderDate, setRecvOrderDate] = useState("")
+  const [recvOrderTime, setRecvOrderTime] = useState("")
   const [recvReturnDate, setRecvReturnDate] = useState("")
   const [receiving, setReceiving] = useState(false)
   const [receiveError, setReceiveError] = useState<string | null>(null)
@@ -563,6 +570,7 @@ export default function MonitoringCssdPage() {
     setSelections({})
     setRecvBorrowedBy(order.borrowed_by ?? "")
     setRecvOrderDate(toDateInput(order.order_date))
+    setRecvOrderTime(toTimeInput(order.order_time))
     setRecvReturnDate(toDateInput(order.return_plan_date))
     setAllocLoading(true)
     try {
@@ -633,6 +641,7 @@ export default function MonitoringCssdPage() {
       const payload = {
         borrowed_by: recvBorrowedBy.trim() || null,
         order_date: recvOrderDate,
+        order_time: recvOrderTime || null,
         return_plan_date: recvReturnDate || null,
         selections: Object.fromEntries(
           allocReqs.map((r) => [r.key, (selections[r.key] ?? []).map((id) => Number(id))]),
@@ -1257,6 +1266,7 @@ export default function MonitoringCssdPage() {
               <DetailField label="Dipinjam Oleh" value={incomingDetail.borrowed_by} />
               <DetailField label="Ruangan / Unit" value={incomingDetail.room?.name} />
               <DetailField label="Tanggal Pinjam" value={formatDate(incomingDetail.order_date)} />
+              <DetailField label="Jam Pinjam" value={incomingDetail.order_time ?? null} />
               <DetailField label="Rencana Kembali" value={formatDate(incomingDetail.return_plan_date)} />
               <div className="space-y-1">
                 <p className="text-xs font-semibold uppercase tracking-wide text-gray-400">Status</p>
@@ -1379,6 +1389,15 @@ export default function MonitoringCssdPage() {
                   type="date"
                   value={recvOrderDate}
                   onChange={(e) => setRecvOrderDate(e.target.value)}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="recv-jam-pinjam">Jam Pinjam</Label>
+                <Input
+                  id="recv-jam-pinjam"
+                  type="time"
+                  value={recvOrderTime}
+                  onChange={(e) => setRecvOrderTime(e.target.value)}
                 />
               </div>
               <div className="space-y-1.5">
