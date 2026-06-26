@@ -18,6 +18,7 @@ import icd10Reducer from "./slices/icd10Slice"
 import categoriCPReducer from "./slices/categoriClinicalPathwaySlice"
 import templateCPReducer from "./slices/templateClinicalPathwaySlice"
 import asesmenCPReducer from "./slices/asesmenClinicalPathwaySlice"
+import cleaningReducer from "./slices/cleaningSlice"
 
 export const store = configureStore({
   reducer: {
@@ -36,6 +37,7 @@ export const store = configureStore({
     bmhps: bmhpReducer,
     notif: notifReducer,
     monitoring: monitoringReducer,
+    cleaning: cleaningReducer,
     icd10: icd10Reducer,
     categoriCP: categoriCPReducer,
     templateCP: templateCPReducer,

@@ -2,9 +2,13 @@ import { createAsyncThunk, createSlice, type PayloadAction } from "@reduxjs/tool
 import api from "@/lib/axios"
 import type { TimelineEvent } from "@/components/molecules/OrderTimeline"
 
-// Status order sesuai PRD §4.6 (order.status)
+// Status order sesuai PRD §4.6 (order.status) + tahapan pipeline CSSD
+// (pencucian → pengemasan → selesai) untuk tracking.
 export const ORDER_STATUSES = [
   "diajukan",
+  "pencucian",
+  "pengemasan",
+  "selesai",
   "dipinjam",
   "dikembalikan",
   "dibatalkan",

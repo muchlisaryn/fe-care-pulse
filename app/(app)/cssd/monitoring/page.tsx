@@ -1,6 +1,7 @@
 "use client"
 
-import { useEffect, useMemo, useRef, useState } from "react"
+import { Suspense, useEffect, useMemo, useRef, useState } from "react"
+import { usePathname, useRouter, useSearchParams } from "next/navigation"
 import {
   Search,
   Package,
@@ -42,8 +43,27 @@ import {
   type IncomingOrder,
   type ReturnedOrder,
 } from "@/lib/store/slices/monitoringSlice"
+import { fetchCleaning } from "@/lib/store/slices/cleaningSlice"
+import { CleaningTab } from "@/components/molecules/CleaningTab"
+import { PackagingTab } from "@/components/molecules/PackagingTab"
 import api from "@/lib/axios"
 import { getEcho } from "@/lib/echo"
+
+// Tab kategori order pada halaman monitoring (tahapan alur CSSD).
+type MonitoringTab = "masuk" | "cleaning" | "packaging" | "sterilization" | "distribusi"
+
+const MONITORING_TABS: MonitoringTab[] = [
+  "masuk",
+  "cleaning",
+  "packaging",
+  "sterilization",
+  "distribusi",
+]
+
+// Validasi nilai tab dari URL (?tab=...); fallback ke "masuk" bila tidak dikenal.
+function parseTab(value: string | null): MonitoringTab {
+  return MONITORING_TABS.includes(value as MonitoringTab) ? (value as MonitoringTab) : "masuk"
+}
 
 const ITEMS_PER_PAGE = 20
 
@@ -60,38 +80,14 @@ const incomingStatusVariant: Record<IncomingStatus, "warning" | "default"> = {
   diajukan: "warning",
 }
 
-// Warna garis kiri kartu per status order (penanda visual cepat).
+// Warna garis kiri kartu per tahap order — konsisten dengan tracking status:
+// Order Masuk=kuning-amber, Cleaning=kuning, Packaging=ungu (di CleaningTab),
+// Distribusi=biru, Dikembalikan=hijau, Dibatalkan=merah.
 const STATUS_BORDER: Record<string, string> = {
   diajukan: "border-l-amber-400",
-  dipinjam: "border-l-[#4ba69d]",
+  dipinjam: "border-l-blue-500",
   dikembalikan: "border-l-green-500",
   dibatalkan: "border-l-red-400",
-}
-
-// Keterangan warna status (legenda di bawah kolom pencarian).
-const STATUS_LEGEND: { status: string; label: string; dot: string }[] = [
-  { status: "diajukan", label: "Diajukan", dot: "bg-amber-400" },
-  { status: "dipinjam", label: "Dipinjam", dot: "bg-[#4ba69d]" },
-  { status: "dikembalikan", label: "Dikembalikan", dot: "bg-green-500" },
-  { status: "dibatalkan", label: "Dibatalkan", dot: "bg-red-400" },
-]
-
-// Kebutuhan unit untuk menerima order (dari endpoint allocation).
-type AllocUnit = { id: number; code: string }
-type AllocRequirement = {
-  key: string
-  source: "satuan" | "paket"
-  package_name: string | null
-  instrument: { id: number; code: string; name: string }
-  needed_qty: number
-  available_units: AllocUnit[]
-  available_count: number
-}
-
-// ISO date → "YYYY-MM-DD" untuk <input type="date">.
-function toDateInput(value: string | null): string {
-  if (!value) return ""
-  return value.slice(0, 10)
 }
 
 // Tanggal hari ini (lokal) dalam format "YYYY-MM-DD" untuk <input type="date">.
@@ -159,18 +155,11 @@ type OrderGroup = {
   satuanInstruments: MonitoredInstrument[]
 }
 
-// Baris daftar gabungan: order masuk (atas) → sedang dipinjam → sudah dikembalikan.
+// Baris tab "Distribusi": order yang sedang dipinjam (terdistribusi ke ruangan)
+// atau sudah dikembalikan (riwayat).
 type CombinedRow =
-  | { kind: "incoming"; order: IncomingOrder }
   | { kind: "borrowed"; group: OrderGroup }
   | { kind: "returned"; order: ReturnedOrder }
-
-// Status order untuk satu baris daftar gabungan — dipakai filter legenda.
-function rowStatus(row: CombinedRow): string {
-  if (row.kind === "incoming") return "diajukan"
-  if (row.kind === "borrowed") return "dipinjam"
-  return "dikembalikan"
-}
 
 // Kelompokkan daftar instrumen dipinjam per order, lalu per paket / satuan.
 // `roomFallback` dipakai saat item tidak membawa nama ruangan sendiri (mis. di
@@ -213,7 +202,7 @@ function buildOrderGroups(
   })
 }
 
-export default function MonitoringCssdPage() {
+function MonitoringCssd() {
   const dispatch = useAppDispatch()
   // Data monitoring disimpan di Redux global. Hanya di-fetch saat store masih
   // kosong (mis. halaman di-refresh / dibuka pertama kali), bukan tiap kali
@@ -225,6 +214,17 @@ export default function MonitoringCssdPage() {
   const incomingLoading = useAppSelector((s) => s.monitoring.incomingLoading)
   const returnedLoading = useAppSelector((s) => s.monitoring.returnedLoading)
   const roomsLoaded = useAppSelector((s) => s.monitoring.roomsLoaded)
+  const cleaning = useAppSelector((s) => s.cleaning.items)
+  const cleaningLoading = useAppSelector((s) => s.cleaning.loading)
+
+  // Tab aktif pada kartu Daftar Order — disimpan di URL (?tab=...) agar tetap
+  // bertahan saat halaman di-refresh.
+  const router = useRouter()
+  const pathname = usePathname()
+  const searchParams = useSearchParams()
+  const [activeTab, setActiveTab] = useState<MonitoringTab>(() =>
+    parseTab(searchParams.get("tab")),
+  )
 
   // Distribusi per Ruangan (data rooms): pakai cache — hanya di-fetch saat store
   // masih kosong (refresh halaman / pertama dibuka), TIDAK saat kembali ke menu.
@@ -239,6 +239,7 @@ export default function MonitoringCssdPage() {
   useEffect(() => {
     dispatch(fetchMonitoringIncoming())
     dispatch(fetchMonitoringReturned())
+    dispatch(fetchCleaning())
   }, [dispatch])
 
   // Real-time: segarkan daftar monitoring/tracking saat ada order baru atau
@@ -267,11 +268,12 @@ export default function MonitoringCssdPage() {
     }
   }, [dispatch])
 
-  // Paksa muat ulang seluruh data monitoring (dipakai setelah terima/pengembalian).
+  // Paksa muat ulang seluruh data monitoring (dipakai setelah proses/pengembalian).
   const refreshMonitoring = () => {
     dispatch(fetchMonitoringRooms())
     dispatch(fetchMonitoringIncoming())
     dispatch(fetchMonitoringReturned())
+    dispatch(fetchCleaning())
   }
 
   // Batalkan order masuk (status → dibatalkan). Hanya untuk order yang belum
@@ -293,8 +295,6 @@ export default function MonitoringCssdPage() {
   const [searchInput, setSearchInput] = useState("")
   const [searchQuery, setSearchQuery] = useState("")
   const [page, setPage] = useState(1)
-  // Filter status via legenda (klik). Kosong = tampilkan semua status.
-  const [statusFilter, setStatusFilter] = useState<Set<string>>(new Set())
   // Mode scan (sekali-pakai): diaktifkan lewat tombol scan. Saat barcode order
   // terbaca, langsung buka modal Pengembalian untuk order itu. Pencarian manual
   // tetap perlu tekan "Cari".
@@ -324,8 +324,6 @@ export default function MonitoringCssdPage() {
   const [roomsModalOpen, setRoomsModalOpen] = useState(false)
   const [roomSearch, setRoomSearch] = useState("")
 
-  // Modal detail order masuk.
-  const [incomingDetail, setIncomingDetail] = useState<IncomingOrder | null>(null)
   // Order masuk yang akan dibatalkan (konfirmasi) + status proses pembatalan.
   const [cancelTarget, setCancelTarget] = useState<IncomingOrder | null>(null)
   const [cancelling, setCancelling] = useState(false)
@@ -339,16 +337,10 @@ export default function MonitoringCssdPage() {
   const [returnedDetail, setReturnedDetail] = useState<Record<number, ReturnOrder>>({})
   const [returnedDetailLoading, setReturnedDetailLoading] = useState<Set<number>>(new Set())
 
-  // Terima order: data alokasi + pilihan unit per requirement + form header.
-  const [receiveOrder, setReceiveOrder] = useState<IncomingOrder | null>(null)
-  const [allocReqs, setAllocReqs] = useState<AllocRequirement[]>([])
-  const [allocLoading, setAllocLoading] = useState(false)
-  const [selections, setSelections] = useState<Record<string, string[]>>({})
-  const [recvBorrowedBy, setRecvBorrowedBy] = useState("")
-  const [recvOrderDate, setRecvOrderDate] = useState("")
-  const [recvReturnDate, setRecvReturnDate] = useState("")
-  const [receiving, setReceiving] = useState(false)
-  const [receiveError, setReceiveError] = useState<string | null>(null)
+  // Proses order masuk: konfirmasi → order pindah ke tahap Cleaning & Pengemasan.
+  const [processTarget, setProcessTarget] = useState<IncomingOrder | null>(null)
+  const [processing, setProcessing] = useState(false)
+  const [processError, setProcessError] = useState<string | null>(null)
 
   // Pengembalian: modal dibuka per-order, lalu data order dimuat otomatis (lookup).
   const conditions = useAppSelector((s) => s.conditions.items)
@@ -555,99 +547,22 @@ export default function MonitoringCssdPage() {
     }
   }
 
-  // Buka modal terima order: muat data alokasi & prefill form.
-  async function openReceive(order: IncomingOrder) {
-    setReceiveOrder(order)
-    setReceiveError(null)
-    setAllocReqs([])
-    setSelections({})
-    setRecvBorrowedBy(order.borrowed_by ?? "")
-    setRecvOrderDate(toDateInput(order.order_date))
-    setRecvReturnDate(toDateInput(order.return_plan_date))
-    setAllocLoading(true)
+  // Proses order masuk: catat waktu proses & pindahkan ke tahap Cleaning.
+  async function handleProcess() {
+    if (!processTarget || processing) return
+    setProcessing(true)
+    setProcessError(null)
     try {
-      const res = await api.get(`/master/orders/${order.id}/allocation`)
-      const reqs: AllocRequirement[] = res.data.data.requirements
-      setAllocReqs(reqs)
-      // Inisialisasi slot kosong sebanyak needed_qty per requirement.
-      const init: Record<string, string[]> = {}
-      reqs.forEach((r) => {
-        init[r.key] = Array.from({ length: r.needed_qty }, () => "")
-      })
-      setSelections(init)
-    } finally {
-      setAllocLoading(false)
-    }
-  }
-
-  // Set unit pada slot tertentu sebuah requirement.
-  function setSlot(key: string, slot: number, stockId: string) {
-    setReceiveError(null)
-    setSelections((prev) => {
-      const arr = [...(prev[key] ?? [])]
-      arr[slot] = stockId
-      return { ...prev, [key]: arr }
-    })
-  }
-
-  // Isi otomatis seluruh slot dengan unit tersedia (tanpa duplikat).
-  function generateAuto() {
-    setReceiveError(null)
-    const next: Record<string, string[]> = {}
-    allocReqs.forEach((r) => {
-      next[r.key] = r.available_units.slice(0, r.needed_qty).map((u) => String(u.id))
-    })
-    setSelections(next)
-  }
-
-  async function handleReceive() {
-    if (!receiveOrder || receiving) return
-    if (!recvOrderDate) {
-      setReceiveError("Tanggal pinjam wajib diisi.")
-      return
-    }
-    // Validasi: semua slot terisi & tidak ada unit terpilih ganda.
-    const used = new Set<string>()
-    for (const r of allocReqs) {
-      const slots = selections[r.key] ?? []
-      if (r.available_count < r.needed_qty) {
-        setReceiveError(`Unit tersedia untuk "${r.instrument.name}" tidak mencukupi (${r.available_count}/${r.needed_qty}).`)
-        return
-      }
-      for (const id of slots) {
-        if (!id) {
-          setReceiveError(`Masih ada unit "${r.instrument.name}" yang belum dipilih.`)
-          return
-        }
-        if (used.has(id)) {
-          setReceiveError("Ada unit yang terpilih lebih dari sekali.")
-          return
-        }
-        used.add(id)
-      }
-    }
-
-    setReceiving(true)
-    setReceiveError(null)
-    try {
-      const payload = {
-        borrowed_by: recvBorrowedBy.trim() || null,
-        order_date: recvOrderDate,
-        return_plan_date: recvReturnDate || null,
-        selections: Object.fromEntries(
-          allocReqs.map((r) => [r.key, (selections[r.key] ?? []).map((id) => Number(id))]),
-        ),
-      }
-      await api.post(`/master/orders/${receiveOrder.id}/receive`, payload)
-      setReceiveOrder(null)
-      refreshMonitoring() // refresh order masuk + distribusi ruangan
-      dispatch(invalidateOrders()) // pastikan daftar Order Instrumen ikut ter-refresh
+      await api.post(`/master/orders/${processTarget.id}/process`)
+      setProcessTarget(null)
+      refreshMonitoring() // order keluar dari daftar order masuk
+      dispatch(invalidateOrders()) // sinkronkan daftar Order Instrumen
       dispatch(fetchIncomingCount()) // perbarui badge notifikasi sidebar seketika
     } catch (err) {
       const e = err as { response?: { data?: { message?: string } } }
-      setReceiveError(e.response?.data?.message ?? "Gagal menerima order.")
+      setProcessError(e.response?.data?.message ?? "Gagal memproses order.")
     } finally {
-      setReceiving(false)
+      setProcessing(false)
     }
   }
 
@@ -793,31 +708,73 @@ export default function MonitoringCssdPage() {
     )
   }, [returned, q])
 
-  // Satu daftar gabungan: order masuk → sedang dipinjam → sudah dikembalikan.
-  // Disaring lagi oleh filter status legenda (kosong = tampilkan semua).
-  const combinedRows = useMemo<CombinedRow[]>(() => {
-    const all: CombinedRow[] = [
-      ...incomingFiltered.map((order) => ({ kind: "incoming" as const, order })),
+  // Order tahap pemrosesan (status pencucian/pengemasan) — disaring dengan kata
+  // kunci pencarian yang sama, lalu dipecah per tahap:
+  // - Cleaning & Disinfection = status "pencucian" (sedang dicuci)
+  // - Inspection & Packaging  = status "pengemasan" (selesai cuci, menunggu kemas)
+  const cleaningFiltered = useMemo(() => {
+    if (!q) return cleaning
+    return cleaning.filter(
+      (o) =>
+        o.code.toLowerCase().includes(q) ||
+        (o.code_transaction ?? "").toLowerCase().includes(q) ||
+        (o.borrowed_by ?? "").toLowerCase().includes(q) ||
+        (o.room?.name ?? "").toLowerCase().includes(q) ||
+        o.items.some((it) => it.name.toLowerCase().includes(q)),
+    )
+  }, [cleaning, q])
+
+  const cleaningItems = useMemo(
+    () => cleaningFiltered.filter((o) => o.status === "pencucian"),
+    [cleaningFiltered],
+  )
+  const packagingItems = useMemo(
+    () => cleaningFiltered.filter((o) => o.status === "pengemasan"),
+    [cleaningFiltered],
+  )
+
+  // Tab "Distribution & Tracking": order yang terdistribusi ke ruangan (sedang
+  // dipinjam) + riwayat yang sudah dikembalikan.
+  const distribusiRows = useMemo<CombinedRow[]>(
+    () => [
       ...orderGroups.map((group) => ({ kind: "borrowed" as const, group })),
       ...returnedFiltered.map((order) => ({ kind: "returned" as const, order })),
-    ]
-    if (statusFilter.size === 0) return all
-    return all.filter((row) => statusFilter.has(rowStatus(row)))
-  }, [incomingFiltered, orderGroups, returnedFiltered, statusFilter])
+    ],
+    [orderGroups, returnedFiltered],
+  )
 
-  // Klik label legenda untuk filter status (toggle). Selalu balik ke halaman 1.
-  function toggleStatusFilter(status: string) {
-    setPage(1)
-    setStatusFilter((prev) => {
-      const next = new Set(prev)
-      if (next.has(status)) next.delete(status)
-      else next.add(status)
-      return next
-    })
+  // Jumlah per tab (total) untuk badge angka di label tab.
+  const masukCount = incomingFiltered.length
+  const cleaningCount = cleaningItems.length
+  const packagingCount = packagingItems.length
+  // Tahap Sterilization belum punya data pipeline (menyusul).
+  const sterilizationCount = 0
+  const distribusiCount = distribusiRows.length
+
+  const tabCount: Record<MonitoringTab, number> = {
+    masuk: masukCount,
+    cleaning: cleaningCount,
+    packaging: packagingCount,
+    sterilization: sterilizationCount,
+    distribusi: distribusiCount,
   }
 
-  const totalPages = Math.ceil(combinedRows.length / ITEMS_PER_PAGE)
-  const pagedRows = combinedRows.slice((page - 1) * ITEMS_PER_PAGE, page * ITEMS_PER_PAGE)
+  // Pindah tab → kembali ke halaman 1 & simpan tab ke URL (?tab=...).
+  function changeTab(tab: MonitoringTab) {
+    setActiveTab(tab)
+    setPage(1)
+    const params = new URLSearchParams(searchParams.toString())
+    params.set("tab", tab)
+    router.replace(`${pathname}?${params.toString()}`, { scroll: false })
+  }
+
+  const activeCount = tabCount[activeTab]
+  const totalPages = Math.ceil(activeCount / ITEMS_PER_PAGE)
+  const pageStart = (page - 1) * ITEMS_PER_PAGE
+  const pagedIncoming = incomingFiltered.slice(pageStart, pageStart + ITEMS_PER_PAGE)
+  const pagedCleaning = cleaningItems.slice(pageStart, pageStart + ITEMS_PER_PAGE)
+  const pagedPackaging = packagingItems.slice(pageStart, pageStart + ITEMS_PER_PAGE)
+  const pagedDistribusi = distribusiRows.slice(pageStart, pageStart + ITEMS_PER_PAGE)
 
   // Modal "Alat Dipinjam" per ruangan: saring lalu kelompokkan dengan pola yang sama.
   const roomOrderGroups = useMemo(() => {
@@ -962,9 +919,48 @@ export default function MonitoringCssdPage() {
           <div>
             <h2 className="text-base font-semibold text-gray-900">Daftar Order</h2>
             <p className="mt-0.5 text-xs text-gray-400">
-              Order masuk (belum dipinjam) tampil di atas, diikuti order yang sedang dipinjam.
+              Pilih tab: order masuk, tahap sterilisasi &amp; packing, atau yang sudah terdistribusi.
             </p>
           </div>
+          {/* Tab kategori order — gaya underline (seperti tab Google) */}
+          <div className="flex flex-wrap gap-6 border-b border-gray-200">
+            {(
+              [
+                { key: "masuk", label: "Order Masuk", count: masukCount },
+                { key: "cleaning", label: "Cleaning & Disinfection", count: cleaningCount },
+                { key: "packaging", label: "Inspection & Packaging", count: packagingCount },
+                { key: "sterilization", label: "Sterilization", count: sterilizationCount },
+                { key: "distribusi", label: "Distribution & Tracking", count: distribusiCount },
+              ] as { key: MonitoringTab; label: string; count: number }[]
+            ).map((t) => {
+              const active = activeTab === t.key
+              return (
+                <button
+                  key={t.key}
+                  type="button"
+                  onClick={() => changeTab(t.key)}
+                  aria-pressed={active}
+                  className={
+                    "relative -mb-px flex items-center gap-2 border-b-2 px-1 pb-2.5 pt-1 text-sm transition-colors " +
+                    (active
+                      ? "border-[#075489] font-semibold text-[#075489]"
+                      : "border-transparent font-medium text-gray-500 hover:text-gray-800")
+                  }
+                >
+                  {t.label}
+                  <span
+                    className={
+                      "rounded-full px-1.5 py-0.5 text-xs font-semibold " +
+                      (active ? "bg-[#075489]/10 text-[#075489]" : "bg-gray-100 text-gray-500")
+                    }
+                  >
+                    {t.count}
+                  </span>
+                </button>
+              )
+            })}
+          </div>
+
           <form onSubmit={handleSearch} className="flex gap-2 w-full">
             <div className="relative flex-1">
               {scanLoading || searching ? (
@@ -1004,99 +1000,91 @@ export default function MonitoringCssdPage() {
               Cari
             </Button>
           </form>
-
-          {/* Keterangan warna status — klik untuk memfilter Daftar Order per status */}
-          <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 text-xs text-gray-500">
-            <span className="font-medium text-gray-400">Keterangan:</span>
-            {STATUS_LEGEND.map((s) => {
-              const active = statusFilter.has(s.status)
-              return (
-                <button
-                  key={s.status}
-                  type="button"
-                  onClick={() => toggleStatusFilter(s.status)}
-                  aria-pressed={active}
-                  title={`Filter status ${s.label}`}
-                  className={
-                    "flex items-center gap-1.5 rounded-full border px-2 py-1 transition-colors " +
-                    (active
-                      ? "border-[#075489] bg-[#075489]/10 text-[#075489] font-medium"
-                      : "border-transparent hover:bg-gray-100")
-                  }
-                >
-                  <span className={`h-3 w-1.5 rounded-sm ${s.dot}`} />
-                  {s.label}
-                </button>
-              )
-            })}
-            {statusFilter.size > 0 && (
-              <button
-                type="button"
-                onClick={() => {
-                  setStatusFilter(new Set())
-                  setPage(1)
-                }}
-                className="text-[#075489] underline underline-offset-2 hover:text-[#075489]/80"
-              >
-                Reset filter
-              </button>
-            )}
-          </div>
         </div>
 
-        {loading || incomingLoading || returnedLoading ? (
+        {loading || incomingLoading || returnedLoading || cleaningLoading ? (
           <div className="py-16 text-center text-sm text-gray-400">Memuat data...</div>
-        ) : pagedRows.length === 0 ? (
+        ) : activeCount === 0 ? (
           <div className="py-16 text-center text-sm text-gray-400">
-            {searchQuery
+            {searchQuery && activeTab !== "sterilization"
               ? "Tidak ada order yang cocok dengan pencarian."
-              : statusFilter.size > 0
-                ? "Tidak ada order untuk status yang dipilih."
-                : "Belum ada order masuk, dipinjam, maupun dikembalikan."}
+              : activeTab === "masuk"
+                ? "Belum ada order masuk."
+                : activeTab === "cleaning"
+                  ? "Belum ada order pada tahap cleaning & disinfection."
+                  : activeTab === "packaging"
+                    ? "Belum ada order pada tahap inspection & packaging."
+                    : activeTab === "sterilization"
+                      ? "Tahap sterilization akan tersedia berikutnya."
+                      : "Belum ada order yang terdistribusi."}
           </div>
         ) : (
           <div className="space-y-2 p-4">
-            {pagedRows.map((row) =>
-              row.kind === "incoming" ? (
+            {activeTab === "masuk" &&
+              pagedIncoming.map((order) => (
                 <IncomingOrderCard
-                  key={`incoming-${row.order.id}`}
-                  order={row.order}
-                  expanded={expandedIncoming.has(String(row.order.id))}
-                  onToggle={() => toggleIncoming(String(row.order.id))}
-                  onReceive={() => openReceive(row.order)}
-                  onDetail={() => setIncomingDetail(row.order)}
-                  onCancel={() => setCancelTarget(row.order)}
+                  key={`incoming-${order.id}`}
+                  order={order}
+                  expanded={expandedIncoming.has(String(order.id))}
+                  onToggle={() => toggleIncoming(String(order.id))}
+                  onProcess={() => setProcessTarget(order)}
+                  onCancel={() => setCancelTarget(order)}
                 />
-              ) : row.kind === "borrowed" ? (
-                <OrderGroupCard
-                  key={`borrowed-${row.group.order_code}`}
-                  o={row.group}
-                  expandedOrder={expandedMonOrder}
-                  toggleOrder={toggleMonOrder}
-                  expandedPaket={expandedMonPaket}
-                  togglePaket={toggleMonPaket}
-                  onPrintBarcode={setBarcodeOrder}
-                  onReturn={openReturnFor}
-                />
-              ) : (
-                <ReturnedOrderCard
-                  key={`returned-${row.order.id}`}
-                  order={row.order}
-                  expanded={expandedReturned.has(String(row.order.id))}
-                  onToggle={() => toggleReturned(row.order)}
-                  detail={returnedDetail[row.order.id] ?? null}
-                  detailLoading={returnedDetailLoading.has(row.order.id)}
-                  onHistory={() => openHistory(row.order.code)}
-                />
-              ),
+              ))}
+
+            {activeTab === "cleaning" && (
+              <CleaningTab
+                items={pagedCleaning}
+                stage="cleaning"
+                onChanged={() => {
+                  dispatch(fetchCleaning())
+                  dispatch(invalidateOrders())
+                }}
+              />
             )}
+
+            {activeTab === "packaging" && (
+              <PackagingTab
+                items={pagedPackaging}
+                onChanged={() => {
+                  dispatch(fetchCleaning())
+                  dispatch(invalidateOrders())
+                }}
+              />
+            )}
+
+            {activeTab === "distribusi" &&
+              pagedDistribusi.map((row) =>
+                row.kind === "borrowed" ? (
+                  <OrderGroupCard
+                    key={`borrowed-${row.group.order_code}`}
+                    o={row.group}
+                    expandedOrder={expandedMonOrder}
+                    toggleOrder={toggleMonOrder}
+                    expandedPaket={expandedMonPaket}
+                    togglePaket={toggleMonPaket}
+                    onPrintBarcode={setBarcodeOrder}
+                    onReturn={openReturnFor}
+                  />
+                ) : row.kind === "returned" ? (
+                  <ReturnedOrderCard
+                    key={`returned-${row.order.id}`}
+                    order={row.order}
+                    expanded={expandedReturned.has(String(row.order.id))}
+                    onToggle={() => toggleReturned(row.order)}
+                    detail={returnedDetail[row.order.id] ?? null}
+                    detailLoading={returnedDetailLoading.has(row.order.id)}
+                    onHistory={() => openHistory(row.order.code)}
+                  />
+                ) : null,
+              )}
           </div>
         )}
 
         <Pagination
           currentPage={page}
           totalPages={totalPages}
-          totalItems={combinedRows.length}
+          totalItems={activeCount}
           itemsPerPage={ITEMS_PER_PAGE}
           onPageChange={setPage}
         />
@@ -1239,58 +1227,6 @@ export default function MonitoringCssdPage() {
         </div>
       </Modal>
 
-      {/* Detail order masuk */}
-      <Modal
-        open={incomingDetail !== null}
-        onClose={() => setIncomingDetail(null)}
-        title={incomingDetail ? `Order Masuk — ${incomingDetail.code}` : "Order Masuk"}
-        size="lg"
-        footer={
-          <Button variant="outline" onClick={() => setIncomingDetail(null)}>
-            Tutup
-          </Button>
-        }
-      >
-        {incomingDetail && (
-          <div className="space-y-5">
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-              <DetailField label="Dipinjam Oleh" value={incomingDetail.borrowed_by} />
-              <DetailField label="Ruangan / Unit" value={incomingDetail.room?.name} />
-              <DetailField label="Tanggal Pinjam" value={formatDate(incomingDetail.order_date)} />
-              <DetailField label="Rencana Kembali" value={formatDate(incomingDetail.return_plan_date)} />
-              <div className="space-y-1">
-                <p className="text-xs font-semibold uppercase tracking-wide text-gray-400">Status</p>
-                <Badge variant={incomingStatusVariant[incomingDetail.status]}>
-                  {incomingStatusLabel[incomingDetail.status]}
-                </Badge>
-              </div>
-            </div>
-
-            {incomingDetail.note && (
-              <div className="space-y-1">
-                <p className="text-xs font-semibold uppercase tracking-wide text-gray-400">Catatan</p>
-                <p className="text-sm text-gray-700">{incomingDetail.note}</p>
-              </div>
-            )}
-
-            <div>
-              <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-400">
-                Daftar Permintaan
-              </p>
-              {incomingDetail.items.length === 0 ? (
-                <div className="py-6 text-center text-sm text-gray-400">Tidak ada permintaan.</div>
-              ) : (
-                <div className="space-y-2">
-                  {incomingDetail.items.map((it, idx) => (
-                    <IncomingItemRow key={idx} item={it} />
-                  ))}
-                </div>
-              )}
-            </div>
-          </div>
-        )}
-      </Modal>
-
       {/* Konfirmasi pembatalan order masuk */}
       <Modal
         open={cancelTarget !== null}
@@ -1325,145 +1261,69 @@ export default function MonitoringCssdPage() {
         </div>
       </Modal>
 
-      {/* Terima order: alokasi unit + edit penerima/tanggal */}
+      {/* Proses order masuk: detail order + konfirmasi → tahap Cleaning */}
       <Modal
-        open={receiveOrder !== null}
-        onClose={() => setReceiveOrder(null)}
-        title={receiveOrder ? `Terima Order — ${receiveOrder.code}` : "Terima Order"}
+        open={processTarget !== null}
+        onClose={processing ? () => {} : () => setProcessTarget(null)}
+        title={processTarget ? `Proses Order — ${processTarget.code}` : "Proses Order"}
         size="lg"
         footer={
           <div className="flex w-full items-center justify-between gap-3">
-            {receiveError ? (
-              <p className="text-sm text-red-600">{receiveError}</p>
+            {processError ? (
+              <p className="text-sm text-red-600">{processError}</p>
             ) : (
               <span className="text-xs text-gray-400">
-                Unit terpilih akan berstatus dipinjam & mengurangi stok.
+                Waktu proses dicatat & order pindah ke tahap Cleaning &amp; Disinfection.
               </span>
             )}
             <div className="flex shrink-0 gap-2">
-              <Button variant="outline" onClick={() => setReceiveOrder(null)}>
+              <Button variant="outline" onClick={() => setProcessTarget(null)} disabled={processing}>
                 Batal
               </Button>
               <Button
-                onClick={handleReceive}
-                disabled={receiving || allocLoading}
+                onClick={handleProcess}
+                disabled={processing}
                 className="bg-[#4ba69d] hover:bg-[#4ba69d]/90 text-white"
               >
-                {receiving ? "Memproses..." : "Terima & Pinjamkan"}
+                {processing ? "Memproses..." : "Proses"}
               </Button>
             </div>
           </div>
         }
       >
-        {allocLoading ? (
-          <div className="py-12 text-center text-sm text-gray-400">Memuat data alokasi...</div>
-        ) : (
+        {processTarget && (
           <div className="space-y-5">
-            {/* Edit data peminjaman */}
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-              <div className="space-y-1.5">
-                <Label htmlFor="recv-penerima">Nama Penerima</Label>
-                <Input
-                  id="recv-penerima"
-                  value={recvBorrowedBy}
-                  onChange={(e) => setRecvBorrowedBy(e.target.value)}
-                  placeholder="Nama penerima / peminjam"
-                />
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="recv-tgl-pinjam">
-                  Tanggal Pinjam <span className="text-red-500">*</span>
-                </Label>
-                <Input
-                  id="recv-tgl-pinjam"
-                  type="date"
-                  value={recvOrderDate}
-                  onChange={(e) => setRecvOrderDate(e.target.value)}
-                />
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="recv-tgl-kembali">Rencana Kembali</Label>
-                <Input
-                  id="recv-tgl-kembali"
-                  type="date"
-                  value={recvReturnDate}
-                  onChange={(e) => setRecvReturnDate(e.target.value)}
-                />
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <DetailField label="Dipinjam Oleh" value={processTarget.borrowed_by} />
+              <DetailField label="Ruangan / Unit" value={processTarget.room?.name} />
+              <DetailField label="Tanggal Pinjam" value={formatDate(processTarget.order_date)} />
+              <DetailField label="Rencana Kembali" value={formatDate(processTarget.return_plan_date)} />
+              <div className="space-y-1">
+                <p className="text-xs font-semibold uppercase tracking-wide text-gray-400">Status</p>
+                <Badge variant={incomingStatusVariant[processTarget.status]}>
+                  {incomingStatusLabel[processTarget.status]}
+                </Badge>
               </div>
             </div>
 
-            {/* Alokasi unit */}
-            <div>
-              <div className="mb-2 flex items-center justify-between">
-                <p className="text-xs font-semibold uppercase tracking-wide text-gray-400">
-                  Pilih Unit yang Dipinjam
-                </p>
-                <button
-                  type="button"
-                  onClick={generateAuto}
-                  className="text-xs font-medium text-[#075489] hover:underline"
-                >
-                  Generate Otomatis
-                </button>
+            {processTarget.note && (
+              <div className="space-y-1">
+                <p className="text-xs font-semibold uppercase tracking-wide text-gray-400">Catatan</p>
+                <p className="text-sm text-gray-700">{processTarget.note}</p>
               </div>
+            )}
 
-              {allocReqs.length === 0 ? (
-                <div className="py-8 text-center text-sm text-gray-400">
-                  Order ini tidak punya kebutuhan unit yang bisa dialokasikan.
-                </div>
+            <div>
+              <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-400">
+                Daftar Permintaan
+              </p>
+              {processTarget.items.length === 0 ? (
+                <div className="py-6 text-center text-sm text-gray-400">Tidak ada permintaan.</div>
               ) : (
-                <div className="space-y-3">
-                  {(() => {
-                    // Kumpulkan semua unit yang sudah terpilih (cegah duplikat antar slot).
-                    const allUsed = new Set<string>()
-                    Object.values(selections).forEach((arr) =>
-                      arr.forEach((id) => id && allUsed.add(id)),
-                    )
-                    return allocReqs.map((r) => {
-                      const slots = selections[r.key] ?? []
-                      const insufficient = r.available_count < r.needed_qty
-                      return (
-                        <div key={r.key} className="rounded-lg border border-gray-200 p-3">
-                          <div className="mb-2 flex items-center justify-between gap-2">
-                            <div className="flex items-center gap-2">
-                              <Badge variant={r.source === "paket" ? "info" : "default"}>
-                                {r.source === "paket" ? "Paket" : "Satuan"}
-                              </Badge>
-                              <span className="text-sm font-medium text-gray-800">
-                                {r.instrument.name}
-                              </span>
-                              {r.source === "paket" && r.package_name && (
-                                <span className="text-xs text-gray-400">· {r.package_name}</span>
-                              )}
-                            </div>
-                            <span
-                              className={
-                                "text-xs " + (insufficient ? "font-semibold text-red-500" : "text-gray-400")
-                              }
-                            >
-                              butuh {r.needed_qty} · tersedia {r.available_count}
-                            </span>
-                          </div>
-                          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-                            {slots.map((cur, slot) => {
-                              const options = r.available_units
-                                .filter((u) => !allUsed.has(String(u.id)) || String(u.id) === cur)
-                                .map((u) => ({ value: String(u.id), label: u.code }))
-                              return (
-                                <SelectSearch
-                                  key={slot}
-                                  options={options}
-                                  value={cur}
-                                  onChange={(v) => setSlot(r.key, slot, v)}
-                                  placeholder={`-- Unit ${slot + 1} --`}
-                                />
-                              )
-                            })}
-                          </div>
-                        </div>
-                      )
-                    })
-                  })()}
+                <div className="space-y-2">
+                  {processTarget.items.map((it, idx) => (
+                    <IncomingItemRow key={idx} item={it} />
+                  ))}
                 </div>
               )}
             </div>
@@ -1798,6 +1658,15 @@ export default function MonitoringCssdPage() {
   )
 }
 
+// Bungkus dengan Suspense karena memakai useSearchParams (untuk menyimpan tab di URL).
+export default function MonitoringCssdPage() {
+  return (
+    <Suspense fallback={null}>
+      <MonitoringCssd />
+    </Suspense>
+  )
+}
+
 // Daftar order yang sedang dipinjam, dikelompokkan per peminjam → paket / satuan.
 // Dipakai oleh tabel utama monitoring dan modal "Alat Dipinjam" per ruangan.
 function OrderGroupList({
@@ -2001,21 +1870,20 @@ function IncomingItemRow({ item }: { item: IncomingItem }) {
   )
 }
 
-// Satu kartu order masuk (belum dipinjam) — tampil di atas daftar gabungan, dengan
-// tombol Terima Order dan Detail. Bisa di-expand untuk lihat permintaan.
+// Satu kartu order masuk (belum dipinjam) — tampil di tab Order Masuk, dengan
+// tombol Proses dan Batal. Bisa di-expand untuk lihat permintaan. Detail lengkap
+// ditampilkan di dalam modal Proses.
 function IncomingOrderCard({
   order,
   expanded,
   onToggle,
-  onReceive,
-  onDetail,
+  onProcess,
   onCancel,
 }: {
   order: IncomingOrder
   expanded: boolean
   onToggle: () => void
-  onReceive: () => void
-  onDetail: () => void
+  onProcess: () => void
   onCancel: () => void
 }) {
   return (
@@ -2060,17 +1928,10 @@ function IncomingOrderCard({
         <div className="mt-1.5 flex shrink-0 flex-wrap items-center justify-end gap-1.5 pr-1">
           <button
             type="button"
-            onClick={onReceive}
+            onClick={onProcess}
             className="rounded-md border border-[#4ba69d] bg-[#4ba69d] px-2 py-1 text-xs font-medium text-white hover:bg-[#4ba69d]/90"
           >
-            Terima
-          </button>
-          <button
-            type="button"
-            onClick={onDetail}
-            className="rounded-md border border-[#075489] px-2 py-1 text-xs font-medium text-[#075489] hover:bg-[#075489]/10"
-          >
-            Detail
+            Proses
           </button>
           <button
             type="button"

@@ -16,6 +16,7 @@ import {
   Box,
   Activity,
   Monitor,
+  Droplets,
   ChevronRight,
   X,
   Circle,
@@ -38,6 +39,7 @@ const ICON_MAP: Record<string, LucideIcon> = {
   box: Box,
   activity: Activity,
   monitor: Monitor,
+  droplets: Droplets,
 }
 
 function getIcon(name: string | null): LucideIcon {

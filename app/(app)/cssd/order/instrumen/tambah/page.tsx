@@ -135,21 +135,19 @@ export default function TambahOrderInstrumenPage() {
     if (currentUserName) setBorrowedBy((prev) => prev || currentUserName)
   }, [currentUserName])
 
-  // Hanya tampilkan instrumen yang masih punya stok tersedia (sembunyikan yang habis).
-  const instrumentOptions = instruments
-    .filter((i) => (i.available_stocks_count ?? 0) > 0)
-    .map((i) => ({
-      value: String(i.id),
-      label: `${i.code ? `${i.code} — ` : ""}${i.name} · tersedia ${i.available_stocks_count ?? 0}`,
-    }))
+  // Semua jenis instrumen bisa diorder — unit fisik dialokasikan saat CSSD
+  // menerima pesanan, jadi stok tersedia saat ini tidak membatasi pemesanan.
+  const instrumentOptions = instruments.map((i) => ({
+    value: String(i.id),
+    label: `${i.code ? `${i.code} — ` : ""}${i.name}`,
+  }))
 
-  // Hanya tampilkan paket yang masih bisa dipenuhi minimal 1 set (sembunyikan yang habis).
-  const catalogOptions = catalogs
-    .filter((c) => (c.available_sets ?? 0) > 0)
-    .map((c) => ({
-      value: String(c.id),
-      label: `${c.code} — ${c.name} · ${c.available_sets ?? 0} set tersedia`,
-    }))
+  // Semua paket bisa diorder — unit fisik dialokasikan saat CSSD menerima
+  // pesanan, jadi set tersedia saat ini tidak membatasi pemesanan.
+  const catalogOptions = catalogs.map((c) => ({
+    value: String(c.id),
+    label: `${c.code} — ${c.name}`,
+  }))
 
   // Tambah / gabungkan baris permintaan. Bila jenis/paket yang sama sudah ada,
   // jumlahnya diakumulasi alih-alih membuat baris baru.

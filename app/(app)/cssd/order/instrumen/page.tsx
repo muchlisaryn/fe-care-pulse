@@ -13,7 +13,8 @@ import { DataTable, type Column } from "@/components/molecules/DataTable"
 import { Modal } from "@/components/molecules/Modal"
 import { ConfirmDialog } from "@/components/molecules/ConfirmDialog"
 import { Pagination } from "@/components/molecules/Pagination"
-import { OrderTimeline } from "@/components/molecules/OrderTimeline"
+import { OrderTimeline, type TimelineEvent } from "@/components/molecules/OrderTimeline"
+import { OrderStatusTracker, OrderStatusBadge } from "@/components/molecules/OrderStatusTracker"
 import { useAppDispatch, useAppSelector } from "@/lib/store/hooks"
 import {
   fetchOrders,
@@ -53,24 +54,25 @@ type PinjamTarget = {
 
 const statusLabel: Record<OrderStatus, string> = {
   diajukan: "Diajukan",
-  dipinjam: "Dipinjam",
+  pencucian: "Sedang Dicuci",
+  pengemasan: "Sedang Packaging",
+  selesai: "Tahap Steril",
+  dipinjam: "Distribusi",
   dikembalikan: "Dikembalikan",
   dibatalkan: "Dibatalkan",
 }
 
-const statusVariant: Record<OrderStatus, "info" | "success" | "danger" | "warning" | "default"> = {
-  diajukan: "warning",
-  dipinjam: "info",
-  dikembalikan: "success",
-  dibatalkan: "danger",
-}
-
 // Tombol aksi status berikutnya:
-// diajukan → (diterima via Monitoring) → dipinjam → dikembalikan (atau dibatalkan)
+// diajukan → (diterima via Monitoring) → pencucian → pengemasan → ... → dipinjam
+// Tahapan pipeline (pencucian–selesai) dijalankan dari menu Monitoring, jadi
+// di sini hanya order "diajukan" yang masih bisa dibatalkan.
 const nextActions: Record<OrderStatus, { label: string; to: OrderStatus; variant: "primary" | "danger" }[]> = {
   diajukan: [
     { label: "Batalkan", to: "dibatalkan", variant: "danger" },
   ],
+  pencucian: [],
+  pengemasan: [],
+  selesai: [],
   dipinjam: [],
   dikembalikan: [],
   dibatalkan: [],
@@ -111,7 +113,13 @@ type BorrowedOrder = {
 
 // Order yang sudah diproses (unit fisik sudah dialokasikan) tidak boleh
 // dibatalkan/dihapus lagi dari daftar.
-const PROCESSED_STATUSES: OrderStatus[] = ["dipinjam", "dikembalikan"]
+const PROCESSED_STATUSES: OrderStatus[] = [
+  "pencucian",
+  "pengemasan",
+  "selesai",
+  "dipinjam",
+  "dikembalikan",
+]
 const isProcessed = (status: OrderStatus) => PROCESSED_STATUSES.includes(status)
 
 function formatDate(value: string | null) {
@@ -119,6 +127,27 @@ function formatDate(value: string | null) {
   const d = new Date(value)
   if (Number.isNaN(d.getTime())) return value
   return d.toLocaleDateString("id-ID", { day: "2-digit", month: "short", year: "numeric" })
+}
+
+// Tanggal + jam — dipakai untuk waktu diajukan / di-ACC (bisa terjadi di hari yang
+// sama, jadi jam penting agar tidak rancu).
+function formatDateTime(value: string | null | undefined) {
+  if (!value) return null
+  const d = new Date(value)
+  if (Number.isNaN(d.getTime())) return value
+  return d.toLocaleString("id-ID", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  })
+}
+
+// Ambil waktu sebuah event timeline berdasarkan tipenya (mis. "dibuat" = diajukan,
+// "diterima" = di-ACC & dipinjamkan CSSD). Null bila event belum ada.
+function timelineTimeOf(timeline: TimelineEvent[] | undefined, type: TimelineEvent["type"]) {
+  return timeline?.find((e) => e.type === type)?.created_at ?? null
 }
 
 export default function OrderInstrumenPage() {
@@ -596,8 +625,8 @@ export default function OrderInstrumenPage() {
     },
     {
       header: "Status",
-      cell: (row) => <Badge variant={statusVariant[row.status]}>{statusLabel[row.status]}</Badge>,
-      className: "w-32",
+      cell: (row) => <OrderStatusBadge status={row.status} />,
+      className: "w-40",
     },
   ]
 
@@ -1074,16 +1103,26 @@ export default function OrderInstrumenPage() {
           <div className="py-10 text-center text-sm text-gray-400">Memuat data...</div>
         ) : detail ? (
           <div className="space-y-5">
+            {/* Status tracking alur CSSD: Diterima → Dicuci → Packaging → Steril → Distribusi */}
+            <div className="space-y-2">
+              <p className="text-xs font-semibold uppercase tracking-wide text-gray-400">
+                Status Tracking
+              </p>
+              <OrderStatusTracker status={detail.status} />
+            </div>
+
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <Field label="Dipinjam Oleh" value={detail.borrowed_by ?? detail.user?.name} />
               <Field label="Ruangan / Unit" value={detail.room?.name} />
               <Field label="Tanggal Pinjam" value={formatDate(detail.order_date)} />
+              <Field label="Waktu Diajukan" value={formatDateTime(timelineTimeOf(detail.timeline, "dibuat"))} />
+              <Field label="Waktu ACC / Dipinjamkan" value={formatDateTime(timelineTimeOf(detail.timeline, "diterima"))} />
               <Field label="Rencana Kembali" value={formatDate(detail.return_plan_date)} />
               <Field label="Tanggal Kembali" value={formatDate(detail.return_actual_date)} />
               <Field label="Dikembalikan Oleh" value={detail.returned_by} />
               <div className="space-y-1">
                 <p className="text-xs font-semibold uppercase tracking-wide text-gray-400">Status</p>
-                <Badge variant={statusVariant[detail.status]}>{statusLabel[detail.status]}</Badge>
+                <OrderStatusBadge status={detail.status} />
               </div>
             </div>
 

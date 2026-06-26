@@ -296,7 +296,7 @@ Base URL: `/api` (via axios instance with Bearer token interceptor)
 | GET | `/auth/me` | Bearer (wajib) | Ambil data user + menus (untuk rehydrasi) |
 | PUT | `/auth/update` | Bearer (wajib) | Update profil + password opsional (token lama tetap aktif) |
 | PUT | `/auth/profile` | Bearer (wajib) | Update profil saja (name, username, email) |
-| PUT | `/auth/change-password` | Bearer (wajib) | Ganti password — semua token lama dihapus, token baru dikembalikan |
+| PUT | `/auth/change-password` | Bearer (wajib) | Ganti password — sesi perangkat LAIN dicabut, sesi perangkat ini dipertahankan |
 
 ### POST `/auth/register`
 Body: `name`, `username`, `email`, `password`, `password_confirmation` (semua wajib)  
@@ -324,5 +324,6 @@ Response 200: `{ data: { id, name, username, email, updated_at } }`
 
 ### PUT `/auth/change-password`
 Body: `current_password`, `password`, `password_confirmation` (semua wajib)  
-Response 200: `{ data: { token } }` — simpan token baru ke store + cookie  
+Hanya sesi di perangkat **lain** yang dicabut; sesi perangkat yang melakukan ganti password tetap aktif (token tidak berubah).  
+Response 200: `{ data: { token } }` — token sama dengan yang sedang dipakai; tetap di-`saveAuth` agar store & cookie konsisten  
 Response 422: `{ message: "Password saat ini tidak sesuai." }`
