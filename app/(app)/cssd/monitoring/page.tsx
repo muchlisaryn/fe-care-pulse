@@ -44,8 +44,12 @@ import {
   type ReturnedOrder,
 } from "@/lib/store/slices/monitoringSlice"
 import { fetchCleaning } from "@/lib/store/slices/cleaningSlice"
+import { fetchSterilizePipeline } from "@/lib/store/slices/sterilizePipelineSlice"
+import { fetchReadyToDistribute } from "@/lib/store/slices/distributeSlice"
 import { CleaningTab } from "@/components/molecules/CleaningTab"
 import { PackagingTab } from "@/components/molecules/PackagingTab"
+import { SterilizationTab } from "@/components/molecules/SterilizationTab"
+import { DistributeReady } from "@/components/molecules/DistributeReady"
 import api from "@/lib/axios"
 import { getEcho } from "@/lib/echo"
 
@@ -117,6 +121,9 @@ type ReturnOrder = {
   return_plan_date: string | null
   return_actual_date: string | null
   returned_by: string | null
+  medical_record_no?: string | null
+  patient_name?: string | null
+  distributed_to?: string | null
   items: ReturnUnit[]
   timeline?: TimelineEvent[]
 }
@@ -216,6 +223,10 @@ function MonitoringCssd() {
   const roomsLoaded = useAppSelector((s) => s.monitoring.roomsLoaded)
   const cleaning = useAppSelector((s) => s.cleaning.items)
   const cleaningLoading = useAppSelector((s) => s.cleaning.loading)
+  const sterilizePipeline = useAppSelector((s) => s.sterilizePipeline.items)
+  const sterilizePipelineLoading = useAppSelector((s) => s.sterilizePipeline.loading)
+  const readyToDistribute = useAppSelector((s) => s.distribute.items)
+  const distributeLoading = useAppSelector((s) => s.distribute.loading)
 
   // Tab aktif pada kartu Daftar Order — disimpan di URL (?tab=...) agar tetap
   // bertahan saat halaman di-refresh.
@@ -240,6 +251,8 @@ function MonitoringCssd() {
     dispatch(fetchMonitoringIncoming())
     dispatch(fetchMonitoringReturned())
     dispatch(fetchCleaning())
+    dispatch(fetchSterilizePipeline())
+    dispatch(fetchReadyToDistribute())
   }, [dispatch])
 
   // Real-time: segarkan daftar monitoring/tracking saat ada order baru atau
@@ -274,6 +287,8 @@ function MonitoringCssd() {
     dispatch(fetchMonitoringIncoming())
     dispatch(fetchMonitoringReturned())
     dispatch(fetchCleaning())
+    dispatch(fetchSterilizePipeline())
+    dispatch(fetchReadyToDistribute())
   }
 
   // Batalkan order masuk (status → dibatalkan). Hanya untuk order yang belum
@@ -733,6 +748,20 @@ function MonitoringCssd() {
     [cleaningFiltered],
   )
 
+  // Tahap Sterilization: order siap-steril (status "selesai") — disaring dengan
+  // kata kunci pencarian yang sama.
+  const sterilizationItems = useMemo(() => {
+    if (!q) return sterilizePipeline
+    return sterilizePipeline.filter(
+      (o) =>
+        o.code.toLowerCase().includes(q) ||
+        (o.code_transaction ?? "").toLowerCase().includes(q) ||
+        (o.borrowed_by ?? "").toLowerCase().includes(q) ||
+        (o.room?.name ?? "").toLowerCase().includes(q) ||
+        o.units.some((u) => (u.code ?? "").toLowerCase().includes(q)),
+    )
+  }, [sterilizePipeline, q])
+
   // Tab "Distribution & Tracking": order yang terdistribusi ke ruangan (sedang
   // dipinjam) + riwayat yang sudah dikembalikan.
   const distribusiRows = useMemo<CombinedRow[]>(
@@ -743,13 +772,27 @@ function MonitoringCssd() {
     [orderGroups, returnedFiltered],
   )
 
+  // Order siap distribusi (status digudang) — disaring kata kunci yang sama.
+  const readyDistributeFiltered = useMemo(() => {
+    if (!q) return readyToDistribute
+    return readyToDistribute.filter(
+      (o) =>
+        o.code.toLowerCase().includes(q) ||
+        (o.code_transaction ?? "").toLowerCase().includes(q) ||
+        (o.borrowed_by ?? "").toLowerCase().includes(q) ||
+        (o.room?.name ?? "").toLowerCase().includes(q),
+    )
+  }, [readyToDistribute, q])
+
   // Jumlah per tab (total) untuk badge angka di label tab.
   const masukCount = incomingFiltered.length
   const cleaningCount = cleaningItems.length
   const packagingCount = packagingItems.length
-  // Tahap Sterilization belum punya data pipeline (menyusul).
-  const sterilizationCount = 0
+  const sterilizationCount = sterilizationItems.length
+  // Pagination tab Distribusi hanya atas borrowed+returned; "Siap Distribusi"
+  // ditampilkan terpisah di atas (tidak dipaginasi).
   const distribusiCount = distribusiRows.length
+  const distribusiBadge = distribusiCount + readyDistributeFiltered.length
 
   const tabCount: Record<MonitoringTab, number> = {
     masuk: masukCount,
@@ -774,6 +817,7 @@ function MonitoringCssd() {
   const pagedIncoming = incomingFiltered.slice(pageStart, pageStart + ITEMS_PER_PAGE)
   const pagedCleaning = cleaningItems.slice(pageStart, pageStart + ITEMS_PER_PAGE)
   const pagedPackaging = packagingItems.slice(pageStart, pageStart + ITEMS_PER_PAGE)
+  const pagedSterilization = sterilizationItems.slice(pageStart, pageStart + ITEMS_PER_PAGE)
   const pagedDistribusi = distribusiRows.slice(pageStart, pageStart + ITEMS_PER_PAGE)
 
   // Modal "Alat Dipinjam" per ruangan: saring lalu kelompokkan dengan pola yang sama.
@@ -930,7 +974,7 @@ function MonitoringCssd() {
                 { key: "cleaning", label: "Cleaning & Disinfection", count: cleaningCount },
                 { key: "packaging", label: "Inspection & Packaging", count: packagingCount },
                 { key: "sterilization", label: "Sterilization", count: sterilizationCount },
-                { key: "distribusi", label: "Distribution & Tracking", count: distribusiCount },
+                { key: "distribusi", label: "Distribution & Tracking", count: distribusiBadge },
               ] as { key: MonitoringTab; label: string; count: number }[]
             ).map((t) => {
               const active = activeTab === t.key
@@ -1002,11 +1046,26 @@ function MonitoringCssd() {
           </form>
         </div>
 
-        {loading || incomingLoading || returnedLoading || cleaningLoading ? (
+        {/* Grup "Siap Distribusi" (digudang) — selalu di atas, tidak dipaginasi. */}
+        {activeTab === "distribusi" && page === 1 && readyDistributeFiltered.length > 0 && (
+          <div className="p-4 pb-0">
+            <DistributeReady
+              items={readyDistributeFiltered}
+              onChanged={() => {
+                dispatch(fetchReadyToDistribute())
+                refreshMonitoring()
+                dispatch(invalidateOrders())
+              }}
+            />
+          </div>
+        )}
+
+        {loading || incomingLoading || returnedLoading || cleaningLoading || sterilizePipelineLoading || distributeLoading ? (
           <div className="py-16 text-center text-sm text-gray-400">Memuat data...</div>
-        ) : activeCount === 0 ? (
+        ) : activeCount === 0 &&
+          !(activeTab === "distribusi" && readyDistributeFiltered.length > 0) ? (
           <div className="py-16 text-center text-sm text-gray-400">
-            {searchQuery && activeTab !== "sterilization"
+            {searchQuery
               ? "Tidak ada order yang cocok dengan pencarian."
               : activeTab === "masuk"
                 ? "Belum ada order masuk."
@@ -1015,7 +1074,7 @@ function MonitoringCssd() {
                   : activeTab === "packaging"
                     ? "Belum ada order pada tahap inspection & packaging."
                     : activeTab === "sterilization"
-                      ? "Tahap sterilization akan tersedia berikutnya."
+                      ? "Belum ada order siap disterilkan."
                       : "Belum ada order yang terdistribusi."}
           </div>
         ) : (
@@ -1048,6 +1107,17 @@ function MonitoringCssd() {
                 items={pagedPackaging}
                 onChanged={() => {
                   dispatch(fetchCleaning())
+                  dispatch(fetchSterilizePipeline())
+                  dispatch(invalidateOrders())
+                }}
+              />
+            )}
+
+            {activeTab === "sterilization" && (
+              <SterilizationTab
+                items={pagedSterilization}
+                onChanged={() => {
+                  dispatch(fetchSterilizePipeline())
                   dispatch(invalidateOrders())
                 }}
               />
@@ -1568,6 +1638,15 @@ function MonitoringCssd() {
                 value={`${formatDate(historyOrder.order_date)} → ${formatDate(historyOrder.return_plan_date)}`}
               />
             </div>
+
+            {/* Tautan RM pasien (traceability loop) — bila alat sempat didistribusikan ke pasien */}
+            {(historyOrder.medical_record_no || historyOrder.patient_name) && (
+              <div className="grid grid-cols-1 gap-4 rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 sm:grid-cols-3">
+                <DetailField label="No. RM Pasien" value={historyOrder.medical_record_no} />
+                <DetailField label="Nama Pasien" value={historyOrder.patient_name} />
+                <DetailField label="Diterima" value={historyOrder.distributed_to} />
+              </div>
+            )}
 
             {/* Timeline tracking: dibuat → di-ACC → dipindah antar ruangan → dikembalikan */}
             <OrderTimeline events={historyOrder.timeline} />

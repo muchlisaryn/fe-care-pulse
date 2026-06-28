@@ -17,6 +17,8 @@ import {
   Activity,
   Monitor,
   Droplets,
+  Warehouse,
+  WashingMachine,
   ChevronRight,
   X,
   Circle,
@@ -40,6 +42,8 @@ const ICON_MAP: Record<string, LucideIcon> = {
   activity: Activity,
   monitor: Monitor,
   droplets: Droplets,
+  warehouse: Warehouse,
+  "washing-machine": WashingMachine,
 }
 
 function getIcon(name: string | null): LucideIcon {

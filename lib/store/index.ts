@@ -12,6 +12,7 @@ import orderTransferReducer from "./slices/orderTransferSlice"
 import distributionReducer from "./slices/distributionSlice"
 import sterilizationReducer from "./slices/sterilizationSlice"
 import bmhpReducer from "./slices/bmhpSlice"
+import washerMachineReducer from "./slices/washerMachineSlice"
 import notifReducer from "./slices/notifSlice"
 import monitoringReducer from "./slices/monitoringSlice"
 import icd10Reducer from "./slices/icd10Slice"
@@ -19,6 +20,9 @@ import categoriCPReducer from "./slices/categoriClinicalPathwaySlice"
 import templateCPReducer from "./slices/templateClinicalPathwaySlice"
 import asesmenCPReducer from "./slices/asesmenClinicalPathwaySlice"
 import cleaningReducer from "./slices/cleaningSlice"
+import sterilizePipelineReducer from "./slices/sterilizePipelineSlice"
+import storageReducer from "./slices/storageSlice"
+import distributeReducer from "./slices/distributeSlice"
 
 export const store = configureStore({
   reducer: {
@@ -35,9 +39,13 @@ export const store = configureStore({
     distributions: distributionReducer,
     sterilizations: sterilizationReducer,
     bmhps: bmhpReducer,
+    washerMachines: washerMachineReducer,
     notif: notifReducer,
     monitoring: monitoringReducer,
     cleaning: cleaningReducer,
+    sterilizePipeline: sterilizePipelineReducer,
+    storage: storageReducer,
+    distribute: distributeReducer,
     icd10: icd10Reducer,
     categoriCP: categoriCPReducer,
     templateCP: templateCPReducer,

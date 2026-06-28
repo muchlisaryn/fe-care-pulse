@@ -1,48 +1,49 @@
 "use client"
 
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import Link from "next/link"
 import { useAppDispatch, useAppSelector } from "@/lib/store/hooks"
 import { setCredentials } from "@/lib/store/slices/authSlice"
 import { loadAuth } from "@/lib/auth"
 import api from "@/lib/axios"
 
-// Instrumen yang sedang dipinjam (qty digabung backend) + nama ruangannya.
-type RoomInstrument = {
-  order_code: string
-  code_transaction: string | null
-  borrowed_by: string | null
-  order_date: string | null
-  order_time: string | null
-  return_plan_date: string | null
-  source: "satuan" | "paket"
-  package_name: string | null
-  instrument: { id: number; code: string; name: string }
-  qty: number
-  room_name: string
-}
+type BoardLine = { jenis: "Paket" | "Satuan"; name: string; qty: number }
 
-type MonitoredRoom = {
-  id: number
-  code: string
-  name: string
-  borrowed_count: number
-  instruments: Omit<RoomInstrument, "room_name">[]
-}
-
-// Grup tampilan per order → paket (per nama) lalu satuan.
-type OrderGroup = {
+// Order aktif lintas tahap pipeline (dari /master/monitoring/board).
+type BoardOrder = {
   order_code: string
   no_transaction: string | null
   borrowed_by: string | null
   order_date: string | null
   order_time: string | null
-  room_name: string
-  paketGroups: { name: string; instruments: RoomInstrument[]; qty: number }[]
-  satuan: RoomInstrument[]
+  room_name: string | null
+  status: string
+  lines: BoardLine[]
 }
 
 const REFRESH_MS = 20000 // auto-refresh tiap 20 detik
+
+// Label & warna badge per tahap pipeline (untuk papan gelap).
+const STATUS_LABEL: Record<string, string> = {
+  diajukan: "Diajukan",
+  pencucian: "Pencucian",
+  pengemasan: "Packaging",
+  selesai: "Siap Steril",
+  sterilisasi: "Sterilisasi",
+  steril: "Steril",
+  digudang: "Di Gudang",
+  dipinjam: "Terdistribusi",
+}
+const STATUS_COLOR: Record<string, string> = {
+  diajukan: "bg-amber-300 text-amber-950",
+  pencucian: "bg-yellow-300 text-yellow-950",
+  pengemasan: "bg-violet-300 text-violet-950",
+  selesai: "bg-indigo-300 text-indigo-950",
+  sterilisasi: "bg-sky-300 text-sky-950",
+  steril: "bg-emerald-300 text-emerald-950",
+  digudang: "bg-teal-300 text-teal-950",
+  dipinjam: "bg-blue-200 text-blue-950",
+}
 
 function formatDate(value: string | null) {
   if (!value) return "—"
@@ -51,58 +52,20 @@ function formatDate(value: string | null) {
   return d.toLocaleDateString("id-ID", { day: "2-digit", month: "short", year: "numeric" })
 }
 
-// Kelompokkan instrumen: per order → paket (per nama) lalu satuan.
-function buildOrderGroups(items: RoomInstrument[]): OrderGroup[] {
-  const map = new Map<string, RoomInstrument[]>()
-  for (const it of items) {
-    const arr = map.get(it.order_code) ?? []
-    arr.push(it)
-    map.set(it.order_code, arr)
-  }
-  return [...map.entries()].map(([order_code, rows]) => {
-    const first = rows[0]
-    const paket = new Map<string, RoomInstrument[]>()
-    const satuan: RoomInstrument[] = []
-    for (const r of rows) {
-      if (r.source === "paket") {
-        const name = r.package_name ?? "Paket"
-        const a = paket.get(name) ?? []
-        a.push(r)
-        paket.set(name, a)
-      } else {
-        satuan.push(r)
-      }
-    }
-    return {
-      order_code,
-      no_transaction: first.code_transaction,
-      borrowed_by: first.borrowed_by,
-      order_date: first.order_date,
-      order_time: first.order_time,
-      room_name: first.room_name,
-      paketGroups: [...paket.entries()].map(([name, instruments]) => ({
-        name,
-        instruments,
-        qty: instruments.reduce((s, i) => s + i.qty, 0),
-      })),
-      satuan,
-    }
-  })
-}
-
-const GRID = "grid grid-cols-[150px_160px_150px_160px_110px_1fr_90px] items-start gap-3 leading-tight"
+const GRID =
+  "grid grid-cols-[140px_150px_140px_130px_130px_84px_1fr_70px] items-start gap-3 leading-tight"
 
 export default function MonitorAllPage() {
   const dispatch = useAppDispatch()
   const token = useAppSelector((s) => s.auth.token)
 
-  const [instruments, setInstruments] = useState<RoomInstrument[]>([])
+  const [orders, setOrders] = useState<BoardOrder[]>([])
   const [loaded, setLoaded] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [now, setNow] = useState<Date | null>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
 
-  // Hidrasi token dari localStorage (halaman di luar AppLayout, tak ikut rehydrate).
+  // Hidrasi token dari localStorage (halaman di luar AppLayout).
   useEffect(() => {
     const stored = loadAuth()
     if (stored?.token) {
@@ -127,30 +90,16 @@ export default function MonitorAllPage() {
     return () => clearInterval(t)
   }, [])
 
-  // Ambil semua ruangan + auto-refresh; ratakan instrumen lintas ruangan.
+  // Ambil order aktif lintas tahap + auto-refresh.
   useEffect(() => {
     if (!token) return
     let active = true
 
     async function load() {
       try {
-        const flat: RoomInstrument[] = []
-        let page = 1
-        let last = 1
-        do {
-          const res = await api.get("/master/monitoring/rooms", { params: { page } })
-          const p = res.data.data
-          for (const room of p.data as MonitoredRoom[]) {
-            for (const it of room.instruments) {
-              flat.push({ ...it, room_name: room.name })
-            }
-          }
-          last = p.last_page
-          page++
-        } while (page <= last)
-
+        const res = await api.get("/master/monitoring/board")
         if (active) {
-          setInstruments(flat)
+          setOrders((res.data.data as BoardOrder[]) ?? [])
           setError(null)
         }
       } catch {
@@ -168,8 +117,6 @@ export default function MonitorAllPage() {
     }
   }, [token])
 
-  const orderGroups = useMemo(() => buildOrderGroups(instruments), [instruments])
-
   // Auto-scroll perlahan bila baris melebihi layar (loop atas-bawah).
   useEffect(() => {
     const el = scrollRef.current
@@ -182,10 +129,14 @@ export default function MonitorAllPage() {
       else if (el.scrollTop <= 0) dir = 1
     }, 40)
     return () => clearInterval(t)
-  }, [orderGroups])
+  }, [orders])
 
-  const jam = now ? now.toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit", second: "2-digit" }) : ""
-  const tanggal = now ? now.toLocaleDateString("id-ID", { weekday: "long", day: "2-digit", month: "long", year: "numeric" }) : ""
+  const jam = now
+    ? now.toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit", second: "2-digit" })
+    : ""
+  const tanggal = now
+    ? now.toLocaleDateString("id-ID", { weekday: "long", day: "2-digit", month: "long", year: "numeric" })
+    : ""
 
   return (
     <div className="fixed inset-0 flex flex-col bg-[#0a5bd6] px-6 py-5 text-white">
@@ -193,7 +144,7 @@ export default function MonitorAllPage() {
       <div className="flex items-end justify-between border-b-2 border-white/30 pb-3">
         <div className="min-w-0">
           <h1 className="truncate text-4xl font-extrabold tracking-tight drop-shadow">
-            CSSD MONITOR — Semua Ruangan
+            CSSD MONITOR — Status Proses
           </h1>
           <Link href="/monitor" className="mt-1 inline-block text-sm text-white/80 underline hover:text-white">
             ← Pilih ruangan
@@ -211,6 +162,7 @@ export default function MonitorAllPage() {
         <div>Reservation</div>
         <div>Peminjam</div>
         <div>Location</div>
+        <div>Status</div>
         <div>Jenis</div>
         <div>Instrument</div>
         <div className="text-right">Qty</div>
@@ -227,34 +179,25 @@ export default function MonitorAllPage() {
           </div>
         ) : error ? (
           <div className="flex h-full items-center justify-center text-2xl text-red-100">{error}</div>
-        ) : orderGroups.length === 0 ? (
+        ) : orders.length === 0 ? (
           <div className="flex h-full items-center justify-center text-2xl text-white/70">
             Tidak ada order aktif saat ini.
           </div>
         ) : (
-          orderGroups.map((g, gi) => {
-            // Satu baris per paket (tampilkan nama paket) dan per instrumen satuan
-            // (tampilkan nama instrumen) — tanpa rincian isi paket / kode.
-            const lines: { jenis: "Paket" | "Satuan"; name: string; qty: number }[] = []
-            for (const pk of g.paketGroups) {
-              lines.push({ jenis: "Paket", name: pk.name, qty: pk.qty })
-            }
-            for (const it of g.satuan) {
-              lines.push({ jenis: "Satuan", name: it.instrument.name, qty: it.qty })
-            }
-
-            return (
-              <div
-                key={g.order_code}
-                className={`border-t-2 border-white/20 ${gi % 2 === 1 ? "bg-white/[0.05]" : ""}`}
-              >
-                {lines.map((ln, li) => (
+          orders.map((g, gi) => (
+            <div
+              key={g.order_code}
+              className={`border-t-2 border-white/20 ${gi % 2 === 1 ? "bg-white/[0.05]" : ""}`}
+            >
+              {(g.lines.length ? g.lines : [{ jenis: "Satuan" as const, name: "—", qty: 0 }]).map(
+                (ln, li) => (
                   <div key={li} className={`${GRID} ${li === 0 ? "py-0.5 text-lg" : "py-0"}`}>
-                    {/* Date|Time, Reservation, Peminjam, Location hanya di baris pertama order */}
+                    {/* Date|Time, Reservation, Peminjam, Location, Status hanya di baris pertama */}
                     <div className="font-mono tabular-nums text-white/95">
                       {li === 0 ? (
                         <>
-                          {formatDate(g.order_date)} <span className="text-white/60">|</span> {g.order_time ?? "—"}
+                          {formatDate(g.order_date)} <span className="text-white/60">|</span>{" "}
+                          {g.order_time ?? "—"}
                         </>
                       ) : null}
                     </div>
@@ -262,21 +205,31 @@ export default function MonitorAllPage() {
                       {li === 0 ? g.no_transaction || g.order_code : null}
                     </div>
                     <div className="truncate text-white/90">{li === 0 ? g.borrowed_by ?? "—" : null}</div>
-                    <div className="truncate text-white/90">{li === 0 ? g.room_name : null}</div>
-                    {/* Jenis: Paket / Satuan */}
+                    <div className="truncate text-white/90">{li === 0 ? g.room_name ?? "—" : null}</div>
+                    <div>
+                      {li === 0 ? (
+                        <span
+                          className={
+                            "rounded px-1.5 py-0.5 text-xs font-bold uppercase " +
+                            (STATUS_COLOR[g.status] ?? "bg-white/20 text-white")
+                          }
+                        >
+                          {STATUS_LABEL[g.status] ?? g.status}
+                        </span>
+                      ) : null}
+                    </div>
                     <div>
                       <span className="rounded bg-white/15 px-1.5 py-0.5 text-xs font-bold uppercase">
                         {ln.jenis}
                       </span>
                     </div>
-                    {/* Instrument: hanya nama paket / nama instrumen */}
                     <div className="truncate font-semibold uppercase">{ln.name}</div>
                     <div className="text-right text-lg font-bold tabular-nums">{ln.qty}</div>
                   </div>
-                ))}
-              </div>
-            )
-          })
+                )
+              )}
+            </div>
+          ))
         )}
       </div>
     </div>

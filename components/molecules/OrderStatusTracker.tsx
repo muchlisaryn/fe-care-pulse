@@ -1,4 +1,16 @@
-import { Check, Clock, Inbox, Droplets, Package, ShieldCheck, Truck, Undo2, X } from "lucide-react"
+import {
+  Check,
+  Clock,
+  Inbox,
+  Droplets,
+  Package,
+  ShieldCheck,
+  FlaskConical,
+  Warehouse,
+  Truck,
+  Undo2,
+  X,
+} from "lucide-react"
 import type { LucideIcon } from "lucide-react"
 import type { OrderStatus } from "@/lib/store/slices/orderSlice"
 
@@ -35,11 +47,30 @@ const STATUS_STYLES: Record<OrderStatus, StatusStyle> = {
     pulse: true,
   },
   selesai: {
-    label: "Tahap Steril",
+    label: "Siap Disterilkan",
     icon: ShieldCheck,
     className: "bg-indigo-50 text-indigo-700 ring-1 ring-indigo-200",
     iconClassName: "text-indigo-500",
     pulse: true,
+  },
+  sterilisasi: {
+    label: "Sedang Disterilkan",
+    icon: FlaskConical,
+    className: "bg-sky-50 text-sky-700 ring-1 ring-sky-200",
+    iconClassName: "text-sky-500",
+    pulse: true,
+  },
+  steril: {
+    label: "Steril / Siap Rilis",
+    icon: ShieldCheck,
+    className: "bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200",
+    iconClassName: "text-emerald-500",
+  },
+  digudang: {
+    label: "Di Gudang Steril",
+    icon: Warehouse,
+    className: "bg-teal-50 text-teal-700 ring-1 ring-teal-200",
+    iconClassName: "text-teal-500",
   },
   dipinjam: {
     label: "Distribusi",
@@ -61,9 +92,16 @@ const STATUS_STYLES: Record<OrderStatus, StatusStyle> = {
   },
 }
 
+const FALLBACK_STYLE: StatusStyle = {
+  label: "—",
+  icon: Clock,
+  className: "bg-gray-50 text-gray-600 ring-1 ring-gray-200",
+  iconClassName: "text-gray-400",
+}
+
 /** Badge status order yang menonjol: warna + ikon khas per tahap pipeline CSSD. */
 export function OrderStatusBadge({ status }: { status: OrderStatus }) {
-  const s = STATUS_STYLES[status]
+  const s = STATUS_STYLES[status] ?? { ...FALLBACK_STYLE, label: status }
   const Icon = s.icon
   return (
     <span
@@ -105,7 +143,10 @@ function activeStageIndex(status: OrderStatus): number {
     case "pengemasan":
       return 2 // selesai cuci, sedang packaging
     case "selesai":
-      return 3 // selesai packaging, tahap steril
+    case "sterilisasi":
+    case "steril":
+    case "digudang":
+      return 3 // tahap steril / gudang steril
     case "dipinjam":
     case "dikembalikan":
       return 4 // sudah terdistribusi

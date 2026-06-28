@@ -1,16 +1,22 @@
 import { createAsyncThunk, createSlice } from "@reduxjs/toolkit"
 import api from "@/lib/axios"
 
-export type WashingStatus = "dalam_proses" | "selesai"
+export type WashingStatus = "dalam_proses" | "selesai" | "gagal"
 
 export type WashingRecord = {
   id: number
+  washer_machine_id: number | null
+  washer_machine: { id: number; code: string; name: string } | null
   machine_no: string | null
   operator: string | null
   temperature: string | null
   washed_at: string | null
+  duration_minutes: number | null
   detergent_type: string | null
   status: WashingStatus
+  alert: boolean
+  alert_message: string | null
+  failure_reason: string | null
   completed_at: string | null
 }
 

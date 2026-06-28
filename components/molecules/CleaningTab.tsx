@@ -1,11 +1,20 @@
 "use client"
 
 import { useState } from "react"
-import { Droplets, ChevronRight, Package, CheckCircle2 } from "lucide-react"
+import {
+  Droplets,
+  ChevronRight,
+  Package,
+  CheckCircle2,
+  ScanLine,
+  AlertTriangle,
+  XCircle,
+} from "lucide-react"
 import { Input } from "@/components/atoms/Input"
 import { Button } from "@/components/atoms/Button"
 import { Badge } from "@/components/atoms/Badge"
 import { Label } from "@/components/atoms/Label"
+import { Textarea } from "@/components/atoms/Textarea"
 import { Modal } from "@/components/molecules/Modal"
 import api from "@/lib/axios"
 import { useAppSelector } from "@/lib/store/hooks"
@@ -45,8 +54,36 @@ export function isWashingFilled(order: CleaningOrder): boolean {
   const w = order.washing
   return !!(
     w &&
-    (w.machine_no || w.operator || w.temperature || w.washed_at || w.detergent_type)
+    (w.machine_no ||
+      w.operator ||
+      w.temperature ||
+      w.washed_at ||
+      w.detergent_type ||
+      w.duration_minutes ||
+      w.washer_machine_id)
   )
+}
+
+// Hasil scan barcode mesin washer (master washer_machines).
+type ScannedMachine = {
+  id: number
+  code: string
+  name: string
+  min_temperature: string | null
+  max_temperature: string | null
+  min_duration_minutes: number | null
+  max_duration_minutes: number | null
+}
+
+function rangeText(
+  min: string | number | null,
+  max: string | number | null,
+  suffix: string
+): string | null {
+  if (min === null && max === null) return null
+  const lo = min === null ? "?" : Number(min)
+  const hi = max === null ? "?" : Number(max)
+  return `${lo}–${hi}${suffix}`
 }
 
 /**
@@ -75,6 +112,19 @@ export function CleaningTab({
   const [detergent, setDetergent] = useState("")
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // Scan barcode mesin washer + mesin yang ter-resolve (beserta ambang).
+  const [machineCode, setMachineCode] = useState("")
+  const [washerMachineId, setWasherMachineId] = useState<number | null>(null)
+  const [machineInfo, setMachineInfo] = useState<ScannedMachine | null>(null)
+  const [scanning, setScanning] = useState(false)
+  const [scanError, setScanError] = useState<string | null>(null)
+  const [duration, setDuration] = useState("")
+  // Notifikasi kegagalan suhu/waktu dari backend (parameter di luar ambang mesin).
+  const [alertMsg, setAlertMsg] = useState<string | null>(null)
+  // Mode "Tandai Gagal" (pencucian wajib diulang) + alasan.
+  const [failMode, setFailMode] = useState(false)
+  const [failReason, setFailReason] = useState("")
+  const [failing, setFailing] = useState(false)
   // Order yang sedang ditandai "Selesai" (pindah ke packaging) dari tombol kartu.
   const [completingId, setCompletingId] = useState<number | null>(null)
   // Konfirmasi penyelesaian cleaning: order target + waktu selesai (datetime-local).
@@ -85,35 +135,116 @@ export function CleaningTab({
   function openWashing(order: CleaningOrder) {
     setActive(order)
     setError(null)
+    setScanError(null)
+    setFailMode(false)
+    setFailReason("")
     const w = order.washing
     setMachineNo(w?.machine_no ?? "")
     // Auto-isi dengan operator tersimpan; bila kosong pakai user yang login.
     setOperator(w?.operator || currentUser)
     setTemperature(w?.temperature ?? "")
-    setWashedAt(toLocalInput(w?.washed_at ?? null))
+    // Waktu mulai cuci: pakai yang tersimpan, atau otomatis jam sekarang saat dibuka.
+    setWashedAt(toLocalInput(w?.washed_at ?? new Date().toISOString()))
     setDetergent(w?.detergent_type ?? "")
+    setDuration(w?.duration_minutes != null ? String(w.duration_minutes) : "")
+    setWasherMachineId(w?.washer_machine_id ?? null)
+    setMachineCode(w?.washer_machine?.code ?? "")
+    // Mesin tersimpan ditampilkan tanpa ambang (ambang lengkap hanya saat scan).
+    setMachineInfo(
+      w?.washer_machine
+        ? {
+            ...w.washer_machine,
+            min_temperature: null,
+            max_temperature: null,
+            min_duration_minutes: null,
+            max_duration_minutes: null,
+          }
+        : null
+    )
+    setAlertMsg(w?.alert ? w.alert_message : null)
   }
 
-  // Simpan catatan pencucian (tanpa menyelesaikan).
+  // Scan barcode mesin washer → resolve mesin + ambang parameternya.
+  async function scanMachine() {
+    if (!machineCode.trim() || scanning) return
+    setScanning(true)
+    setScanError(null)
+    try {
+      const res = await api.post("/master/washer-machines/scan", { code: machineCode.trim() })
+      const m = res.data.data as ScannedMachine
+      setMachineInfo(m)
+      setWasherMachineId(m.id)
+      setMachineNo(m.code)
+    } catch (err) {
+      const e = err as { response?: { data?: { message?: string } } }
+      setScanError(e.response?.data?.message ?? "Mesin washer tidak ditemukan.")
+      setMachineInfo(null)
+      setWasherMachineId(null)
+    } finally {
+      setScanning(false)
+    }
+  }
+
+  // Payload parameter pencucian bersama (dipakai Simpan & Tandai Gagal).
+  function washingPayload() {
+    return {
+      washer_machine_id: washerMachineId,
+      machine_no: machineNo.trim() || null,
+      operator: operator.trim() || null,
+      temperature: temperature.trim() || null,
+      washed_at: washedAt ? new Date(washedAt).toISOString() : null,
+      duration_minutes: duration.trim() ? Number(duration) : null,
+      detergent_type: detergent.trim() || null,
+    }
+  }
+
+  // Simpan catatan pencucian (tanpa menyelesaikan). Bila parameter di luar ambang
+  // mesin, backend menandai alert → modal tetap terbuka & notifikasi ditampilkan.
   async function saveWashing() {
     if (!active || saving) return
     setSaving(true)
     setError(null)
     try {
-      await api.put(`/master/cleaning/${active.id}/washing`, {
-        machine_no: machineNo.trim() || null,
-        operator: operator.trim() || null,
-        temperature: temperature.trim() || null,
-        washed_at: washedAt ? new Date(washedAt).toISOString() : null,
-        detergent_type: detergent.trim() || null,
-      })
-      setActive(null)
+      const res = await api.put(`/master/cleaning/${active.id}/washing`, washingPayload())
+      const w = res.data?.data?.washing as { alert?: boolean; alert_message?: string | null } | undefined
       onChanged()
+      if (w?.alert) {
+        setAlertMsg(w.alert_message ?? "Parameter pencucian di luar ambang mesin.")
+      } else {
+        setActive(null)
+      }
     } catch (err) {
       const e = err as { response?: { data?: { message?: string } } }
       setError(e.response?.data?.message ?? "Gagal menyimpan catatan pencucian.")
     } finally {
       setSaving(false)
+    }
+  }
+
+  // Tandai pencucian "Gagal" (wajib diulang) — order tetap di tahap pencucian.
+  async function failWashing() {
+    if (!active || failing) return
+    if (!failReason.trim()) {
+      setError("Isi alasan kegagalan terlebih dahulu.")
+      return
+    }
+    setFailing(true)
+    setError(null)
+    try {
+      await api.put(`/master/cleaning/${active.id}/washing`, {
+        ...washingPayload(),
+        fail: true,
+        failure_reason: failReason.trim(),
+      })
+      setActive(null)
+      setFailMode(false)
+      setFailReason("")
+      onChanged()
+    } catch (err) {
+      const e = err as { response?: { data?: { message?: string } } }
+      setError(e.response?.data?.message ?? "Gagal menandai pencucian gagal.")
+    } finally {
+      setFailing(false)
     }
   }
 
@@ -212,6 +343,82 @@ export function CleaningTab({
               />
             </div>
 
+            {alertMsg && (
+              <div className="flex items-start gap-2 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3">
+                <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-amber-500" />
+                <div>
+                  <p className="text-sm font-semibold text-amber-700">
+                    Notifikasi kegagalan suhu/waktu
+                  </p>
+                  <p className="text-xs text-amber-700/90">{alertMsg}</p>
+                  <p className="mt-1 text-xs text-amber-600">
+                    Pencucian belum bisa diselesaikan. Perbaiki parameter lalu Simpan ulang, atau
+                    Tandai Gagal.
+                  </p>
+                </div>
+              </div>
+            )}
+
+            {!washedActive && (
+              <div className="space-y-1.5">
+                <Label htmlFor="wash-scan">Scan Barcode Mesin Washer</Label>
+                <div className="flex gap-2">
+                  <div className="relative flex-1">
+                    <ScanLine className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 pointer-events-none" />
+                    <Input
+                      id="wash-scan"
+                      value={machineCode}
+                      onChange={(e) => setMachineCode(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          e.preventDefault()
+                          scanMachine()
+                        }
+                      }}
+                      placeholder="mis. WSH-001"
+                      className="pl-9 font-mono"
+                    />
+                  </div>
+                  <Button
+                    type="button"
+                    onClick={scanMachine}
+                    disabled={scanning || !machineCode.trim()}
+                    variant="outline"
+                    className="shrink-0"
+                  >
+                    {scanning ? "..." : "Scan"}
+                  </Button>
+                </div>
+                {scanError && <p className="text-xs text-red-600">{scanError}</p>}
+                {machineInfo && (
+                  <div className="flex flex-wrap items-center gap-2 rounded-lg border border-[#4ba69d]/30 bg-[#4ba69d]/5 px-3 py-2 text-xs">
+                    <Badge variant="info">{machineInfo.code}</Badge>
+                    <span className="font-medium text-gray-800">{machineInfo.name}</span>
+                    {rangeText(machineInfo.min_temperature, machineInfo.max_temperature, "°C") && (
+                      <span className="text-gray-500">
+                        Suhu{" "}
+                        {rangeText(machineInfo.min_temperature, machineInfo.max_temperature, "°C")}
+                      </span>
+                    )}
+                    {rangeText(
+                      machineInfo.min_duration_minutes,
+                      machineInfo.max_duration_minutes,
+                      " mnt"
+                    ) && (
+                      <span className="text-gray-500">
+                        Durasi{" "}
+                        {rangeText(
+                          machineInfo.min_duration_minutes,
+                          machineInfo.max_duration_minutes,
+                          " mnt"
+                        )}
+                      </span>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <div className="space-y-1.5">
                 <Label htmlFor="wash-machine">Nomor Mesin</Label>
@@ -219,7 +426,7 @@ export function CleaningTab({
                   id="wash-machine"
                   value={machineNo}
                   onChange={(e) => setMachineNo(e.target.value)}
-                  placeholder="mis. WD-01"
+                  placeholder="mis. WD-01 / WSH-001"
                   disabled={washedActive}
                 />
               </div>
@@ -236,12 +443,25 @@ export function CleaningTab({
                 />
               </div>
               <div className="space-y-1.5">
-                <Label htmlFor="wash-time">Waktu</Label>
+                <Label htmlFor="wash-time">Waktu Mulai Cuci</Label>
                 <Input
                   id="wash-time"
                   type="datetime-local"
                   value={washedAt}
                   onChange={(e) => setWashedAt(e.target.value)}
+                  disabled={washedActive}
+                />
+                <p className="text-xs text-gray-400">Terisi otomatis jam saat ini — bisa diubah.</p>
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="wash-duration">Durasi (menit)</Label>
+                <Input
+                  id="wash-duration"
+                  type="number"
+                  min={0}
+                  value={duration}
+                  onChange={(e) => setDuration(e.target.value)}
+                  placeholder="mis. 20"
                   disabled={washedActive}
                 />
               </div>
@@ -256,6 +476,49 @@ export function CleaningTab({
                 />
               </div>
             </div>
+
+            {!washedActive &&
+              (failMode ? (
+                <div className="space-y-2 rounded-lg border border-red-200 bg-red-50 px-4 py-3">
+                  <Label htmlFor="fail-reason" className="text-red-700">
+                    Alasan Kegagalan Pencucian
+                  </Label>
+                  <Textarea
+                    id="fail-reason"
+                    value={failReason}
+                    onChange={(e) => setFailReason(e.target.value)}
+                    placeholder="mis. Suhu tidak tercapai, indikator kotor masih tersisa"
+                  />
+                  <div className="flex justify-end gap-2">
+                    <Button
+                      variant="outline"
+                      onClick={() => {
+                        setFailMode(false)
+                        setFailReason("")
+                      }}
+                      disabled={failing}
+                    >
+                      Batal
+                    </Button>
+                    <Button
+                      onClick={failWashing}
+                      disabled={failing || !failReason.trim()}
+                      className="bg-red-600 hover:bg-red-700 text-white"
+                    >
+                      {failing ? "Memproses..." : "Konfirmasi Gagal"}
+                    </Button>
+                  </div>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setFailMode(true)}
+                  className="flex items-center gap-1.5 text-xs font-medium text-red-600 hover:text-red-700"
+                >
+                  <XCircle className="h-4 w-4" />
+                  Tandai pencucian gagal (wajib diulang)
+                </button>
+              ))}
 
             {washedActive && (
               <div className="flex items-start gap-3 rounded-lg border border-dashed border-gray-300 bg-gray-50 px-4 py-3">
@@ -391,6 +654,12 @@ function CleaningOrderCard({
                   {order.code_transaction ?? order.code}
                 </span>
                 {washed && <Badge variant="success">Selesai Cuci</Badge>}
+                {!washed && order.washing?.status === "gagal" && (
+                  <Badge variant="danger">Gagal Cuci</Badge>
+                )}
+                {!washed && order.washing?.alert && (
+                  <Badge variant="warning">Cek Parameter</Badge>
+                )}
               </div>
               <div className="mt-1 flex flex-wrap gap-x-4 gap-y-0.5 text-xs text-gray-500">
                 <span>Ruangan: {order.room?.name ?? "—"}</span>

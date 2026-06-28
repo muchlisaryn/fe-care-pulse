@@ -1,13 +1,32 @@
 "use client"
 
 import { useState } from "react"
-import Link from "next/link"
-import { Package, Boxes, Loader2, AlertTriangle, CheckCircle2, ShieldCheck } from "lucide-react"
+import {
+  Package,
+  Boxes,
+  AlertTriangle,
+  CheckCircle2,
+  ScanLine,
+  Check,
+  Circle,
+  Printer,
+} from "lucide-react"
 import { Button } from "@/components/atoms/Button"
 import { Badge } from "@/components/atoms/Badge"
+import { Input } from "@/components/atoms/Input"
+import { Barcode } from "@/components/atoms/Barcode"
 import { Modal } from "@/components/molecules/Modal"
+import { useAppSelector } from "@/lib/store/hooks"
 import api from "@/lib/axios"
 import type { CleaningOrder } from "@/lib/store/slices/cleaningSlice"
+
+// Label sterilisasi yang dicetak saat packaging selesai.
+type SterilLabel = {
+  code: string
+  batch: string | null
+  setName: string
+  packer: string
+}
 
 function formatDateTime(value: string | null) {
   if (!value) return "—"
@@ -27,7 +46,6 @@ function errMsg(e: unknown): string {
   return x.response?.data?.message ?? "Terjadi kesalahan."
 }
 
-// Kebutuhan unit per instrumen pada tahap packaging.
 type PackagingReq = {
   key: string
   instrument: { id: number; code: string | null; name: string }
@@ -51,9 +69,10 @@ type PackagingData = {
 }
 
 /**
- * Konten tab "Inspection & Packaging": daftar order tahap pengemasan. Tiap order
- * bisa diproses → generate unit fisik otomatis dari stok tersedia (parsial bila
- * kurang), bangkitkan nomor batch (code_transaction), lalu lanjut → siap steril.
+ * Tab "Inspection & Packaging": checklist digital komponen set. Petugas memindai
+ * barcode tiap unit instrumen untuk mencentangnya satu per satu (verifikasi
+ * komponen ada). "Isi Otomatis" tersedia sebagai jalan pintas. Setelah lengkap →
+ * Selesaikan (bangkitkan nomor batch, order → siap disterilkan).
  */
 export function PackagingTab({
   items,
@@ -65,27 +84,27 @@ export function PackagingTab({
   const [active, setActive] = useState<CleaningOrder | null>(null)
   const [data, setData] = useState<PackagingData | null>(null)
   const [loading, setLoading] = useState(false)
-  const [generating, setGenerating] = useState(false)
-  const [saving, setSaving] = useState(false)
-  const [completing, setCompleting] = useState(false)
+  const [autoFilling, setAutoFilling] = useState(false)
+  const [finishing, setFinishing] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  // Fase alur: idle → (Generate) staged → (Simpan) saved → (Lanjut). "staged" =
-  // hasil pratinjau yang BELUM disimpan.
-  const [phase, setPhase] = useState<"idle" | "staged" | "saved">("idle")
-  // Modal hasil akhir "Siap Disterilkan" (setelah Lanjut).
-  const [ready, setReady] = useState<{ code: string; batch: string | null } | null>(null)
+  const [scanCode, setScanCode] = useState("")
+  const [scanning, setScanning] = useState(false)
+  const [checking, setChecking] = useState<string | null>(null)
+  const [scanMsg, setScanMsg] = useState<{ type: "ok" | "err"; text: string } | null>(null)
+  const [ready, setReady] = useState<SterilLabel | null>(null)
+  // ID petugas pengemas = user yang login.
+  const packer = useAppSelector((s) => s.auth.name ?? s.auth.username ?? "—")
 
   async function openPackaging(order: CleaningOrder) {
     setActive(order)
     setData(null)
     setError(null)
-    setPhase("idle")
+    setScanCode("")
+    setScanMsg(null)
     setLoading(true)
     try {
       const res = await api.get(`/master/orders/${order.id}/packaging`)
       setData(res.data.data)
-      // Sudah pernah disimpan bila nomor batch sudah ada.
-      setPhase(res.data.data.order.code_transaction ? "saved" : "idle")
     } catch (e) {
       setError(errMsg(e))
     } finally {
@@ -93,67 +112,145 @@ export function PackagingTab({
     }
   }
 
-  // Generate = PRATINJAU alokasi unit (belum disimpan). Tidak membuat nomor batch.
-  async function handleGenerate() {
-    if (!active || generating) return
-    setGenerating(true)
-    setError(null)
+  // Scan barcode unit → centang komponen set.
+  async function handleScan() {
+    if (!active || scanning || !scanCode.trim()) return
+    setScanning(true)
+    setScanMsg(null)
     try {
-      const res = await api.post(`/master/orders/${active.id}/pack`, { preview: true })
+      const res = await api.post(`/master/orders/${active.id}/pack/scan`, { code: scanCode.trim() })
       setData(res.data.data)
-      setPhase("staged")
+      setScanMsg({ type: "ok", text: res.data.message ?? "Unit tercentang." })
+      setScanCode("")
     } catch (e) {
-      setError(errMsg(e))
+      setScanMsg({ type: "err", text: errMsg(e) })
     } finally {
-      setGenerating(false)
+      setScanning(false)
     }
   }
 
-  // Simpan = commit alokasi + bangkitkan nomor batch.
-  async function handleSave() {
-    if (!active || saving) return
-    setSaving(true)
+  // Centang manual satu komponen (alokasi 1 unit tersedia, tanpa scan barcode).
+  async function handleCheck(reqKey: string) {
+    if (!active || checking) return
+    setChecking(reqKey)
+    setScanMsg(null)
+    try {
+      const res = await api.post(`/master/orders/${active.id}/pack/check`, { key: reqKey })
+      setData(res.data.data)
+      setScanMsg({ type: "ok", text: res.data.message ?? "Komponen tercentang." })
+    } catch (e) {
+      setScanMsg({ type: "err", text: errMsg(e) })
+    } finally {
+      setChecking(null)
+    }
+  }
+
+  // Isi otomatis sisa komponen dari stok (jalan pintas, lewati inspeksi manual).
+  async function handleAutoFill() {
+    if (!active || autoFilling) return
+    setAutoFilling(true)
     setError(null)
     try {
       const res = await api.post(`/master/orders/${active.id}/pack`)
       setData(res.data.data)
-      setPhase("saved")
     } catch (e) {
       setError(errMsg(e))
     } finally {
-      setSaving(false)
+      setAutoFilling(false)
     }
   }
 
-  // Lanjut: order → selesai (siap disterilkan), tampilkan modal konfirmasi.
-  async function handleLanjut() {
-    if (!active || completing) return
-    setCompleting(true)
+  // Nama set dari komponen paket (gabung unik), atau "Instrumen Satuan".
+  function setNameFrom(reqs: PackagingReq[]): string {
+    const names = Array.from(
+      new Set(reqs.filter((r) => r.source === "paket" && r.package_name).map((r) => r.package_name as string)),
+    )
+    return names.length ? names.join(", ") : "Instrumen Satuan"
+  }
+
+  // Selesaikan packaging → bangkitkan nomor batch & order siap disterilkan.
+  async function handleFinish() {
+    if (!active || finishing) return
+    setFinishing(true)
     setError(null)
     try {
-      await api.post(`/master/orders/${active.id}/packaging-complete`)
+      const res = await api.post(`/master/orders/${active.id}/packaging-complete`)
+      const batch = res.data?.data?.code_transaction ?? data?.order.code_transaction ?? active.code_transaction ?? null
       setReady({
         code: active.code,
-        batch: data?.order.code_transaction ?? active.code_transaction ?? null,
+        batch,
+        setName: setNameFrom(data?.requirements ?? []),
+        packer,
       })
       setActive(null)
       setData(null)
-      onChanged()
+      // Catatan: refetch (onChanged) DITUNDA sampai modal label ditutup. Bila
+      // refetch di sini & ini order packaging terakhir, tab jadi kosong →
+      // PackagingTab unmount → modal "Cetak Label" ikut hilang.
     } catch (e) {
       setError(errMsg(e))
     } finally {
-      setCompleting(false)
+      setFinishing(false)
     }
+  }
+
+  // Tutup modal label → baru segarkan daftar (order yang selesai keluar dari tab).
+  function closeReady() {
+    setReady(null)
+    onChanged()
+  }
+
+  // Cetak Label Barcode Sterilisasi (nama set, batch, ID pengemas + barcode Code128).
+  function printLabel() {
+    if (!ready?.batch) return
+    const svg = document.getElementById("steril-label-barcode")
+    const barcodeSvg = svg ? new XMLSerializer().serializeToString(svg) : ""
+    const w = window.open("", "_blank", "width=460,height=360")
+    if (!w) return
+    w.document.write(`
+      <html>
+        <head>
+          <title>Label Sterilisasi ${ready.batch}</title>
+          <style>
+            body { margin: 0; font-family: Arial, Helvetica, sans-serif; }
+            .label { width: 360px; margin: 12px auto; border: 1px solid #000; padding: 12px; }
+            .head { text-align: center; font-weight: 700; font-size: 13px; letter-spacing: 1px; border-bottom: 1px dashed #999; padding-bottom: 6px; }
+            .set { text-align: center; font-size: 16px; font-weight: 700; margin: 8px 0; }
+            .bc { text-align: center; margin: 6px 0; }
+            .batch { text-align: center; font-family: 'Courier New', monospace; font-weight: 700; letter-spacing: 2px; font-size: 14px; }
+            table { width: 100%; font-size: 11px; margin-top: 8px; border-collapse: collapse; }
+            td { padding: 2px 0; }
+            td.k { color: #555; width: 42%; }
+            td.v { font-weight: 600; }
+            @media print { @page { margin: 6mm; } }
+          </style>
+        </head>
+        <body>
+          <div class="label">
+            <div class="head">LABEL STERILISASI CSSD</div>
+            <div class="set">${ready.setName}</div>
+            <div class="bc">${barcodeSvg}</div>
+            <div class="batch">${ready.batch}</div>
+            <table>
+              <tr><td class="k">No. Batch</td><td class="v">${ready.batch}</td></tr>
+              <tr><td class="k">ID Petugas Pengemas</td><td class="v">${ready.packer}</td></tr>
+              <tr><td class="k">Tgl Sterilisasi</td><td class="v">__________</td></tr>
+              <tr><td class="k">Tgl Kedaluwarsa</td><td class="v">__________</td></tr>
+            </table>
+          </div>
+        </body>
+      </html>
+    `)
+    w.document.close()
+    w.focus()
+    w.print()
   }
 
   const reqs = data?.requirements ?? []
   const totalNeeded = reqs.reduce((s, r) => s + r.needed_qty, 0)
-  const totalGenerated = reqs.reduce((s, r) => s + r.generated_qty, 0)
-  const shortage = Math.max(0, totalNeeded - totalGenerated)
-  const busy = loading || generating || saving || completing
-  // Generate/Generate Ulang: pratinjau alokasi (belum simpan). Nonaktif bila sudah
-  // tersimpan & tak ada kekurangan.
-  const canGenerate = !busy && (phase !== "saved" || shortage > 0)
+  const totalChecked = reqs.reduce((s, r) => s + r.generated_qty, 0)
+  const shortage = Math.max(0, totalNeeded - totalChecked)
+  const busy = loading || autoFilling || finishing || scanning || checking !== null
 
   return (
     <>
@@ -176,18 +273,10 @@ export function PackagingTab({
                       <span className="text-sm font-semibold text-gray-900">
                         {order.borrowed_by ?? "—"}
                       </span>
-                      {order.code_transaction ? (
-                        <span className="font-mono text-xs font-semibold text-violet-700 bg-violet-100 px-2 py-0.5 rounded">
-                          {order.code_transaction}
-                        </span>
-                      ) : (
-                        <span className="font-mono text-xs font-semibold text-[#075489] bg-[#075489]/8 px-2 py-0.5 rounded">
-                          {order.code}
-                        </span>
-                      )}
-                      <Badge variant={packed ? "info" : "warning"}>
-                        {packed ? "Sudah Di-generate" : "Belum Di-generate"}
-                      </Badge>
+                      <span className="font-mono text-xs font-semibold text-[#075489] bg-[#075489]/8 px-2 py-0.5 rounded">
+                        {order.code_transaction ?? order.code}
+                      </span>
+                      <Badge variant="warning">Perlu Inspeksi</Badge>
                     </div>
                     <div className="mt-1 flex flex-wrap gap-x-4 gap-y-0.5 text-xs text-gray-500">
                       <span>Ruangan: {order.room?.name ?? "—"}</span>
@@ -203,7 +292,7 @@ export function PackagingTab({
                   onClick={() => openPackaging(order)}
                   className="shrink-0 self-center rounded-md border border-violet-500 bg-violet-500 px-3 py-1.5 text-xs font-medium text-white hover:bg-violet-600"
                 >
-                  Proses Packaging
+                  Inspeksi & Kemas
                 </button>
               </div>
             </div>
@@ -211,27 +300,20 @@ export function PackagingTab({
         })}
       </div>
 
-      {/* Modal proses packaging: generate unit dari stok + nomor batch */}
+      {/* Modal checklist inspeksi & packaging */}
       <Modal
         open={active !== null}
-        onClose={completing ? () => {} : () => setActive(null)}
-        title={active ? `Packaging — ${active.code}` : "Packaging"}
+        onClose={finishing ? () => {} : () => setActive(null)}
+        title={active ? `Inspeksi & Packaging — ${active.code}` : "Inspeksi & Packaging"}
         size="lg"
         footer={
           <div className="flex w-full items-center justify-between gap-3">
             {error ? (
               <p className="text-sm text-red-600">{error}</p>
-            ) : phase === "staged" ? (
-              <span className="text-xs text-amber-600">
-                Pratinjau — klik <b>Simpan</b> untuk menyimpan alokasi.
-              </span>
-            ) : phase === "saved" ? (
-              <span className="text-xs text-gray-400">
-                Tersimpan. Klik Lanjut bila siap disterilkan.
-              </span>
             ) : (
               <span className="text-xs text-gray-400">
-                Klik Generate untuk mengalokasikan unit dari stok.
+                Centang {totalChecked}/{totalNeeded} komponen
+                {shortage > 0 ? ` · kurang ${shortage}` : ""}
               </span>
             )}
             <div className="flex shrink-0 gap-2">
@@ -239,177 +321,214 @@ export function PackagingTab({
                 Batal
               </Button>
               <Button
-                onClick={handleGenerate}
-                disabled={!canGenerate}
-                className="bg-[#4ba69d] hover:bg-[#4ba69d]/90 text-white"
+                onClick={handleAutoFill}
+                disabled={busy || shortage === 0}
+                variant="outline"
               >
-                {generating ? "Generate..." : phase === "idle" ? "Generate" : "Generate Ulang"}
+                {autoFilling ? "Mengisi..." : "Isi Otomatis"}
               </Button>
-              {phase === "staged" && (
-                <Button
-                  onClick={handleSave}
-                  disabled={busy}
-                  className="bg-violet-600 hover:bg-violet-700 text-white"
-                >
-                  {saving ? "Menyimpan..." : "Simpan"}
-                </Button>
-              )}
               <Button
-                onClick={handleLanjut}
-                disabled={phase !== "saved" || busy}
+                onClick={handleFinish}
+                disabled={busy || totalChecked === 0}
                 className="bg-[#075489] hover:bg-[#075489]/90 text-white"
               >
-                {completing ? "Memproses..." : "Lanjut"}
+                {finishing ? "Memproses..." : "Selesaikan"}
               </Button>
             </div>
           </div>
         }
       >
         {loading ? (
-          <div className="py-10 text-center text-sm text-gray-400">Memuat data packaging...</div>
+          <div className="py-10 text-center text-sm text-gray-400">Memuat checklist...</div>
         ) : data ? (
           <div className="space-y-4">
-            {/* Nomor batch (code_transaction) — dibuat saat Simpan */}
-            {data.order.code_transaction ? (
-              <div className="flex items-center justify-between gap-3 rounded-lg border border-violet-200 bg-violet-50 px-4 py-3">
-                <div>
-                  <p className="text-xs font-semibold uppercase tracking-wide text-violet-500">
-                    No. Batch / Kode Transaksi
-                  </p>
-                  <p className="font-mono text-lg font-bold text-violet-700">
-                    {data.order.code_transaction}
-                  </p>
+            {/* Scan barcode unit */}
+            <div className="space-y-1.5">
+              <div className="flex gap-2">
+                <div className="relative flex-1">
+                  <ScanLine className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 pointer-events-none" />
+                  <Input
+                    value={scanCode}
+                    onChange={(e) => setScanCode(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault()
+                        handleScan()
+                      }
+                    }}
+                    placeholder="Scan barcode unit instrumen (mis. GNE-002)..."
+                    className="pl-9 font-mono"
+                    autoFocus
+                  />
                 </div>
-                {phase === "staged" ? (
-                  <Badge variant="warning">Pratinjau</Badge>
-                ) : (
-                  <Package className="h-8 w-8 text-violet-300" />
-                )}
+                <Button
+                  type="button"
+                  onClick={handleScan}
+                  disabled={scanning || !scanCode.trim()}
+                  className="bg-[#4ba69d] hover:bg-[#4ba69d]/90 text-white"
+                >
+                  {scanning ? "..." : "Centang"}
+                </Button>
               </div>
-            ) : phase === "staged" ? (
-              <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
-                Pratinjau alokasi — nomor batch akan dibuat saat klik <b>Simpan</b>.
-              </div>
-            ) : (
-              <div className="rounded-lg border border-dashed border-gray-300 bg-gray-50 px-4 py-3 text-sm text-gray-500">
-                Belum di-generate. Klik Generate untuk pratinjau alokasi unit.
-              </div>
-            )}
+              {scanMsg && (
+                <p className={"text-xs " + (scanMsg.type === "ok" ? "text-green-600" : "text-red-600")}>
+                  {scanMsg.text}
+                </p>
+              )}
+            </div>
 
-            {/* Ringkasan + peringatan stok kurang */}
+            {/* Progress + nomor batch */}
             <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
               <span className="text-gray-600">
-                Ter-generate{" "}
+                Tercentang{" "}
                 <span className="font-semibold text-gray-900">
-                  {totalGenerated}/{totalNeeded}
+                  {totalChecked}/{totalNeeded}
                 </span>{" "}
-                unit
+                komponen
               </span>
               {shortage > 0 && (
                 <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-700">
                   <AlertTriangle className="h-3.5 w-3.5" />
-                  Stok kurang {shortage} unit — tetap bisa lanjut
+                  Kurang {shortage} — tetap bisa diselesaikan
+                </span>
+              )}
+              {data.order.code_transaction && (
+                <span className="inline-flex items-center gap-1 rounded-full bg-violet-50 px-2 py-0.5 text-xs font-semibold text-violet-700">
+                  <Package className="h-3.5 w-3.5" />
+                  {data.order.code_transaction}
                 </span>
               )}
             </div>
 
-            {/* Rincian kebutuhan per instrumen */}
-            <div className="overflow-hidden rounded-lg border border-gray-200">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-gray-100 bg-gray-50 text-xs font-semibold uppercase tracking-wide text-gray-400">
-                    <th className="py-2.5 px-3 text-left">Instrumen</th>
-                    <th className="py-2.5 px-3 text-center w-24">Dibutuhkan</th>
-                    <th className="py-2.5 px-3 text-center w-28">Ter-generate</th>
-                    <th className="py-2.5 px-3 text-center w-24">Tersedia</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-50">
-                  {reqs.map((r) => {
-                    const kurang = r.generated_qty < r.needed_qty
-                    return (
-                      <tr key={r.key}>
-                        <td className="py-2.5 px-3">
-                          <div className="flex items-center gap-2">
-                            <Badge variant={r.source === "paket" ? "info" : "default"}>
-                              {r.source === "paket" ? "Paket" : "Satuan"}
-                            </Badge>
-                            <span className="font-medium text-gray-800">{r.instrument.name}</span>
-                            {r.source === "paket" && r.package_name && (
-                              <span className="text-xs text-gray-400">· {r.package_name}</span>
-                            )}
-                          </div>
-                          {/* Kode unit (stock) yang ter-generate */}
-                          {(r.generated_units?.length ?? 0) > 0 && (
-                            <div className="mt-1.5 flex flex-wrap gap-1">
-                              {r.generated_units.map((u) => (
-                                <span
-                                  key={u.id}
-                                  className="font-mono text-[11px] font-semibold text-violet-700 bg-violet-100 px-1.5 py-0.5 rounded"
-                                >
-                                  {u.code ?? `#${u.id}`}
-                                </span>
-                              ))}
-                            </div>
+            {/* Checklist komponen set */}
+            <div className="space-y-2">
+              {reqs.map((r) => {
+                const complete = r.generated_qty >= r.needed_qty
+                const emptySlots = Math.max(0, r.needed_qty - r.generated_qty)
+                return (
+                  <div key={r.key} className="rounded-lg border border-gray-200 px-3 py-2.5">
+                    <div className="flex flex-wrap items-center gap-2">
+                      {complete ? (
+                        <CheckCircle2 className="h-4 w-4 shrink-0 text-green-500" />
+                      ) : (
+                        <Circle className="h-4 w-4 shrink-0 text-gray-300" />
+                      )}
+                      <Badge variant={r.source === "paket" ? "info" : "default"}>
+                        {r.source === "paket" ? "Paket" : "Satuan"}
+                      </Badge>
+                      <span className="font-medium text-gray-800">{r.instrument.name}</span>
+                      {r.source === "paket" && r.package_name && (
+                        <span className="text-xs text-gray-400">· {r.package_name}</span>
+                      )}
+                      <span
+                        className={
+                          "ml-auto text-xs font-semibold " +
+                          (complete ? "text-green-600" : "text-amber-600")
+                        }
+                      >
+                        {r.generated_qty}/{r.needed_qty}
+                      </span>
+                    </div>
+                    <div className="mt-2 flex flex-wrap gap-1.5">
+                      {r.generated_units.map((u) => (
+                        <span
+                          key={u.id}
+                          className="inline-flex items-center gap-1 rounded bg-green-50 px-1.5 py-0.5 font-mono text-[11px] font-semibold text-green-700"
+                        >
+                          <Check className="h-3 w-3" />
+                          {u.code ?? `#${u.id}`}
+                        </span>
+                      ))}
+                      {Array.from({ length: emptySlots }).map((_, i) => (
+                        <button
+                          key={`empty-${i}`}
+                          type="button"
+                          onClick={() => handleCheck(r.key)}
+                          disabled={busy || r.available_count === 0}
+                          title={
+                            r.available_count === 0
+                              ? "Stok tidak tersedia"
+                              : "Klik untuk centang (alokasi 1 unit)"
+                          }
+                          className="inline-flex items-center gap-1 rounded border border-dashed border-gray-300 px-1.5 py-0.5 text-[11px] text-gray-500 transition-colors hover:border-[#4ba69d] hover:text-[#4ba69d] disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:border-gray-300 disabled:hover:text-gray-500"
+                        >
+                          {checking === r.key ? (
+                            <Circle className="h-3 w-3 animate-pulse" />
+                          ) : (
+                            <Check className="h-3 w-3" />
                           )}
-                        </td>
-                        <td className="py-2.5 px-3 text-center text-gray-700">{r.needed_qty}</td>
-                        <td className="py-2.5 px-3 text-center">
-                          <span
-                            className={
-                              "font-semibold " + (kurang ? "text-amber-600" : "text-green-600")
-                            }
-                          >
-                            {r.generated_qty}
-                          </span>
-                        </td>
-                        <td className="py-2.5 px-3 text-center text-gray-500">{r.available_count}</td>
-                      </tr>
-                    )
-                  })}
-                </tbody>
-              </table>
+                          {r.available_count === 0 ? "stok habis" : "centang"}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )
+              })}
             </div>
           </div>
         ) : null}
       </Modal>
 
-      {/* Modal "Siap Disterilkan" — hasil akhir setelah Lanjut */}
+      {/* Modal "Siap Disterilkan" + preview & cetak Label Barcode Sterilisasi */}
       <Modal
         open={ready !== null}
-        onClose={() => setReady(null)}
+        onClose={closeReady}
         title="Siap Disterilkan"
         size="sm"
         footer={
           <div className="flex w-full justify-end gap-2">
-            <Button variant="outline" onClick={() => setReady(null)}>
+            <Button variant="outline" onClick={closeReady}>
               Tutup
             </Button>
-            <Link href="/cssd/sterilisasi">
-              <Button className="bg-[#075489] hover:bg-[#075489]/90 text-white">
-                Ke Sterilisasi
-              </Button>
-            </Link>
+            <Button
+              onClick={printLabel}
+              disabled={!ready?.batch}
+              className="bg-[#075489] hover:bg-[#075489]/90 text-white"
+            >
+              <Printer className="mr-1.5 h-4 w-4" />
+              Cetak Label
+            </Button>
           </div>
         }
       >
         {ready && (
-          <div className="flex flex-col items-center gap-3 py-2 text-center">
-            <div className="flex h-14 w-14 items-center justify-center rounded-full bg-green-50">
-              <CheckCircle2 className="h-7 w-7 text-green-600" />
+          <div className="space-y-3">
+            <div className="flex items-center gap-2 text-sm text-green-700">
+              <CheckCircle2 className="h-5 w-5 shrink-0" />
+              Inspeksi &amp; packaging selesai — order siap disterilkan.
             </div>
-            <div>
-              <p className="text-base font-semibold text-gray-900">Order siap disterilkan</p>
-              <p className="mt-1 text-sm text-gray-500">
-                Packaging selesai. Unit dapat dimasukkan ke batch sterilisasi di menu Sterilisasi.
+
+            {/* Preview label sterilisasi */}
+            <div className="rounded-lg border border-gray-300 p-3">
+              <p className="text-center text-[11px] font-bold uppercase tracking-wider text-gray-700 border-b border-dashed border-gray-300 pb-1.5">
+                Label Sterilisasi CSSD
               </p>
-            </div>
-            {ready.batch && (
-              <div className="mt-1 inline-flex items-center gap-2 rounded-lg bg-violet-50 px-3 py-1.5">
-                <ShieldCheck className="h-4 w-4 text-violet-500" />
-                <span className="font-mono text-sm font-semibold text-violet-700">{ready.batch}</span>
+              <p className="mt-2 text-center text-base font-bold text-gray-900">{ready.setName}</p>
+              <div className="my-1.5 flex justify-center">
+                {ready.batch ? (
+                  <Barcode id="steril-label-barcode" value={ready.batch} height={56} moduleWidth={2} />
+                ) : (
+                  <span className="text-xs text-gray-400">Nomor batch belum tersedia</span>
+                )}
               </div>
-            )}
+              <p className="text-center font-mono text-sm font-semibold tracking-wider text-gray-800">
+                {ready.batch ?? "—"}
+              </p>
+              <div className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1 text-[11px]">
+                <span className="text-gray-500">No. Batch</span>
+                <span className="font-semibold text-gray-800">{ready.batch ?? "—"}</span>
+                <span className="text-gray-500">ID Pengemas</span>
+                <span className="font-semibold text-gray-800">{ready.packer}</span>
+                <span className="text-gray-500">Tgl Steril</span>
+                <span className="text-gray-400">menyusul (sterilisasi)</span>
+                <span className="text-gray-500">Tgl Kedaluwarsa</span>
+                <span className="text-gray-400">menyusul (sterilisasi)</span>
+              </div>
+            </div>
+            <p className="text-xs text-gray-400">
+              Tempel label di kemasan luar. Tgl sterilisasi &amp; kedaluwarsa diisi otomatis setelah
+              batch sterilisasi divalidasi.
+            </p>
           </div>
         )}
       </Modal>
