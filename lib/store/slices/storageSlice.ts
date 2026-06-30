@@ -6,6 +6,7 @@ export type StorageIncomingUnit = {
   id: number
   code: string | null
   instrument: string | null
+  image_url: string | null
   source: "satuan" | "paket"
   package_name: string | null
   stored: boolean

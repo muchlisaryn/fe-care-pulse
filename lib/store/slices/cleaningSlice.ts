@@ -26,6 +26,19 @@ export type CleaningItem = {
   quantity: number
 }
 
+// Unit fisik yang dikunci ke batch (terisi untuk batch Produksi CSSD; kosong
+// untuk order peminjaman yang unitnya baru di-generate saat Packaging).
+export type CleaningUnit = {
+  id: number
+  source: "satuan" | "paket"
+  package_name: string | null
+  instrument_stock_id: number | null
+  code: string | null
+  instrument: { id: number; name: string } | null
+  status: string | null
+  condition_out: { id: number; name: string } | null
+}
+
 // Order pada tahap Cleaning & Pengemasan (status pencucian / pengemasan).
 export type CleaningOrder = {
   id: number
@@ -40,6 +53,8 @@ export type CleaningOrder = {
   requested_qty: number
   request_lines: number
   items: CleaningItem[]
+  units_count: number
+  units: CleaningUnit[]
   washing: WashingRecord | null
 }
 

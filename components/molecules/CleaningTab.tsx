@@ -4,10 +4,12 @@ import { useEffect, useState } from "react"
 import {
   Droplets,
   ChevronRight,
+  ChevronDown,
   Package,
   CheckCircle2,
   AlertTriangle,
   XCircle,
+  ListChecks,
 } from "lucide-react"
 import { Input } from "@/components/atoms/Input"
 import { Button } from "@/components/atoms/Button"
@@ -18,7 +20,7 @@ import { SelectSearch } from "@/components/atoms/SelectSearch"
 import { Modal } from "@/components/molecules/Modal"
 import api from "@/lib/axios"
 import { useAppSelector } from "@/lib/store/hooks"
-import type { CleaningOrder } from "@/lib/store/slices/cleaningSlice"
+import type { CleaningOrder, CleaningUnit } from "@/lib/store/slices/cleaningSlice"
 
 function formatDateTime(value: string | null) {
   if (!value) return "—"
@@ -40,6 +42,20 @@ function toLocalInput(value: string | null): string {
   if (Number.isNaN(d.getTime())) return ""
   d.setMinutes(d.getMinutes() - d.getTimezoneOffset())
   return d.toISOString().slice(0, 16)
+}
+
+// Ringkasan jumlah barang. Bila unit fisik sudah ada (mis. batch Produksi CSSD,
+// di mana paket sudah diuraikan jadi unit), pakai hitungan unit fisik & jumlah
+// jenis instrumen-nya — bukan `requested_qty`/`request_lines` yang hanya menghitung
+// baris permintaan (1 paket = 1 jenis, menyesatkan untuk paket).
+function unitSummary(order: CleaningOrder): { units: number; jenis: number } {
+  if (order.units?.length) {
+    const jenis = new Set(
+      order.units.map((u) => u.instrument?.id ?? u.instrument?.name ?? u.id)
+    ).size
+    return { units: order.units.length, jenis }
+  }
+  return { units: order.requested_qty, jenis: order.request_lines }
 }
 
 // Status pencucian sebuah order (turunan dari washing/order status).
@@ -365,13 +381,17 @@ export function CleaningTab({
           <div className="space-y-5">
             <div className="grid grid-cols-1 gap-4 rounded-lg border border-gray-200 bg-gray-50 px-4 py-3 sm:grid-cols-2">
               <Detail label="Peminjam / Unit" value={active.borrowed_by} />
-              <Detail label="Ruangan" value={active.room?.name} />
               <Detail label="Diproses" value={formatDateTime(active.processed_at)} />
               <Detail
                 label="Jumlah"
-                value={`${active.requested_qty} unit · ${active.request_lines} jenis`}
+                value={(() => {
+                  const s = unitSummary(active)
+                  return `${s.units} unit · ${s.jenis} jenis`
+                })()}
               />
             </div>
+
+            <InstrumentList order={active} collapsible defaultOpen={false} />
 
             {alertMsg && (
               <div className="flex items-start gap-2 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3">
@@ -671,7 +691,6 @@ function CleaningOrderCard({
                 )}
               </div>
               <div className="mt-1 flex flex-wrap gap-x-4 gap-y-0.5 text-xs text-gray-500">
-                <span>Ruangan: {order.room?.name ?? "—"}</span>
                 <span>Diproses: {formatDateTime(order.processed_at)}</span>
                 {order.washing?.machine_no && <span>Mesin: {order.washing.machine_no}</span>}
               </div>
@@ -710,6 +729,106 @@ function CleaningOrderCard({
           )}
         </div>
       </div>
+    </div>
+  )
+}
+
+// Daftar instrumen yang akan dicuci pada batch ini.
+// - Bila ada unit fisik (`units`, mis. batch Produksi CSSD): tampilkan tiap unit
+//   beserta kode stock & kondisi.
+// - Bila belum ada unit fisik (order peminjaman, unit di-generate saat Packaging):
+//   fallback ke ringkasan baris permintaan (`items`: jenis + jumlah).
+function InstrumentList({
+  order,
+  collapsible = false,
+  defaultOpen = true,
+}: {
+  order: CleaningOrder
+  // Bila true, judul "Daftar Instrumen" jadi tombol untuk tampil/sembunyikan isi.
+  collapsible?: boolean
+  defaultOpen?: boolean
+}) {
+  const [open, setOpen] = useState(defaultOpen)
+  const hasUnits = (order.units?.length ?? 0) > 0
+  const summary = unitSummary(order)
+
+  // Kelompokkan unit fisik per instrumen agar ringkas (nama + daftar kode).
+  const grouped = hasUnits
+    ? Object.values(
+        order.units.reduce<Record<string, { name: string; units: CleaningUnit[] }>>((acc, u) => {
+          const name = u.instrument?.name ?? u.package_name ?? "Instrumen"
+          const key = String(u.instrument?.id ?? name)
+          ;(acc[key] ??= { name, units: [] }).units.push(u)
+          return acc
+        }, {})
+      )
+    : []
+
+  return (
+    <div className="space-y-2">
+      {collapsible ? (
+        <button
+          type="button"
+          onClick={() => setOpen((v) => !v)}
+          className="flex w-full items-center justify-between gap-1.5 text-xs font-semibold uppercase tracking-wide text-gray-400 hover:text-gray-600"
+        >
+          <span className="flex items-center gap-1.5">
+            <ListChecks className="h-4 w-4" />
+            Daftar Instrumen
+            <span className="font-normal normal-case tracking-normal text-gray-400">
+              ({summary.units} unit · {summary.jenis} jenis)
+            </span>
+          </span>
+          <ChevronDown
+            className={"h-4 w-4 transition-transform " + (open ? "rotate-180" : "")}
+          />
+        </button>
+      ) : (
+        <p className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-gray-400">
+          <ListChecks className="h-4 w-4" />
+          Daftar Instrumen
+        </p>
+      )}
+
+      {collapsible && !open ? null : hasUnits ? (
+        <ul className="divide-y divide-gray-100 rounded-lg border border-gray-200">
+          {grouped.map((g) => (
+            <li key={g.name} className="px-3 py-2">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-sm font-medium text-gray-800">{g.name}</span>
+                <span className="text-xs text-gray-400">{g.units.length} unit</span>
+              </div>
+              <div className="mt-1 flex flex-wrap gap-1.5">
+                {g.units.map((u) => (
+                  <span
+                    key={u.id}
+                    className="font-mono text-[11px] font-medium text-[#075489] bg-[#075489]/8 px-1.5 py-0.5 rounded"
+                    title={u.condition_out?.name ? `Kondisi: ${u.condition_out.name}` : undefined}
+                  >
+                    {u.code ?? `#${u.instrument_stock_id ?? u.id}`}
+                  </span>
+                ))}
+              </div>
+            </li>
+          ))}
+        </ul>
+      ) : order.items?.length ? (
+        <ul className="divide-y divide-gray-100 rounded-lg border border-gray-200">
+          {order.items.map((it, i) => (
+            <li key={`${it.name}-${i}`} className="flex items-center justify-between gap-2 px-3 py-2">
+              <span className="flex items-center gap-2 text-sm text-gray-800">
+                {it.name}
+                {it.type === "paket" && <Badge variant="info">Paket</Badge>}
+              </span>
+              <span className="text-xs text-gray-400">{it.quantity} unit</span>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="rounded-lg border border-dashed border-gray-200 px-3 py-2 text-xs text-gray-400">
+          Belum ada rincian instrumen.
+        </p>
+      )}
     </div>
   )
 }

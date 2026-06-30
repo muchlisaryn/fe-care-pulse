@@ -1,10 +1,9 @@
 "use client"
 
-import { useState } from "react"
+import { useRef, useState } from "react"
 import {
   Package,
   Boxes,
-  AlertTriangle,
   CheckCircle2,
   ScanLine,
   Check,
@@ -55,6 +54,11 @@ function errMsg(e: unknown): string {
   return x.response?.data?.message ?? "Terjadi kesalahan."
 }
 
+// Seluruh instrument_stock_id unit yang sudah terikat (generated) pada payload.
+function generatedIds(d: PackagingData | null): number[] {
+  return (d?.requirements ?? []).flatMap((r) => r.generated_units.map((u) => u.id))
+}
+
 type PackagingReq = {
   key: string
   instrument: { id: number; code: string | null; name: string; image_url: string | null }
@@ -102,6 +106,12 @@ export function PackagingTab({
   // instrument_stock_id unit yang sedang dibatalkan centangnya.
   const [unchecking, setUnchecking] = useState<number | null>(null)
   const [scanMsg, setScanMsg] = useState<{ type: "ok" | "err"; text: string } | null>(null)
+  // Inspeksi manual: instrument_stock_id unit yang sudah dicentang petugas.
+  // Unit pre-locked (mis. batch produksi) mulai TIDAK tercentang — wajib dicek satu per satu.
+  const [inspected, setInspected] = useState<Set<number>>(new Set())
+  // Snapshot id unit generated terakhir, untuk mendeteksi unit yang baru ditambah
+  // (lewat scan / klik slot) → otomatis dianggap sudah diperiksa.
+  const prevGenRef = useRef<Set<number>>(new Set())
   const [ready, setReady] = useState<SterilLabel | null>(null)
   // Foto instrumen yang sedang di-zoom (klik thumbnail) — null = tidak ada.
   const [zoom, setZoom] = useState<{ url: string; name: string } | null>(null)
@@ -117,12 +127,39 @@ export function PackagingTab({
     setLoading(true)
     try {
       const res = await api.get(`/master/orders/${order.id}/packaging`)
-      setData(res.data.data)
+      const d = res.data.data as PackagingData
+      // Unit yang sudah terikat saat dibuka (pre-locked) mulai TANPA centang.
+      prevGenRef.current = new Set(generatedIds(d))
+      setInspected(new Set())
+      setData(d)
     } catch (e) {
       setError(errMsg(e))
     } finally {
       setLoading(false)
     }
+  }
+
+  // Tandai unit yang BARU ditambah (dibanding snapshot sebelumnya) sebagai sudah
+  // diperiksa — scan / klik slot kosong dianggap inspeksi langsung.
+  function syncDataAndAutoInspect(d: PackagingData) {
+    const newIds = generatedIds(d)
+    setInspected((prev) => {
+      const next = new Set(prev)
+      for (const id of newIds) if (!prevGenRef.current.has(id)) next.add(id)
+      return next
+    })
+    prevGenRef.current = new Set(newIds)
+    setData(d)
+  }
+
+  // Centang / batalkan centang inspeksi sebuah unit (lokal, tanpa ubah ikatan BE).
+  function toggleInspect(id: number) {
+    setInspected((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
   }
 
   // Scan barcode unit → centang komponen set.
@@ -132,7 +169,7 @@ export function PackagingTab({
     setScanMsg(null)
     try {
       const res = await api.post(`/master/orders/${active.id}/pack/scan`, { code: scanCode.trim() })
-      setData(res.data.data)
+      syncDataAndAutoInspect(res.data.data)
       setScanMsg({ type: "ok", text: res.data.message ?? "Unit tercentang." })
       setScanCode("")
     } catch (e) {
@@ -149,7 +186,7 @@ export function PackagingTab({
     setScanMsg(null)
     try {
       const res = await api.post(`/master/orders/${active.id}/pack/scan`, { code })
-      setData(res.data.data)
+      syncDataAndAutoInspect(res.data.data)
       setScanMsg({ type: "ok", text: res.data.message ?? "Unit tercentang." })
     } catch (e) {
       setScanMsg({ type: "err", text: errMsg(e) })
@@ -167,7 +204,11 @@ export function PackagingTab({
       const res = await api.post(`/master/orders/${active.id}/pack/uncheck`, {
         instrument_stock_id: stockId,
       })
-      setData(res.data.data)
+      const d = res.data.data as PackagingData
+      const newIds = new Set(generatedIds(d))
+      setInspected((prev) => new Set([...prev].filter((id) => newIds.has(id))))
+      prevGenRef.current = newIds
+      setData(d)
       setScanMsg({ type: "ok", text: res.data.message ?? "Centang dibatalkan." })
     } catch (e) {
       setScanMsg({ type: "err", text: errMsg(e) })
@@ -281,8 +322,12 @@ export function PackagingTab({
 
   const reqs = data?.requirements ?? []
   const totalNeeded = reqs.reduce((s, r) => s + r.needed_qty, 0)
-  const totalChecked = reqs.reduce((s, r) => s + r.generated_qty, 0)
+  // Unit yang sudah terikat (ada fisiknya) vs yang sudah dicentang inspeksi petugas.
+  const generatedTotal = reqs.reduce((s, r) => s + r.generated_units.length, 0)
+  const totalChecked = inspected.size
   const shortage = Math.max(0, totalNeeded - totalChecked)
+  // "Selesaikan" hanya aktif bila SEMUA unit yang ada sudah dicentang satu per satu.
+  const allInspected = generatedTotal > 0 && totalChecked >= generatedTotal
   const busy =
     loading || finishing || scanning || checking !== null || unchecking !== null
 
@@ -313,7 +358,6 @@ export function PackagingTab({
                       <Badge variant="warning">Perlu Inspeksi</Badge>
                     </div>
                     <div className="mt-1 flex flex-wrap gap-x-4 gap-y-0.5 text-xs text-gray-500">
-                      <span>Ruangan: {order.room?.name ?? "—"}</span>
                       <span>Diproses: {formatDateTime(order.processed_at)}</span>
                       <span>
                         {order.requested_qty} unit · {order.request_lines} jenis
@@ -356,7 +400,7 @@ export function PackagingTab({
               </Button>
               <Button
                 onClick={handleFinish}
-                disabled={busy || totalChecked === 0}
+                disabled={busy || !allInspected}
                 className="bg-[#075489] hover:bg-[#075489]/90 text-white"
               >
                 {finishing ? "Memproses..." : "Selesaikan"}
@@ -413,12 +457,6 @@ export function PackagingTab({
                 </span>{" "}
                 komponen
               </span>
-              {shortage > 0 && (
-                <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-700">
-                  <AlertTriangle className="h-3.5 w-3.5" />
-                  Kurang {shortage} — tetap bisa diselesaikan
-                </span>
-              )}
               {data.order.code_transaction && (
                 <span className="inline-flex items-center gap-1 rounded-full bg-violet-50 px-2 py-0.5 text-xs font-semibold text-violet-700">
                   <Package className="h-3.5 w-3.5" />
@@ -430,8 +468,9 @@ export function PackagingTab({
             {/* Checklist komponen set */}
             <div className="space-y-2">
               {reqs.map((r) => {
-                const complete = r.generated_qty >= r.needed_qty
-                const emptySlots = Math.max(0, r.needed_qty - r.generated_qty)
+                const inspectedCount = r.generated_units.filter((u) => inspected.has(u.id)).length
+                const complete = inspectedCount >= r.needed_qty
+                const emptySlots = Math.max(0, r.needed_qty - r.generated_units.length)
                 return (
                   <div key={r.key} className="flex gap-3 rounded-lg border border-gray-200 px-3 py-2.5">
                     {/* Foto instrumen — klik untuk zoom. Bantu verifikasi komponen fisik. */}
@@ -477,29 +516,46 @@ export function PackagingTab({
                             (complete ? "text-green-600" : "text-amber-600")
                           }
                         >
-                          {r.generated_qty}/{r.needed_qty}
+                          {inspectedCount}/{r.needed_qty}
                         </span>
                       </div>
                       <div className="mt-2 flex flex-wrap gap-1.5">
-                      {r.generated_units.map((u) => (
-                        <span
-                          key={u.id}
-                          className="inline-flex items-center gap-1 rounded bg-green-50 px-1.5 py-0.5 font-mono text-[11px] font-semibold text-green-700"
-                        >
-                          <Check className="h-3 w-3" />
-                          {u.code ?? `#${u.id}`}
-                          {/* Edit: batalkan centang unit tersimpan (ganti dengan unit lain) */}
-                          <button
-                            type="button"
-                            onClick={() => handleUncheck(u.id)}
-                            disabled={busy}
-                            title="Batalkan centang / ganti unit"
-                            className="ml-0.5 rounded-full p-0.5 text-green-600 transition-colors hover:bg-green-100 hover:text-red-600 disabled:opacity-50"
+                      {r.generated_units.map((u) => {
+                        const isChecked = inspected.has(u.id)
+                        return (
+                          <span
+                            key={u.id}
+                            className={
+                              "inline-flex items-center gap-1 rounded px-1.5 py-0.5 font-mono text-[11px] font-semibold " +
+                              (isChecked
+                                ? "bg-green-50 text-green-700"
+                                : "border border-dashed border-gray-300 text-gray-500")
+                            }
                           >
-                            <X className="h-3 w-3" />
-                          </button>
-                        </span>
-                      ))}
+                            {/* Centang inspeksi unit satu per satu (tidak otomatis). */}
+                            <button
+                              type="button"
+                              onClick={() => toggleInspect(u.id)}
+                              disabled={busy}
+                              title={isChecked ? "Batalkan centang" : "Centang — unit sudah diperiksa"}
+                              className="inline-flex items-center gap-1 disabled:opacity-50"
+                            >
+                              {isChecked ? <Check className="h-3 w-3" /> : <Circle className="h-3 w-3" />}
+                              {u.code ?? `#${u.id}`}
+                            </button>
+                            {/* Hapus unit dari batch (ganti dengan unit lain). */}
+                            <button
+                              type="button"
+                              onClick={() => handleUncheck(u.id)}
+                              disabled={busy}
+                              title="Hapus unit dari batch / ganti unit"
+                              className="ml-0.5 rounded-full p-0.5 transition-colors hover:bg-gray-100 hover:text-red-600 disabled:opacity-50"
+                            >
+                              <X className="h-3 w-3" />
+                            </button>
+                          </span>
+                        )
+                      })}
                       {Array.from({ length: emptySlots }).map((_, i) => {
                           // Kandidat unit tersedia untuk slot ini (kode langsung).
                           const cand = r.available_units[i]

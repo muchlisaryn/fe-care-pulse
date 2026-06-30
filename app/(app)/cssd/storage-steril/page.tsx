@@ -12,6 +12,8 @@ import {
   Boxes,
   ChevronDown,
   ChevronRight,
+  ZoomIn,
+  X,
 } from "lucide-react"
 import { Input } from "@/components/atoms/Input"
 import { Button } from "@/components/atoms/Button"
@@ -85,6 +87,8 @@ export default function StorageSterilPage() {
   const [setAll, setSetAll] = useState("")
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // Foto instrumen yang sedang di-zoom (klik thumbnail) — null = tidak ada.
+  const [zoom, setZoom] = useState<{ url: string; name: string } | null>(null)
 
   // Selalu segarkan saat halaman dibuka agar unit yang baru selesai disterilkan
   // langsung muncul (tanpa perlu refresh manual). Data cache tetap tampil seketika
@@ -155,26 +159,31 @@ export default function StorageSterilPage() {
     }
   }
 
-  // Unit modal dikelompokkan: paket (per package_name) jadi satu grup → satu rak,
-  // instrumen satuan tetap per unit.
+  // Unit modal dikelompokkan: paket (per package_name) jadi satu grup → satu rak.
+  // Satuan dengan JENIS instrumen yang sama juga digabung jadi satu grup → satu rak
+  // (karena akan disimpan di rak yang sama).
   const unitGroups = useMemo<StoreUnitGroup[]>(() => {
     if (!active) return []
     const groups: StoreUnitGroup[] = []
-    const paketByName = new Map<string, StoreUnitGroup>()
+    const byKey = new Map<string, StoreUnitGroup>()
     for (const u of active.units) {
-      if (u.source === "paket") {
-        const name = u.package_name ?? "Paket"
-        const key = `paket|${name}`
-        let g = paketByName.get(key)
-        if (!g) {
-          g = { key, source: "paket", packageName: name, units: [] }
-          paketByName.set(key, g)
-          groups.push(g)
+      // Paket → gabung per nama paket; satuan → gabung per jenis instrumen.
+      const key =
+        u.source === "paket"
+          ? `paket|${u.package_name ?? "Paket"}`
+          : `satuan|${u.instrument ?? `#${u.id}`}`
+      let g = byKey.get(key)
+      if (!g) {
+        g = {
+          key,
+          source: u.source,
+          packageName: u.source === "paket" ? u.package_name ?? "Paket" : null,
+          units: [],
         }
-        g.units.push(u)
-      } else {
-        groups.push({ key: `satuan|${u.id}`, source: "satuan", packageName: null, units: [u] })
+        byKey.set(key, g)
+        groups.push(g)
       }
+      g.units.push(u)
     }
     return groups
   }, [active])
@@ -320,7 +329,6 @@ export default function StorageSterilPage() {
                           )}
                         </div>
                         <div className="mt-1 flex flex-wrap gap-x-4 gap-y-0.5 text-xs text-gray-500">
-                          <span>Ruangan: {order.room?.name ?? "—"}</span>
                           <span>{order.unit_count} unit</span>
                           <span>Kedaluwarsa: {formatDate(order.expiry_date)}</span>
                         </div>
@@ -548,57 +556,65 @@ export default function StorageSterilPage() {
               </div>
             </div>
 
-            {/* Daftar unit + rak. Paket → satu rak per paket; satuan → per unit. */}
+            {/* Daftar unit + rak. Satu rak per grup: paket per nama paket,
+                satuan per jenis instrumen (unit sejenis disimpan di rak yang sama). */}
             <div className="space-y-2">
               {unitGroups.map((g) => {
-                // Satuan: satu unit per grup → baris rak per unit (perilaku lama).
-                if (g.source === "satuan") {
-                  const u = g.units[0]
-                  return (
-                    <div
-                      key={g.key}
-                      className="flex flex-wrap items-center gap-3 rounded-lg border border-gray-200 px-3 py-2"
-                    >
-                      <Boxes className="h-4 w-4 shrink-0 text-emerald-500" />
-                      <div className="min-w-0 flex-1">
-                        <span className="font-mono text-xs font-semibold text-[#075489] bg-[#075489]/8 px-2 py-0.5 rounded">
-                          {u.code ?? `#${u.id}`}
-                        </span>
-                        <span className="ml-2 text-sm text-gray-700">{u.instrument ?? "—"}</span>
-                      </div>
-                      {u.stored ? (
-                        <Badge variant="success">
-                          <span className="inline-flex items-center gap-1">
-                            <MapPin className="h-3 w-3" />
-                            {u.rack_code}
-                          </span>
-                        </Badge>
-                      ) : (
-                        <div className="relative w-44">
-                          <ScanLine className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-gray-400 pointer-events-none" />
-                          <Input
-                            value={rackById[u.id] ?? ""}
-                            onChange={(e) => setRackById((p) => ({ ...p, [u.id]: e.target.value }))}
-                            placeholder="Lokasi rak"
-                            className="h-9 pl-8 font-mono text-xs"
-                          />
-                        </div>
-                      )}
-                    </div>
-                  )
-                }
-
-                // Paket: seluruh unit paket disimpan di SATU rak.
+                // Seluruh unit dalam grup disimpan di SATU rak.
                 const firstUnstored = g.units.find((u) => !u.stored)
                 const allStored = !firstUnstored
                 const groupRack = firstUnstored ? rackById[firstUnstored.id] ?? "" : g.units[0]?.rack_code ?? ""
+                const isPaket = g.source === "paket"
+                const title = isPaket ? g.packageName : g.units[0]?.instrument ?? "—"
+                const photo = g.units[0]?.image_url ?? null
                 return (
                   <div key={g.key} className="rounded-lg border border-gray-200 px-3 py-2.5">
                     <div className="flex flex-wrap items-center gap-2">
-                      <Boxes className="h-4 w-4 shrink-0 text-emerald-500" />
-                      <Badge variant="info">Paket</Badge>
-                      <span className="text-sm font-medium text-gray-800">{g.packageName}</span>
+                      {/* Foto instrumen menggantikan ikon; klik untuk zoom. Fallback ke ikon bila tak ada foto. */}
+                      {!isPaket && photo ? (
+                        <button
+                          type="button"
+                          onClick={() => setZoom({ url: photo, name: title ?? "Instrumen" })}
+                          title="Klik untuk perbesar"
+                          className="group relative h-7 w-7 shrink-0 cursor-zoom-in overflow-hidden rounded-md border border-gray-200"
+                        >
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img
+                            src={photo}
+                            alt={title ?? "Instrumen"}
+                            className="h-full w-full object-cover transition-transform group-hover:scale-105"
+                          />
+                          <span className="absolute inset-0 flex items-center justify-center bg-black/0 text-white opacity-0 transition-opacity group-hover:bg-black/30 group-hover:opacity-100">
+                            <ZoomIn className="h-3.5 w-3.5" />
+                          </span>
+                        </button>
+                      ) : (
+                        <Boxes className="h-4 w-4 shrink-0 text-emerald-500" />
+                      )}
+                      <Badge variant={isPaket ? "info" : "default"}>{isPaket ? "Paket" : "Satuan"}</Badge>
+                      <span className="text-sm font-medium text-gray-800">{title}</span>
                       <span className="text-xs text-gray-400">{g.units.length} unit</span>
+                      {/* Lokasi rak — sejajar dengan judul (di kanan), bukan di bawah. */}
+                      <div className="ml-auto">
+                        {allStored ? (
+                          <Badge variant="success">
+                            <span className="inline-flex items-center gap-1">
+                              <MapPin className="h-3 w-3" />
+                              {groupRack || "Tersimpan"}
+                            </span>
+                          </Badge>
+                        ) : (
+                          <div className="relative w-44 sm:w-56">
+                            <ScanLine className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-gray-400 pointer-events-none" />
+                            <Input
+                              value={groupRack}
+                              onChange={(e) => setGroupRack(g, e.target.value)}
+                              placeholder={isPaket ? "Lokasi rak paket" : "Lokasi rak"}
+                              className="h-9 pl-8 font-mono text-xs"
+                            />
+                          </div>
+                        )}
+                      </div>
                     </div>
                     <div className="mt-2 flex flex-wrap gap-1.5">
                       {g.units.map((u) => (
@@ -611,26 +627,6 @@ export default function StorageSterilPage() {
                         </span>
                       ))}
                     </div>
-                    <div className="mt-2.5">
-                      {allStored ? (
-                        <Badge variant="success">
-                          <span className="inline-flex items-center gap-1">
-                            <MapPin className="h-3 w-3" />
-                            {groupRack || "Tersimpan"}
-                          </span>
-                        </Badge>
-                      ) : (
-                        <div className="relative w-full sm:w-64">
-                          <ScanLine className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-gray-400 pointer-events-none" />
-                          <Input
-                            value={groupRack}
-                            onChange={(e) => setGroupRack(g, e.target.value)}
-                            placeholder="Satu lokasi rak untuk paket ini"
-                            className="h-9 pl-8 font-mono text-xs"
-                          />
-                        </div>
-                      )}
-                    </div>
                   </div>
                 )
               })}
@@ -638,6 +634,34 @@ export default function StorageSterilPage() {
           </div>
         )}
       </Modal>
+
+      {/* Zoom foto instrumen — overlay layar penuh, klik di mana saja untuk menutup */}
+      {zoom && (
+        <div
+          className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 p-4"
+          onClick={() => setZoom(null)}
+          role="dialog"
+          aria-modal="true"
+        >
+          <button
+            type="button"
+            onClick={() => setZoom(null)}
+            className="absolute right-4 top-4 rounded-full bg-white/10 p-2 text-white hover:bg-white/20"
+            title="Tutup"
+          >
+            <X className="h-5 w-5" />
+          </button>
+          <div className="flex max-h-full max-w-3xl flex-col items-center gap-2" onClick={(e) => e.stopPropagation()}>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={zoom.url}
+              alt={zoom.name}
+              className="max-h-[80vh] w-auto rounded-lg object-contain shadow-2xl"
+            />
+            <p className="text-sm font-medium text-white">{zoom.name}</p>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
