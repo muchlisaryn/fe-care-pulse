@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react"
 import { useRouter } from "next/navigation"
-import { Factory, Plus, Trash2, Boxes, Package, CheckCircle2, ArrowRight } from "lucide-react"
+import { Factory, Plus, Trash2, Boxes, Package, CheckCircle2, ArrowRight, Search } from "lucide-react"
 import { Button } from "@/components/atoms/Button"
 import { Input } from "@/components/atoms/Input"
 import { Label } from "@/components/atoms/Label"
@@ -12,7 +12,18 @@ import { SelectSearch } from "@/components/atoms/SelectSearch"
 import { Card } from "@/components/molecules/Card"
 import { PageHeader } from "@/components/molecules/PageHeader"
 import { Modal } from "@/components/molecules/Modal"
+import { Pagination } from "@/components/molecules/Pagination"
+import { useAppDispatch, useAppSelector } from "@/lib/store/hooks"
+import { fetchCleaning } from "@/lib/store/slices/cleaningSlice"
+import { fetchSterilizePipeline } from "@/lib/store/slices/sterilizePipelineSlice"
+import { CleaningTab } from "@/components/molecules/CleaningTab"
+import { PackagingTab } from "@/components/molecules/PackagingTab"
+import { SterilizationTab } from "@/components/molecules/SterilizationTab"
 import api from "@/lib/axios"
+
+// Tab halaman Produksi CSSD: form produksi + tahapan pipeline reprocessing.
+type ProduksiTab = "produksi" | "cleaning" | "packaging" | "sterilization"
+const ITEMS_PER_PAGE = 20
 
 // Jenis instrumen (master) — untuk produksi satuan.
 type InstrumentType = { id: number; code: string; name: string }
@@ -43,6 +54,74 @@ function errMsg(e: unknown): string {
  */
 export default function ProduksiCssdPage() {
   const router = useRouter()
+  const dispatch = useAppDispatch()
+
+  // Tab aktif: form produksi atau salah satu tahap pipeline.
+  const [tab, setTab] = useState<ProduksiTab>("produksi")
+  const [page, setPage] = useState(1)
+  const [search, setSearch] = useState("")
+
+  // Data pipeline (tahap Cleaning/Packaging/Sterilization) — sama seperti dulu di
+  // Tracking Order, kini dipantau dari halaman Produksi.
+  const cleaning = useAppSelector((s) => s.cleaning.items)
+  const cleaningLoading = useAppSelector((s) => s.cleaning.loading)
+  const sterilizePipeline = useAppSelector((s) => s.sterilizePipeline.items)
+  const sterilizeLoading = useAppSelector((s) => s.sterilizePipeline.loading)
+
+  useEffect(() => {
+    dispatch(fetchCleaning())
+    dispatch(fetchSterilizePipeline())
+  }, [dispatch])
+
+  function refreshPipeline() {
+    dispatch(fetchCleaning())
+    dispatch(fetchSterilizePipeline())
+  }
+
+  const q = search.trim().toLowerCase()
+  const cleaningFiltered = useMemo(() => {
+    if (!q) return cleaning
+    return cleaning.filter(
+      (o) =>
+        o.code.toLowerCase().includes(q) ||
+        (o.code_transaction ?? "").toLowerCase().includes(q) ||
+        (o.borrowed_by ?? "").toLowerCase().includes(q) ||
+        (o.room?.name ?? "").toLowerCase().includes(q) ||
+        o.items.some((it) => it.name.toLowerCase().includes(q)),
+    )
+  }, [cleaning, q])
+  const cleaningItems = useMemo(() => cleaningFiltered.filter((o) => o.status === "pencucian"), [cleaningFiltered])
+  const packagingItems = useMemo(() => cleaningFiltered.filter((o) => o.status === "pengemasan"), [cleaningFiltered])
+  const sterilizationItems = useMemo(() => {
+    if (!q) return sterilizePipeline
+    return sterilizePipeline.filter(
+      (o) =>
+        o.code.toLowerCase().includes(q) ||
+        (o.code_transaction ?? "").toLowerCase().includes(q) ||
+        (o.borrowed_by ?? "").toLowerCase().includes(q) ||
+        (o.room?.name ?? "").toLowerCase().includes(q) ||
+        o.units.some((u) => (u.code ?? "").toLowerCase().includes(q)),
+    )
+  }, [sterilizePipeline, q])
+
+  const tabCount: Record<ProduksiTab, number> = {
+    produksi: 0, // badge tidak ditampilkan untuk tab form
+    cleaning: cleaningItems.length,
+    packaging: packagingItems.length,
+    sterilization: sterilizationItems.length,
+  }
+
+  // Pagination tahap pipeline (tab non-produksi). Slice ber-tipe spesifik dihitung
+  // di JSX agar props tiap Tab tidak ber-tipe union.
+  const activeCount = tabCount[tab]
+  const pipelineLoading = tab === "sterilization" ? sterilizeLoading : cleaningLoading
+  const totalPages = Math.ceil(activeCount / ITEMS_PER_PAGE)
+  const pageStart = (page - 1) * ITEMS_PER_PAGE
+
+  function changeTab(next: ProduksiTab) {
+    setTab(next)
+    setPage(1)
+  }
 
   const [mode, setMode] = useState<AddMode>("satuan")
   const [lines, setLines] = useState<ProduksiLine[]>([])
@@ -183,9 +262,112 @@ export default function ProduksiCssdPage() {
     <div className="space-y-6">
       <PageHeader
         title="Produksi CSSD"
-        subtitle="Proses stok alat milik CSSD ke antrean Cleaning — awal lifecycle reprocessing"
+        subtitle="Mulai produksi & pantau tahap reprocessing: Cleaning → Inspection → Sterilization"
       />
 
+      {/* Tab: form produksi baru + tahapan pipeline */}
+      <Card className="p-0">
+        <div className="flex flex-wrap gap-6 border-b border-gray-200 px-5 pt-4">
+          {(
+            [
+              { key: "produksi", label: "Produksi Baru" },
+              { key: "cleaning", label: "Cleaning & Disinfection" },
+              { key: "packaging", label: "Inspection & Packaging" },
+              { key: "sterilization", label: "Sterilization" },
+            ] as { key: ProduksiTab; label: string }[]
+          ).map((t) => {
+            const active = tab === t.key
+            return (
+              <button
+                key={t.key}
+                type="button"
+                onClick={() => changeTab(t.key)}
+                className={
+                  "relative -mb-px flex items-center gap-2 border-b-2 px-1 pb-2.5 pt-1 text-sm transition-colors " +
+                  (active
+                    ? "border-[#075489] font-semibold text-[#075489]"
+                    : "border-transparent font-medium text-gray-500 hover:text-gray-800")
+                }
+              >
+                {t.label}
+                {t.key !== "produksi" && (
+                  <span
+                    className={
+                      "rounded-full px-1.5 py-0.5 text-xs font-semibold " +
+                      (active ? "bg-[#075489]/10 text-[#075489]" : "bg-gray-100 text-gray-500")
+                    }
+                  >
+                    {tabCount[t.key]}
+                  </span>
+                )}
+              </button>
+            )
+          })}
+        </div>
+
+        {/* Pencarian untuk tahap pipeline */}
+        {tab !== "produksi" && (
+          <div className="px-5 py-3">
+            <div className="relative">
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+              <Input
+                value={search}
+                onChange={(e) => {
+                  setSearch(e.target.value)
+                  setPage(1)
+                }}
+                placeholder="Cari kode order / peminjam / ruangan / alat..."
+                className="pl-9"
+              />
+            </div>
+          </div>
+        )}
+      </Card>
+
+      {/* Konten tahap pipeline */}
+      {tab !== "produksi" && (
+        <Card className="p-4">
+          {pipelineLoading ? (
+            <div className="py-16 text-center text-sm text-gray-400">Memuat data...</div>
+          ) : activeCount === 0 ? (
+            <div className="py-16 text-center text-sm text-gray-400">
+              {q ? "Tidak ada data yang cocok." : "Belum ada order pada tahap ini."}
+            </div>
+          ) : (
+            <>
+              {tab === "cleaning" && (
+                <CleaningTab
+                  items={cleaningItems.slice(pageStart, pageStart + ITEMS_PER_PAGE)}
+                  onChanged={refreshPipeline}
+                  stage="cleaning"
+                />
+              )}
+              {tab === "packaging" && (
+                <PackagingTab
+                  items={packagingItems.slice(pageStart, pageStart + ITEMS_PER_PAGE)}
+                  onChanged={refreshPipeline}
+                />
+              )}
+              {tab === "sterilization" && (
+                <SterilizationTab
+                  items={sterilizationItems.slice(pageStart, pageStart + ITEMS_PER_PAGE)}
+                  onChanged={refreshPipeline}
+                />
+              )}
+              <Pagination
+                currentPage={page}
+                totalPages={totalPages}
+                totalItems={activeCount}
+                itemsPerPage={ITEMS_PER_PAGE}
+                onPageChange={setPage}
+              />
+            </>
+          )}
+        </Card>
+      )}
+
+      {/* Form produksi baru */}
+      {tab === "produksi" && (
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-5">
         {/* Form tambah baris */}
         <Card className="space-y-4 p-5 lg:col-span-2">
@@ -335,6 +517,7 @@ export default function ProduksiCssdPage() {
           </div>
         </Card>
       </div>
+      )}
 
       {/* Modal sukses */}
       <Modal

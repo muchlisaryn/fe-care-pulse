@@ -56,10 +56,9 @@ import { getEcho } from "@/lib/echo"
 // Tab kategori order pada halaman monitoring (tahapan alur CSSD).
 type MonitoringTab = "masuk" | "cleaning" | "packaging" | "sterilization" | "distribusi"
 
+// Tahapan Cleaning/Inspection/Sterilization dipindah ke halaman Produksi CSSD.
+// Tracking Order kini hanya menangani Order Masuk & Distribution & Tracking.
 const MONITORING_TABS: MonitoringTab[] = [
-  "cleaning",
-  "packaging",
-  "sterilization",
   "masuk",
   "distribusi",
 ]
@@ -972,9 +971,6 @@ function MonitoringCssd() {
           <div className="flex flex-wrap gap-6 border-b border-gray-200">
             {(
               [
-                { key: "cleaning", label: "Cleaning & Disinfection", count: cleaningCount },
-                { key: "packaging", label: "Inspection & Packaging", count: packagingCount },
-                { key: "sterilization", label: "Sterilization", count: sterilizationCount },
                 { key: "masuk", label: "Order Masuk", count: masukCount },
                 { key: "distribusi", label: "Distribution & Tracking", count: distribusiBadge },
               ] as { key: MonitoringTab; label: string; count: number }[]
