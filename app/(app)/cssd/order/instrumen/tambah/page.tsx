@@ -66,6 +66,9 @@ export default function TambahOrderInstrumenPage() {
 
   const [roomId, setRoomId] = useState("")
   const [borrowedBy, setBorrowedBy] = useState("")
+  // Identitas pasien (opsional): no. rekam medis & nama pasien.
+  const [medicalRecordNo, setMedicalRecordNo] = useState("")
+  const [patientName, setPatientName] = useState("")
   const [orderDate, setOrderDate] = useState("")
   const [orderTime, setOrderTime] = useState("")
   const [returnPlanDate, setReturnPlanDate] = useState("")
@@ -286,6 +289,8 @@ export default function TambahOrderInstrumenPage() {
       await api.post("/master/orders", {
         room_id: Number(roomId),
         borrowed_by: borrowedBy.trim() || null,
+        medical_record_no: medicalRecordNo.trim() || null,
+        patient_name: patientName.trim() || null,
         order_date: orderDate,
         order_time: orderTime || null,
         return_plan_date: returnPlanDate || null,
@@ -345,6 +350,28 @@ export default function TambahOrderInstrumenPage() {
                 value={roomId}
                 onChange={setRoomId}
                 placeholder="-- Pilih Ruangan --"
+              />
+            </div>
+          </div>
+
+          {/* Identitas pasien (opsional) */}
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <div className="space-y-1.5">
+              <Label htmlFor="no-rm">No. Rekam Medis</Label>
+              <Input
+                id="no-rm"
+                value={medicalRecordNo}
+                onChange={(e) => setMedicalRecordNo(e.target.value)}
+                placeholder="mis. 00-12-34-56"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="nama-pasien">Nama Pasien</Label>
+              <Input
+                id="nama-pasien"
+                value={patientName}
+                onChange={(e) => setPatientName(e.target.value)}
+                placeholder="Nama pasien"
               />
             </div>
           </div>

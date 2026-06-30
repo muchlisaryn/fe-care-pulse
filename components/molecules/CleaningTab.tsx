@@ -1,12 +1,11 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import {
   Droplets,
   ChevronRight,
   Package,
   CheckCircle2,
-  ScanLine,
   AlertTriangle,
   XCircle,
 } from "lucide-react"
@@ -15,6 +14,7 @@ import { Button } from "@/components/atoms/Button"
 import { Badge } from "@/components/atoms/Badge"
 import { Label } from "@/components/atoms/Label"
 import { Textarea } from "@/components/atoms/Textarea"
+import { SelectSearch } from "@/components/atoms/SelectSearch"
 import { Modal } from "@/components/molecules/Modal"
 import api from "@/lib/axios"
 import { useAppSelector } from "@/lib/store/hooks"
@@ -123,12 +123,10 @@ export function CleaningTab({
   const [detergent, setDetergent] = useState("")
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  // Scan barcode mesin washer + mesin yang ter-resolve (beserta ambang).
-  const [machineCode, setMachineCode] = useState("")
+  // Mesin washer terpilih (beserta ambang) + daftar mesin dari master CSSD.
   const [washerMachineId, setWasherMachineId] = useState<number | null>(null)
   const [machineInfo, setMachineInfo] = useState<ScannedMachine | null>(null)
-  const [scanning, setScanning] = useState(false)
-  const [scanError, setScanError] = useState<string | null>(null)
+  const [machines, setMachines] = useState<ScannedMachine[]>([])
   const [duration, setDuration] = useState("")
   // Notifikasi kegagalan suhu/waktu dari backend (parameter di luar ambang mesin).
   const [alertMsg, setAlertMsg] = useState<string | null>(null)
@@ -143,10 +141,34 @@ export function CleaningTab({
   const [completedAt, setCompletedAt] = useState("")
   const [confirmError, setConfirmError] = useState<string | null>(null)
 
+  // Muat daftar mesin washer aktif (master CSSD) untuk dropdown pilihan.
+  useEffect(() => {
+    let active = true
+    ;(async () => {
+      const collected: ScannedMachine[] = []
+      let cur = 1
+      let last = 1
+      try {
+        do {
+          const res = await api.get("/master/washer-machines", { params: { page: cur, status: "aktif" } })
+          const p = res.data.data
+          collected.push(...p.data)
+          last = p.last_page
+          cur += 1
+        } while (cur <= last && active)
+        if (active) setMachines(collected)
+      } catch {
+        // Abaikan — dropdown tetap kosong bila gagal memuat.
+      }
+    })()
+    return () => {
+      active = false
+    }
+  }, [])
+
   function openWashing(order: CleaningOrder) {
     setActive(order)
     setError(null)
-    setScanError(null)
     setFailMode(false)
     setFailReason("")
     const w = order.washing
@@ -159,8 +181,7 @@ export function CleaningTab({
     setDetergent(w?.detergent_type ?? "")
     setDuration(w?.duration_minutes != null ? String(w.duration_minutes) : "")
     setWasherMachineId(w?.washer_machine_id ?? null)
-    setMachineCode(w?.washer_machine?.code ?? "")
-    // Mesin tersimpan ditampilkan tanpa ambang (ambang lengkap hanya saat scan).
+    // Mesin tersimpan ditampilkan tanpa ambang (ambang lengkap hanya saat dipilih).
     setMachineInfo(
       w?.washer_machine
         ? {
@@ -175,32 +196,23 @@ export function CleaningTab({
     setAlertMsg(w?.alert ? w.alert_message : null)
   }
 
-  // Scan barcode mesin washer → resolve mesin + auto-isi nomor mesin, suhu & durasi.
+  // Pilih mesin washer dari dropdown → auto-isi nomor mesin, suhu & durasi.
   // Suhu & durasi diisi titik tengah ambang mesin (selalu lolos validasi `evaluate`).
-  async function scanMachine() {
-    if (!machineCode.trim() || scanning) return
-    setScanning(true)
-    setScanError(null)
-    try {
-      const res = await api.post("/master/washer-machines/scan", { code: machineCode.trim() })
-      const m = res.data.data as ScannedMachine
-      setMachineInfo(m)
-      setWasherMachineId(m.id)
-      setMachineNo(m.code)
-      // Auto-isi suhu & durasi dari ambang mesin (titik tengah). Hanya bila mesin
-      // punya ambang — jangan menimpa input operator dengan nilai kosong.
-      const temp = midpoint(m.min_temperature, m.max_temperature)
-      if (temp) setTemperature(temp)
-      const dur = midpoint(m.min_duration_minutes, m.max_duration_minutes)
-      if (dur) setDuration(dur)
-    } catch (err) {
-      const e = err as { response?: { data?: { message?: string } } }
-      setScanError(e.response?.data?.message ?? "Mesin washer tidak ditemukan.")
-      setMachineInfo(null)
+  function selectMachine(idStr: string) {
+    const m = machines.find((x) => String(x.id) === idStr)
+    if (!m) {
       setWasherMachineId(null)
-    } finally {
-      setScanning(false)
+      setMachineInfo(null)
+      return
     }
+    setMachineInfo(m)
+    setWasherMachineId(m.id)
+    setMachineNo(m.code)
+    // Selalu segarkan suhu & durasi mengikuti mesin yang dipilih (titik tengah
+    // ambang). Di-set tanpa syarat agar saat ganti mesin data di bawah ikut
+    // terupdate; mesin tanpa ambang akan mengosongkan field (sesuai pilihan).
+    setTemperature(midpoint(m.min_temperature, m.max_temperature))
+    setDuration(midpoint(m.min_duration_minutes, m.max_duration_minutes))
   }
 
   // Payload parameter pencucian bersama (dipakai Simpan & Tandai Gagal).
@@ -379,35 +391,14 @@ export function CleaningTab({
 
             {!washedActive && (
               <div className="space-y-1.5">
-                <Label htmlFor="wash-scan">Scan Barcode Mesin Washer</Label>
-                <div className="flex gap-2">
-                  <div className="relative flex-1">
-                    <ScanLine className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 pointer-events-none" />
-                    <Input
-                      id="wash-scan"
-                      value={machineCode}
-                      onChange={(e) => setMachineCode(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter") {
-                          e.preventDefault()
-                          scanMachine()
-                        }
-                      }}
-                      placeholder="mis. WSH-001"
-                      className="pl-9 font-mono"
-                    />
-                  </div>
-                  <Button
-                    type="button"
-                    onClick={scanMachine}
-                    disabled={scanning || !machineCode.trim()}
-                    variant="outline"
-                    className="shrink-0"
-                  >
-                    {scanning ? "..." : "Scan"}
-                  </Button>
-                </div>
-                {scanError && <p className="text-xs text-red-600">{scanError}</p>}
+                <Label>Mesin Washer</Label>
+                <SelectSearch
+                  options={machines.map((m) => ({ value: String(m.id), label: `${m.code} — ${m.name}` }))}
+                  value={washerMachineId ? String(washerMachineId) : ""}
+                  onChange={selectMachine}
+                  placeholder="Pilih mesin washer..."
+                  searchPlaceholder="Cari kode / nama mesin..."
+                />
                 {machineInfo && (
                   <div className="flex flex-wrap items-center gap-2 rounded-lg border border-[#4ba69d]/30 bg-[#4ba69d]/5 px-3 py-2 text-xs">
                     <Badge variant="info">{machineInfo.code}</Badge>

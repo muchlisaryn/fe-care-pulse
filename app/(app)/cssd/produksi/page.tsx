@@ -1,8 +1,8 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
-import { useRouter } from "next/navigation"
-import { Factory, Plus, Trash2, Boxes, Package, CheckCircle2, ArrowRight, Search } from "lucide-react"
+import { Suspense, useEffect, useMemo, useState } from "react"
+import { useRouter, useSearchParams } from "next/navigation"
+import { Factory, Plus, Trash2, Boxes, Package, Search } from "lucide-react"
 import { Button } from "@/components/atoms/Button"
 import { Input } from "@/components/atoms/Input"
 import { Label } from "@/components/atoms/Label"
@@ -11,7 +11,6 @@ import { Textarea } from "@/components/atoms/Textarea"
 import { SelectSearch } from "@/components/atoms/SelectSearch"
 import { Card } from "@/components/molecules/Card"
 import { PageHeader } from "@/components/molecules/PageHeader"
-import { Modal } from "@/components/molecules/Modal"
 import { Pagination } from "@/components/molecules/Pagination"
 import { useAppDispatch, useAppSelector } from "@/lib/store/hooks"
 import { fetchCleaning } from "@/lib/store/slices/cleaningSlice"
@@ -40,6 +39,7 @@ type ProduksiLine = {
   refId: number // instrument_id (satuan) / instrument_catalog_id (paket)
   name: string
   quantity: string // teks agar boleh kosong sementara; divalidasi saat submit
+  items?: PaketItem[] // rincian isi paket (untuk type `paket`) — ditampilkan sebagai detail
 }
 
 function errMsg(e: unknown): string {
@@ -52,12 +52,19 @@ function errMsg(e: unknown): string {
  * pilih jenis/paket + jumlah, lalu "Mulai Produksi" membuat batch internal yang
  * langsung masuk tahap Cleaning (lanjut ke Inspection → Sterilization → Storage).
  */
-export default function ProduksiCssdPage() {
+const PRODUKSI_TABS: ProduksiTab[] = ["produksi", "cleaning", "packaging", "sterilization"]
+
+function ProduksiCssdPage() {
   const router = useRouter()
+  const searchParams = useSearchParams()
   const dispatch = useAppDispatch()
 
-  // Tab aktif: form produksi atau salah satu tahap pipeline.
-  const [tab, setTab] = useState<ProduksiTab>("produksi")
+  // Tab aktif: form produksi atau salah satu tahap pipeline. Disinkronkan ke URL
+  // (?tab=cleaning) agar tiap tahap punya URL sendiri & bisa di-deep-link.
+  const tabParam = searchParams.get("tab")
+  const [tab, setTab] = useState<ProduksiTab>(
+    PRODUKSI_TABS.includes(tabParam as ProduksiTab) ? (tabParam as ProduksiTab) : "produksi",
+  )
   const [page, setPage] = useState(1)
   const [search, setSearch] = useState("")
 
@@ -121,6 +128,8 @@ export default function ProduksiCssdPage() {
   function changeTab(next: ProduksiTab) {
     setTab(next)
     setPage(1)
+    // Catat tab aktif di URL: /cssd/produksi (form) atau /cssd/produksi?tab=cleaning
+    router.replace(next === "produksi" ? "/cssd/produksi" : `/cssd/produksi?tab=${next}`, { scroll: false })
   }
 
   const [mode, setMode] = useState<AddMode>("satuan")
@@ -128,7 +137,6 @@ export default function ProduksiCssdPage() {
   const [note, setNote] = useState("")
   const [formError, setFormError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
-  const [done, setDone] = useState<string | null>(null)
 
   const [instruments, setInstruments] = useState<InstrumentType[]>([])
   const [catalogs, setCatalogs] = useState<PaketCatalog[]>([])
@@ -207,7 +215,18 @@ export default function ProduksiCssdPage() {
     if (!picked) return
     setLines((prev) => {
       const idx = prev.findIndex((l) => l.type === mode && l.refId === picked.id)
-      if (idx === -1) return [...prev, { type: mode, refId: picked.id, name: picked.name, quantity: String(qty) }]
+      if (idx === -1)
+        return [
+          ...prev,
+          {
+            type: mode,
+            refId: picked.id,
+            name: picked.name,
+            quantity: String(qty),
+            // Simpan rincian isi paket agar bisa ditampilkan sebagai detail di daftar.
+            items: mode === "paket" ? paketItems : undefined,
+          },
+        ]
       const next = [...prev]
       next[idx] = { ...next[idx], quantity: String((Number(next[idx].quantity) || 0) + qty) }
       return next
@@ -247,10 +266,12 @@ export default function ProduksiCssdPage() {
     setSaving(true)
     setFormError(null)
     try {
-      const res = await api.post("/master/production", { items, note: note.trim() || null })
-      setDone(res.data?.data?.code ?? "—")
+      await api.post("/master/production", { items, note: note.trim() || null })
       setLines([])
       setNote("")
+      // Batch baru langsung berstatus pencucian → muat ulang & alihkan ke tab Cleaning.
+      refreshPipeline()
+      changeTab("cleaning")
     } catch (e) {
       setFormError(errMsg(e))
     } finally {
@@ -460,32 +481,49 @@ export default function ProduksiCssdPage() {
             </div>
           ) : (
             <div className="space-y-2">
-              {lines.map((l, i) => (
-                <div
-                  key={`${l.type}-${l.refId}`}
-                  className="flex items-center gap-3 rounded-lg border border-gray-200 px-3 py-2"
-                >
-                  <Badge variant={l.type === "paket" ? "info" : "default"}>
-                    {l.type === "paket" ? "Paket" : "Satuan"}
-                  </Badge>
-                  <span className="min-w-0 flex-1 truncate text-sm font-medium text-gray-800">{l.name}</span>
-                  <Input
-                    type="number"
-                    min={1}
-                    value={l.quantity}
-                    onChange={(e) => setLineQty(i, e.target.value)}
-                    className="h-9 w-20 text-center"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => removeLine(i)}
-                    className="rounded-md p-1.5 text-gray-400 hover:bg-red-50 hover:text-red-600"
-                    title="Hapus"
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </button>
-                </div>
-              ))}
+              {lines.map((l, i) => {
+                const sets = Number(l.quantity) || 0
+                return (
+                  <div key={`${l.type}-${l.refId}`} className="rounded-lg border border-gray-200 px-3 py-2">
+                    <div className="flex items-center gap-3">
+                      <Badge variant={l.type === "paket" ? "info" : "default"}>
+                        {l.type === "paket" ? "Paket" : "Satuan"}
+                      </Badge>
+                      <span className="min-w-0 flex-1 truncate text-sm font-medium text-gray-800">{l.name}</span>
+                      <Input
+                        type="number"
+                        min={1}
+                        value={l.quantity}
+                        onChange={(e) => setLineQty(i, e.target.value)}
+                        className="h-9 w-20 text-center"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => removeLine(i)}
+                        className="rounded-md p-1.5 text-gray-400 hover:bg-red-50 hover:text-red-600"
+                        title="Hapus"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    </div>
+
+                    {/* Detail isi paket: instrumen × total unit (per-set × jumlah set) */}
+                    {l.type === "paket" && l.items && l.items.length > 0 && (
+                      <div className="mt-2 flex flex-wrap items-center gap-1.5 border-t border-gray-100 pl-9 pt-2">
+                        <span className="text-xs text-gray-400">Isi:</span>
+                        {l.items.map((it) => (
+                          <span
+                            key={it.instrument_id}
+                            className="rounded bg-gray-50 px-1.5 py-0.5 text-xs text-gray-600 ring-1 ring-gray-200"
+                          >
+                            {it.instrument?.name ?? `#${it.instrument_id}`} ×{it.quantity * sets}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
             </div>
           )}
 
@@ -518,43 +556,18 @@ export default function ProduksiCssdPage() {
         </Card>
       </div>
       )}
-
-      {/* Modal sukses */}
-      <Modal
-        open={done !== null}
-        onClose={() => setDone(null)}
-        title="Produksi Dimulai"
-        size="sm"
-        footer={
-          <div className="flex w-full justify-end gap-2">
-            <Button variant="outline" onClick={() => setDone(null)}>
-              Produksi Lagi
-            </Button>
-            <Button
-              onClick={() => router.push("/cssd/monitoring?tab=cleaning")}
-              className="bg-[#075489] hover:bg-[#075489]/90 text-white"
-            >
-              Ke Cleaning
-              <ArrowRight className="ml-1.5 h-4 w-4" />
-            </Button>
-          </div>
-        }
-      >
-        {done && (
-          <div className="flex flex-col items-center gap-3 py-2 text-center">
-            <div className="flex h-14 w-14 items-center justify-center rounded-full bg-green-50">
-              <CheckCircle2 className="h-7 w-7 text-green-600" />
-            </div>
-            <div>
-              <p className="text-base font-semibold text-gray-900">Batch produksi dibuat</p>
-              <p className="mt-1 text-sm text-gray-500">
-                Batch <span className="font-mono font-semibold">{done}</span> sudah masuk antrean
-                Cleaning. Lanjutkan prosesnya di menu Tracking Order → tab Cleaning.
-              </p>
-            </div>
-          </div>
-        )}
-      </Modal>
     </div>
+  )
+}
+
+/**
+ * Bungkus dengan Suspense karena `useSearchParams` (baca tab dari URL) memaksa
+ * client-side rendering hingga boundary terdekat saat prerender.
+ */
+export default function ProduksiCssdPageWrapper() {
+  return (
+    <Suspense fallback={null}>
+      <ProduksiCssdPage />
+    </Suspense>
   )
 }
