@@ -14,6 +14,8 @@ type MonitoredRoom = {
   code: string
   name: string
   borrowed_count: number
+  // Unit yang sudah diterima & ditujukan ke ruangan tapi belum didistribusikan.
+  ready_count: number
   transaction_count: number
   instrument_count: number
 }
@@ -43,8 +45,8 @@ export default function MonitorRoomsPage() {
         if (active) {
           setRooms(
             all
-              .filter((r) => r.borrowed_count > 0)
-              .sort((a, b) => b.borrowed_count - a.borrowed_count),
+              .filter((r) => r.borrowed_count > 0 || r.ready_count > 0)
+              .sort((a, b) => b.borrowed_count + b.ready_count - (a.borrowed_count + a.ready_count)),
           )
           setError(null)
         }
@@ -163,6 +165,11 @@ export default function MonitorRoomsPage() {
                     <div className="mt-1.5 text-xs text-white/80">Unit Dipinjam</div>
                   </div>
                 </div>
+                {room.ready_count > 0 && (
+                  <div className="relative mt-2 inline-flex items-center gap-1.5 rounded-full bg-teal-400/25 px-3 py-1 text-xs font-medium text-teal-50">
+                    {room.ready_count} unit siap diantar
+                  </div>
+                )}
               </div>
             </Link>
           ))}
