@@ -22,6 +22,7 @@ type InstrumentType = {
   code: string
   name: string
   available_stocks_count?: number // jumlah unit berstatus `tersedia`
+  available_sterile_count?: number // jumlah unit STERIL siap-order (di gudang steril)
 }
 
 // Katalog paket instrumen (Master › Katalog Instrumen, tipe `paket`).
@@ -30,7 +31,8 @@ type PaketCatalog = {
   code: string
   name: string
   items_count?: number
-  available_sets?: number // jumlah set paket yang bisa dipenuhi dari stok tersedia
+  available_sets?: number // set yang bisa dipenuhi dari stok tersedia
+  available_sterile_sets?: number // set yang bisa dipenuhi dari stok STERIL
 }
 
 // Rincian isi paket (jenis instrumen + jumlah per set), dari endpoint show katalog.
@@ -143,19 +145,28 @@ export default function TambahOrderInstrumenPage() {
     setOrderTime((prev) => prev || time)
   }, [])
 
-  // Semua jenis instrumen bisa diorder — unit fisik dialokasikan saat CSSD
-  // menerima pesanan, jadi stok tersedia saat ini tidak membatasi pemesanan.
-  const instrumentOptions = instruments.map((i) => ({
-    value: String(i.id),
-    label: `${i.code ? `${i.code} — ` : ""}${i.name}`,
-  }))
+  // Order = peminjaman barang yang SUDAH STERIL. Hanya tampilkan instrumen yang
+  // punya stok steril (sudah disterilkan & tersimpan di gudang steril).
+  const instrumentOptions = instruments
+    .filter((i) => (i.available_sterile_count ?? 0) > 0)
+    .map((i) => ({
+      value: String(i.id),
+      label: `${i.code ? `${i.code} — ` : ""}${i.name} · steril ${i.available_sterile_count}`,
+    }))
 
-  // Semua paket bisa diorder — unit fisik dialokasikan saat CSSD menerima
-  // pesanan, jadi set tersedia saat ini tidak membatasi pemesanan.
-  const catalogOptions = catalogs.map((c) => ({
-    value: String(c.id),
-    label: `${c.code} — ${c.name}`,
-  }))
+  // Hanya paket yang seluruh komponennya bisa dipenuhi dari stok steril.
+  const catalogOptions = catalogs
+    .filter((c) => (c.available_sterile_sets ?? 0) > 0)
+    .map((c) => ({
+      value: String(c.id),
+      label: `${c.code} — ${c.name} · steril ${c.available_sterile_sets} set`,
+    }))
+
+  // Stok steril yang tersedia untuk satu instrumen (satuan) / paket (set).
+  function sterileAvailFor(type: AddMode, refId: number): number {
+    if (type === "satuan") return instruments.find((i) => i.id === refId)?.available_sterile_count ?? 0
+    return catalogs.find((c) => c.id === refId)?.available_sterile_sets ?? 0
+  }
 
   // Tambah / gabungkan baris permintaan. Bila jenis/paket yang sama sudah ada,
   // jumlahnya diakumulasi alih-alih membuat baris baru.
@@ -180,6 +191,14 @@ export default function TambahOrderInstrumenPage() {
     const inst = instruments.find((i) => String(i.id) === newInstrumentId)
     const qty = Number(newInstrumentQty)
     if (!inst || !qty || qty <= 0) return
+    // Tidak boleh melebihi stok steril (termasuk yang sudah ada di daftar).
+    const avail = inst.available_sterile_count ?? 0
+    const already = Number(requests.find((r) => r.type === "satuan" && r.refId === inst.id)?.quantity) || 0
+    if (already + qty > avail) {
+      setFormError(`Stok steril "${inst.name}" hanya ${avail}${already ? ` (sudah ${already} di daftar)` : ""}.`)
+      return
+    }
+    setFormError(null)
     addRequest("satuan", inst.id, inst.name, qty)
     setNewInstrumentId("")
     setNewInstrumentQty("1")
@@ -205,6 +224,14 @@ export default function TambahOrderInstrumenPage() {
     const cat = catalogs.find((c) => String(c.id) === newCatalogId)
     const qty = Number(newCatalogQty)
     if (!cat || !qty || qty <= 0) return
+    // Tidak boleh melebihi jumlah set yang bisa dipenuhi dari stok steril.
+    const avail = cat.available_sterile_sets ?? 0
+    const already = Number(requests.find((r) => r.type === "paket" && r.refId === cat.id)?.quantity) || 0
+    if (already + qty > avail) {
+      setFormError(`Stok steril paket "${cat.name}" hanya cukup untuk ${avail} set${already ? ` (sudah ${already})` : ""}.`)
+      return
+    }
+    setFormError(null)
     const contents: PaketContent[] = paketItems.map((it) => ({
       name: it.instrument?.name ?? `Instrumen #${it.instrument_id}`,
       perSet: it.quantity,
@@ -244,6 +271,13 @@ export default function TambahOrderInstrumenPage() {
     const invalid = requests.some((r) => !/^\d+$/.test(r.quantity) || Number(r.quantity) < 1)
     if (invalid) {
       setFormError("Jumlah pada setiap permintaan harus diisi minimal 1.")
+      return
+    }
+    // Pastikan tiap baris tidak melebihi stok steril (mis. setelah diedit manual).
+    const over = requests.find((r) => Number(r.quantity) > sterileAvailFor(r.type, r.refId))
+    if (over) {
+      const avail = sterileAvailFor(over.type, over.refId)
+      setFormError(`"${over.name}" melebihi stok steril (maks ${avail}${over.type === "paket" ? " set" : ""}).`)
       return
     }
     setFormError(null)
@@ -366,7 +400,7 @@ export default function TambahOrderInstrumenPage() {
           <div>
             <h2 className="text-base font-semibold text-gray-900">Daftar Permintaan</h2>
             <p className="mt-0.5 text-xs text-gray-400">
-              Cukup tentukan jumlah. Unit fisik dialokasikan otomatis saat CSSD menerima pesanan.
+              Hanya barang yang sudah steril (tersimpan di gudang steril) yang bisa diorder.
             </p>
           </div>
           {requests.length > 0 && <Badge variant="info">{totalQty} unit</Badge>}

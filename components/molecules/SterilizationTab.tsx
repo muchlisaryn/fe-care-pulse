@@ -37,12 +37,33 @@ function errMsg(e: unknown): string {
   return x.response?.data?.message ?? "Terjadi kesalahan."
 }
 
+// Masa simpan steril default (hari) — selaras dengan backend (Sterilization::STERILE_SHELF_LIFE_DAYS).
+const STERILE_SHELF_LIFE_DAYS = 7
+
+// "YYYY-MM-DD" dari tgl sterilisasi + masa simpan default, untuk pra-isi kedaluwarsa.
+function defaultExpiry(sterilizedAt: string | null | undefined): string {
+  const base = sterilizedAt ? new Date(sterilizedAt) : new Date()
+  if (Number.isNaN(base.getTime())) return ""
+  base.setDate(base.getDate() + STERILE_SHELF_LIFE_DAYS)
+  base.setMinutes(base.getMinutes() - base.getTimezoneOffset())
+  return base.toISOString().slice(0, 10)
+}
+
 const METHOD_OPTIONS = [
   { value: "uap", label: "Uap (Steam / Autoclave)" },
   { value: "eo", label: "Ethylene Oxide (EO)" },
   { value: "plasma", label: "Plasma H2O2" },
   { value: "panas_kering", label: "Panas Kering" },
 ]
+
+// Preset suhu (°C) & durasi (menit) standar per metode sterilisasi — terisi
+// otomatis saat metode dipilih. Operator tetap bisa mengubah manual.
+const METHOD_DEFAULTS: Record<string, { temperature: string; duration_minutes: string }> = {
+  uap: { temperature: "134", duration_minutes: "30" },
+  eo: { temperature: "55", duration_minutes: "180" },
+  plasma: { temperature: "50", duration_minutes: "47" },
+  panas_kering: { temperature: "170", duration_minutes: "60" },
+}
 
 const emptyForm = {
   machine: "",
@@ -52,8 +73,6 @@ const emptyForm = {
   duration_minutes: "",
   sterilized_at: "",
   expiry_date: "",
-  chemical_indicator: "",
-  biological_indicator: "",
   note: "",
 }
 
@@ -88,7 +107,25 @@ export function SterilizationTab({
   function openBatch(order: SterilizeOrder) {
     setActive(order)
     setError(null)
-    setForm({ ...emptyForm, sterilized_at: nowLocalInput() })
+    // Pra-isi suhu & durasi sesuai preset metode default (emptyForm.method).
+    const preset = METHOD_DEFAULTS[emptyForm.method]
+    setForm({
+      ...emptyForm,
+      sterilized_at: nowLocalInput(),
+      temperature: preset?.temperature ?? "",
+      duration_minutes: preset?.duration_minutes ?? "",
+    })
+  }
+
+  // Ganti metode → muat preset suhu & durasi standar metode tersebut.
+  function changeMethod(method: string) {
+    const preset = METHOD_DEFAULTS[method]
+    setForm((f) => ({
+      ...f,
+      method,
+      temperature: preset?.temperature ?? f.temperature,
+      duration_minutes: preset?.duration_minutes ?? f.duration_minutes,
+    }))
   }
 
   async function createBatch() {
@@ -113,8 +150,6 @@ export function SterilizationTab({
         duration_minutes: num(form.duration_minutes),
         sterilized_at: new Date(form.sterilized_at).toISOString(),
         expiry_date: form.expiry_date || null,
-        chemical_indicator: form.chemical_indicator.trim() || null,
-        biological_indicator: form.biological_indicator.trim() || null,
         note: form.note.trim() || null,
       })
       const batch = res.data?.data?.sterilization?.code ?? "—"
@@ -135,7 +170,8 @@ export function SterilizationTab({
     setVForm({
       chemical_indicator: b?.chemical_indicator ?? "",
       biological_indicator: b?.biological_indicator ?? "",
-      expiry_date: b?.expiry_date ?? "",
+      // Pra-isi kedaluwarsa = tgl sterilisasi + masa simpan default (bisa diubah).
+      expiry_date: b?.expiry_date ?? defaultExpiry(b?.sterilized_at),
       note: "",
     })
   }
@@ -301,7 +337,7 @@ export function SterilizationTab({
                 <Select
                   id="str-method"
                   value={form.method}
-                  onChange={(e) => setForm((f) => ({ ...f, method: e.target.value }))}
+                  onChange={(e) => changeMethod(e.target.value)}
                 >
                   {METHOD_OPTIONS.map((m) => (
                     <option key={m.value} value={m.value}>
@@ -359,24 +395,6 @@ export function SterilizationTab({
                   type="date"
                   value={form.expiry_date}
                   onChange={(e) => setForm((f) => ({ ...f, expiry_date: e.target.value }))}
-                />
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="str-chem">Indikator Kimia</Label>
-                <Input
-                  id="str-chem"
-                  value={form.chemical_indicator}
-                  onChange={(e) => setForm((f) => ({ ...f, chemical_indicator: e.target.value }))}
-                  placeholder="mis. Lulus / Lot A-22"
-                />
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="str-bio">Indikator Biologis</Label>
-                <Input
-                  id="str-bio"
-                  value={form.biological_indicator}
-                  onChange={(e) => setForm((f) => ({ ...f, biological_indicator: e.target.value }))}
-                  placeholder="mis. Negatif"
                 />
               </div>
             </div>
@@ -476,21 +494,27 @@ export function SterilizationTab({
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <div className="space-y-1.5">
                 <Label htmlFor="v-chem">Indikator Kimia</Label>
-                <Input
+                <Select
                   id="v-chem"
                   value={vForm.chemical_indicator}
                   onChange={(e) => setVForm((f) => ({ ...f, chemical_indicator: e.target.value }))}
-                  placeholder="mis. Lulus / Lot A-22"
-                />
+                >
+                  <option value="">— Pilih —</option>
+                  <option value="Berhasil">Berhasil</option>
+                  <option value="Tidak Berhasil">Tidak Berhasil</option>
+                </Select>
               </div>
               <div className="space-y-1.5">
                 <Label htmlFor="v-bio">Indikator Biologis</Label>
-                <Input
+                <Select
                   id="v-bio"
                   value={vForm.biological_indicator}
                   onChange={(e) => setVForm((f) => ({ ...f, biological_indicator: e.target.value }))}
-                  placeholder="mis. Negatif"
-                />
+                >
+                  <option value="">— Pilih —</option>
+                  <option value="Negatif">Negatif</option>
+                  <option value="Positif">Positif</option>
+                </Select>
               </div>
               <div className="space-y-1.5">
                 <Label htmlFor="v-exp">Tanggal Kedaluwarsa Steril</Label>

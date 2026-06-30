@@ -22,7 +22,6 @@ import {
   setOrderStatus,
   setOrderPage,
   invalidateOrders,
-  ORDER_STATUSES,
   type Order,
   type OrderItem,
   type OrderStatus,
@@ -59,16 +58,27 @@ const statusLabel: Record<OrderStatus, string> = {
   selesai: "Siap Disterilkan",
   sterilisasi: "Sedang Disterilkan",
   steril: "Steril / Siap Rilis",
-  digudang: "Di Gudang Steril",
-  dipinjam: "Distribusi",
+  digudang: "Siap Distribusi",
+  dipinjam: "Terdistribusi",
   dikembalikan: "Dikembalikan",
   dibatalkan: "Dibatalkan",
 }
 
+// Status yang relevan untuk order PEMINJAMAN (alur: diajukan → diterima/siap
+// distribusi → terdistribusi → dikembalikan / dibatalkan). Status pipeline produksi
+// (pencucian–steril) tidak dipakai order sehingga tidak ditawarkan sebagai filter.
+const ORDER_FILTER_STATUSES: OrderStatus[] = [
+  "diajukan",
+  "digudang",
+  "dipinjam",
+  "dikembalikan",
+  "dibatalkan",
+]
+
 // Tombol aksi status berikutnya:
-// diajukan → (diterima via Monitoring) → pencucian → pengemasan → ... → dipinjam
-// Tahapan pipeline (pencucian–selesai) dijalankan dari menu Monitoring, jadi
-// di sini hanya order "diajukan" yang masih bisa dibatalkan.
+// diajukan → (Terima & Distribusi via Monitoring) → digudang → dipinjam → dikembalikan
+// Order minta barang yang sudah steril, jadi langsung disiapkan distribusi (bukan
+// lewat pipeline produksi). Di sini hanya order "diajukan" yang masih bisa dibatalkan.
 const nextActions: Record<OrderStatus, { label: string; to: OrderStatus; variant: "primary" | "danger" }[]> = {
   diajukan: [
     { label: "Batalkan", to: "dibatalkan", variant: "danger" },
@@ -124,6 +134,8 @@ const PROCESSED_STATUSES: OrderStatus[] = [
   "pencucian",
   "pengemasan",
   "selesai",
+  // Order yang sudah diterima (unit steril dialokasikan) tak boleh dibatalkan lagi.
+  "digudang",
   "dipinjam",
   "dikembalikan",
 ]
@@ -179,7 +191,7 @@ export default function OrderInstrumenPage() {
   // Opsi filter status: "" = semua, lalu tiap status order.
   const statusFilterOptions = [
     { value: "", label: "Semua Status" },
-    ...ORDER_STATUSES.map((s) => ({ value: s, label: statusLabel[s] })),
+    ...ORDER_FILTER_STATUSES.map((s) => ({ value: s, label: statusLabel[s] })),
   ]
 
   const [searchInput, setSearchInput] = useState(search)
@@ -1144,6 +1156,8 @@ export default function OrderInstrumenPage() {
               <Field label="Rencana Kembali" value={formatDate(detail.return_plan_date)} />
               <Field label="Tanggal Kembali" value={formatDate(detail.return_actual_date)} />
               <Field label="Dikembalikan Oleh" value={detail.returned_by} />
+              <Field label="No. RM Pasien" value={detail.medical_record_no} />
+              <Field label="Nama Pasien" value={detail.patient_name} />
               <div className="space-y-1">
                 <p className="text-xs font-semibold uppercase tracking-wide text-gray-400">Status</p>
                 <OrderStatusBadge status={detail.status} />

@@ -28,10 +28,20 @@ import {
   fetchStorageInventory,
   invalidateStorage,
   type StorageIncomingOrder,
+  type StorageIncomingUnit,
 } from "@/lib/store/slices/storageSlice"
 import api from "@/lib/axios"
 
 type StorageTab = "simpan" | "inventaris"
+
+// Kelompok unit pada modal simpan ke rak: tiap paket = satu grup (satu lokasi
+// rak untuk seluruh paket); tiap instrumen satuan = grup berisi satu unit.
+type StoreUnitGroup = {
+  key: string
+  source: "satuan" | "paket"
+  packageName: string | null
+  units: StorageIncomingUnit[]
+}
 
 function formatDate(value: string | null) {
   if (!value) return "—"
@@ -54,7 +64,6 @@ export default function StorageSterilPage() {
     inventory,
     inventoryLoading,
     inventoryLoaded,
-    dirty,
   } = useAppSelector((s) => s.storage)
 
   const [tab, setTab] = useState<StorageTab>("simpan")
@@ -77,10 +86,13 @@ export default function StorageSterilPage() {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
+  // Selalu segarkan saat halaman dibuka agar unit yang baru selesai disterilkan
+  // langsung muncul (tanpa perlu refresh manual). Data cache tetap tampil seketika
+  // sementara refetch berjalan di latar — spinner hanya tampil saat load pertama.
   useEffect(() => {
-    if (!incomingLoaded || dirty) dispatch(fetchStorageIncoming())
-    if (!inventoryLoaded || dirty) dispatch(fetchStorageInventory())
-  }, [incomingLoaded, inventoryLoaded, dirty, dispatch])
+    dispatch(fetchStorageIncoming())
+    dispatch(fetchStorageInventory())
+  }, [dispatch])
 
   function refresh() {
     dispatch(fetchStorageIncoming())
@@ -109,6 +121,17 @@ export default function StorageSterilPage() {
     })
   }
 
+  // Set satu lokasi rak untuk semua unit (belum tersimpan) dalam satu grup/paket.
+  function setGroupRack(group: StoreUnitGroup, value: string) {
+    setRackById((prev) => {
+      const next = { ...prev }
+      group.units.forEach((u) => {
+        if (!u.stored) next[u.id] = value
+      })
+      return next
+    })
+  }
+
   async function saveStorage() {
     if (!active || saving) return
     const items = active.units
@@ -131,6 +154,30 @@ export default function StorageSterilPage() {
       setSaving(false)
     }
   }
+
+  // Unit modal dikelompokkan: paket (per package_name) jadi satu grup → satu rak,
+  // instrumen satuan tetap per unit.
+  const unitGroups = useMemo<StoreUnitGroup[]>(() => {
+    if (!active) return []
+    const groups: StoreUnitGroup[] = []
+    const paketByName = new Map<string, StoreUnitGroup>()
+    for (const u of active.units) {
+      if (u.source === "paket") {
+        const name = u.package_name ?? "Paket"
+        const key = `paket|${name}`
+        let g = paketByName.get(key)
+        if (!g) {
+          g = { key, source: "paket", packageName: name, units: [] }
+          paketByName.set(key, g)
+          groups.push(g)
+        }
+        g.units.push(u)
+      } else {
+        groups.push({ key: `satuan|${u.id}`, source: "satuan", packageName: null, units: [u] })
+      }
+    }
+    return groups
+  }, [active])
 
   const q = search.trim().toLowerCase()
   const incomingFiltered = useMemo(() => {
@@ -241,7 +288,7 @@ export default function StorageSterilPage() {
         </div>
 
         {tab === "simpan" ? (
-          incomingLoading ? (
+          incomingLoading && !incomingLoaded ? (
             <div className="py-16 text-center text-sm text-gray-400">Memuat data...</div>
           ) : incomingFiltered.length === 0 ? (
             <div className="py-16 text-center text-sm text-gray-400">
@@ -291,7 +338,7 @@ export default function StorageSterilPage() {
               ))}
             </div>
           )
-        ) : inventoryLoading ? (
+        ) : inventoryLoading && !inventoryLoaded ? (
           <div className="py-16 text-center text-sm text-gray-400">Memuat data...</div>
         ) : inventoryFiltered.length === 0 ? (
           <div className="py-16 text-center text-sm text-gray-400">
@@ -501,40 +548,92 @@ export default function StorageSterilPage() {
               </div>
             </div>
 
-            {/* Daftar unit + rak per unit */}
+            {/* Daftar unit + rak. Paket → satu rak per paket; satuan → per unit. */}
             <div className="space-y-2">
-              {active.units.map((u) => (
-                <div
-                  key={u.id}
-                  className="flex flex-wrap items-center gap-3 rounded-lg border border-gray-200 px-3 py-2"
-                >
-                  <Boxes className="h-4 w-4 shrink-0 text-emerald-500" />
-                  <div className="min-w-0 flex-1">
-                    <span className="font-mono text-xs font-semibold text-[#075489] bg-[#075489]/8 px-2 py-0.5 rounded">
-                      {u.code ?? `#${u.id}`}
-                    </span>
-                    <span className="ml-2 text-sm text-gray-700">{u.instrument ?? "—"}</span>
-                  </div>
-                  {u.stored ? (
-                    <Badge variant="success">
-                      <span className="inline-flex items-center gap-1">
-                        <MapPin className="h-3 w-3" />
-                        {u.rack_code}
-                      </span>
-                    </Badge>
-                  ) : (
-                    <div className="relative w-44">
-                      <ScanLine className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-gray-400 pointer-events-none" />
-                      <Input
-                        value={rackById[u.id] ?? ""}
-                        onChange={(e) => setRackById((p) => ({ ...p, [u.id]: e.target.value }))}
-                        placeholder="Lokasi rak"
-                        className="h-9 pl-8 font-mono text-xs"
-                      />
+              {unitGroups.map((g) => {
+                // Satuan: satu unit per grup → baris rak per unit (perilaku lama).
+                if (g.source === "satuan") {
+                  const u = g.units[0]
+                  return (
+                    <div
+                      key={g.key}
+                      className="flex flex-wrap items-center gap-3 rounded-lg border border-gray-200 px-3 py-2"
+                    >
+                      <Boxes className="h-4 w-4 shrink-0 text-emerald-500" />
+                      <div className="min-w-0 flex-1">
+                        <span className="font-mono text-xs font-semibold text-[#075489] bg-[#075489]/8 px-2 py-0.5 rounded">
+                          {u.code ?? `#${u.id}`}
+                        </span>
+                        <span className="ml-2 text-sm text-gray-700">{u.instrument ?? "—"}</span>
+                      </div>
+                      {u.stored ? (
+                        <Badge variant="success">
+                          <span className="inline-flex items-center gap-1">
+                            <MapPin className="h-3 w-3" />
+                            {u.rack_code}
+                          </span>
+                        </Badge>
+                      ) : (
+                        <div className="relative w-44">
+                          <ScanLine className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-gray-400 pointer-events-none" />
+                          <Input
+                            value={rackById[u.id] ?? ""}
+                            onChange={(e) => setRackById((p) => ({ ...p, [u.id]: e.target.value }))}
+                            placeholder="Lokasi rak"
+                            className="h-9 pl-8 font-mono text-xs"
+                          />
+                        </div>
+                      )}
                     </div>
-                  )}
-                </div>
-              ))}
+                  )
+                }
+
+                // Paket: seluruh unit paket disimpan di SATU rak.
+                const firstUnstored = g.units.find((u) => !u.stored)
+                const allStored = !firstUnstored
+                const groupRack = firstUnstored ? rackById[firstUnstored.id] ?? "" : g.units[0]?.rack_code ?? ""
+                return (
+                  <div key={g.key} className="rounded-lg border border-gray-200 px-3 py-2.5">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Boxes className="h-4 w-4 shrink-0 text-emerald-500" />
+                      <Badge variant="info">Paket</Badge>
+                      <span className="text-sm font-medium text-gray-800">{g.packageName}</span>
+                      <span className="text-xs text-gray-400">{g.units.length} unit</span>
+                    </div>
+                    <div className="mt-2 flex flex-wrap gap-1.5">
+                      {g.units.map((u) => (
+                        <span
+                          key={u.id}
+                          className="font-mono text-[11px] font-semibold text-[#075489] bg-[#075489]/8 px-1.5 py-0.5 rounded"
+                          title={u.instrument ?? undefined}
+                        >
+                          {u.code ?? `#${u.id}`}
+                        </span>
+                      ))}
+                    </div>
+                    <div className="mt-2.5">
+                      {allStored ? (
+                        <Badge variant="success">
+                          <span className="inline-flex items-center gap-1">
+                            <MapPin className="h-3 w-3" />
+                            {groupRack || "Tersimpan"}
+                          </span>
+                        </Badge>
+                      ) : (
+                        <div className="relative w-full sm:w-64">
+                          <ScanLine className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-gray-400 pointer-events-none" />
+                          <Input
+                            value={groupRack}
+                            onChange={(e) => setGroupRack(g, e.target.value)}
+                            placeholder="Satu lokasi rak untuk paket ini"
+                            className="h-9 pl-8 font-mono text-xs"
+                          />
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )
+              })}
             </div>
           </div>
         )}

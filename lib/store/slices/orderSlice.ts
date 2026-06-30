@@ -76,6 +76,11 @@ export type Order = {
   returned_by: string | null
   status: OrderStatus
   note: string | null
+  // Tautan distribusi ke pasien (diisi saat order didistribusikan).
+  distributed_to: string | null
+  distributed_at: string | null
+  medical_record_no: string | null
+  patient_name: string | null
   room?: { id: number; code: string | null; name: string } | null
   user?: { id: number; name: string } | null
   items?: OrderItem[]

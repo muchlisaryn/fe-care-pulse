@@ -11,6 +11,7 @@ import {
   Circle,
   Printer,
   X,
+  ZoomIn,
 } from "lucide-react"
 import { Button } from "@/components/atoms/Button"
 import { Badge } from "@/components/atoms/Badge"
@@ -21,12 +22,19 @@ import { useAppSelector } from "@/lib/store/hooks"
 import api from "@/lib/axios"
 import type { CleaningOrder } from "@/lib/store/slices/cleaningSlice"
 
-// Label sterilisasi yang dicetak saat packaging selesai.
+// Satu label sterilisasi per alat instrumen yang dikemas.
+type SterilLabelItem = {
+  instrumentName: string
+  unitCode: string | null
+  source: "satuan" | "paket"
+  packageName: string | null
+}
+// Kumpulan label sterilisasi yang dicetak saat packaging selesai — satu label per alat.
 type SterilLabel = {
   code: string
   batch: string | null
-  setName: string
   packer: string
+  items: SterilLabelItem[]
 }
 
 function formatDateTime(value: string | null) {
@@ -49,7 +57,7 @@ function errMsg(e: unknown): string {
 
 type PackagingReq = {
   key: string
-  instrument: { id: number; code: string | null; name: string }
+  instrument: { id: number; code: string | null; name: string; image_url: string | null }
   source: "satuan" | "paket"
   package_name: string | null
   needed_qty: number
@@ -73,7 +81,7 @@ type PackagingData = {
 /**
  * Tab "Inspection & Packaging": checklist digital komponen set. Petugas memindai
  * barcode tiap unit instrumen untuk mencentangnya satu per satu (verifikasi
- * komponen ada). "Isi Otomatis" tersedia sebagai jalan pintas. Setelah lengkap →
+ * komponen ada). Setelah lengkap →
  * Selesaikan (bangkitkan nomor batch, order → siap disterilkan).
  */
 export function PackagingTab({
@@ -86,13 +94,8 @@ export function PackagingTab({
   const [active, setActive] = useState<CleaningOrder | null>(null)
   const [data, setData] = useState<PackagingData | null>(null)
   const [loading, setLoading] = useState(false)
-  const [autoFilling, setAutoFilling] = useState(false)
-  const [saving, setSaving] = useState(false)
   const [finishing, setFinishing] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  // Isi Otomatis menghasilkan PRATINJAU (belum potong stok). `staged` = ada
-  // pratinjau yang belum disimpan; stok baru terpotong saat klik Simpan.
-  const [staged, setStaged] = useState(false)
   const [scanCode, setScanCode] = useState("")
   const [scanning, setScanning] = useState(false)
   const [checking, setChecking] = useState<string | null>(null)
@@ -100,6 +103,8 @@ export function PackagingTab({
   const [unchecking, setUnchecking] = useState<number | null>(null)
   const [scanMsg, setScanMsg] = useState<{ type: "ok" | "err"; text: string } | null>(null)
   const [ready, setReady] = useState<SterilLabel | null>(null)
+  // Foto instrumen yang sedang di-zoom (klik thumbnail) — null = tidak ada.
+  const [zoom, setZoom] = useState<{ url: string; name: string } | null>(null)
   // ID petugas pengemas = user yang login.
   const packer = useAppSelector((s) => s.auth.name ?? s.auth.username ?? "—")
 
@@ -109,7 +114,6 @@ export function PackagingTab({
     setError(null)
     setScanCode("")
     setScanMsg(null)
-    setStaged(false)
     setLoading(true)
     try {
       const res = await api.get(`/master/orders/${order.id}/packaging`)
@@ -129,7 +133,6 @@ export function PackagingTab({
     try {
       const res = await api.post(`/master/orders/${active.id}/pack/scan`, { code: scanCode.trim() })
       setData(res.data.data)
-      setStaged(false)
       setScanMsg({ type: "ok", text: res.data.message ?? "Unit tercentang." })
       setScanCode("")
     } catch (e) {
@@ -147,7 +150,6 @@ export function PackagingTab({
     try {
       const res = await api.post(`/master/orders/${active.id}/pack/scan`, { code })
       setData(res.data.data)
-      setStaged(false)
       setScanMsg({ type: "ok", text: res.data.message ?? "Unit tercentang." })
     } catch (e) {
       setScanMsg({ type: "err", text: errMsg(e) })
@@ -166,54 +168,12 @@ export function PackagingTab({
         instrument_stock_id: stockId,
       })
       setData(res.data.data)
-      setStaged(false)
       setScanMsg({ type: "ok", text: res.data.message ?? "Centang dibatalkan." })
     } catch (e) {
       setScanMsg({ type: "err", text: errMsg(e) })
     } finally {
       setUnchecking(null)
     }
-  }
-
-  // Isi otomatis sisa komponen dari stok — PRATINJAU saja (belum potong stok).
-  // Stok baru diperbarui saat klik Simpan.
-  async function handleAutoFill() {
-    if (!active || autoFilling) return
-    setAutoFilling(true)
-    setError(null)
-    try {
-      const res = await api.post(`/master/orders/${active.id}/pack`, { preview: true })
-      setData(res.data.data)
-      setStaged(true)
-    } catch (e) {
-      setError(errMsg(e))
-    } finally {
-      setAutoFilling(false)
-    }
-  }
-
-  // Simpan hasil Isi Otomatis → commit alokasi unit (stok terpotong di sini).
-  async function handleSave() {
-    if (!active || saving) return
-    setSaving(true)
-    setError(null)
-    try {
-      const res = await api.post(`/master/orders/${active.id}/pack`)
-      setData(res.data.data)
-      setStaged(false)
-    } catch (e) {
-      setError(errMsg(e))
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  // Nama set dari komponen paket (gabung unik), atau "Instrumen Satuan".
-  function setNameFrom(reqs: PackagingReq[]): string {
-    const names = Array.from(
-      new Set(reqs.filter((r) => r.source === "paket" && r.package_name).map((r) => r.package_name as string)),
-    )
-    return names.length ? names.join(", ") : "Instrumen Satuan"
   }
 
   // Selesaikan packaging → bangkitkan nomor batch & order siap disterilkan.
@@ -224,11 +184,20 @@ export function PackagingTab({
     try {
       const res = await api.post(`/master/orders/${active.id}/packaging-complete`)
       const batch = res.data?.data?.code_transaction ?? data?.order.code_transaction ?? active.code_transaction ?? null
+      // Satu label per alat instrumen yang dikemas (per unit yang sudah dicentang).
+      const labelItems: SterilLabelItem[] = (data?.requirements ?? []).flatMap((r) =>
+        r.generated_units.map((u) => ({
+          instrumentName: r.instrument.name,
+          unitCode: u.code,
+          source: r.source,
+          packageName: r.package_name,
+        })),
+      )
       setReady({
         code: active.code,
         batch,
-        setName: setNameFrom(data?.requirements ?? []),
         packer,
+        items: labelItems,
       })
       setActive(null)
       setData(null)
@@ -248,44 +217,60 @@ export function PackagingTab({
     onChanged()
   }
 
-  // Cetak Label Barcode Sterilisasi (nama set, batch, ID pengemas + barcode Code128).
+  // Cetak Label Barcode Sterilisasi — SATU label per alat instrumen.
+  // Setiap label memuat nama alat, kode unit (barcode Code128), batch & ID pengemas.
   function printLabel() {
-    if (!ready?.batch) return
-    const svg = document.getElementById("steril-label-barcode")
-    const barcodeSvg = svg ? new XMLSerializer().serializeToString(svg) : ""
-    const w = window.open("", "_blank", "width=460,height=360")
+    if (!ready || ready.items.length === 0) return
+    const escapeHtml = (s: string) =>
+      s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+
+    const labels = ready.items
+      .map((it, i) => {
+        const svg = document.getElementById(`steril-label-barcode-${i}`)
+        const barcodeSvg = svg ? new XMLSerializer().serializeToString(svg) : ""
+        const unit = it.unitCode ?? "—"
+        const pkg = it.source === "paket" && it.packageName ? ` · ${escapeHtml(it.packageName)}` : ""
+        return `
+          <div class="label">
+            <div class="head">LABEL STERILISASI CSSD</div>
+            <div class="set">${escapeHtml(it.instrumentName)}</div>
+            <div class="sub">${it.source === "paket" ? "Paket" : "Satuan"}${pkg}</div>
+            <div class="bc">${barcodeSvg}</div>
+            <div class="batch">${escapeHtml(unit)}</div>
+            <table>
+              <tr><td class="k">Kode Alat</td><td class="v">${escapeHtml(unit)}</td></tr>
+              <tr><td class="k">No. Batch</td><td class="v">${escapeHtml(ready.batch ?? "—")}</td></tr>
+              <tr><td class="k">ID Petugas Pengemas</td><td class="v">${escapeHtml(ready.packer)}</td></tr>
+              <tr><td class="k">Tgl Sterilisasi</td><td class="v">__________</td></tr>
+              <tr><td class="k">Tgl Kedaluwarsa</td><td class="v">__________</td></tr>
+            </table>
+          </div>`
+      })
+      .join("")
+
+    const w = window.open("", "_blank", "width=460,height=600")
     if (!w) return
     w.document.write(`
       <html>
         <head>
-          <title>Label Sterilisasi ${ready.batch}</title>
+          <title>Label Sterilisasi ${escapeHtml(ready.batch ?? ready.code)}</title>
           <style>
             body { margin: 0; font-family: Arial, Helvetica, sans-serif; }
-            .label { width: 360px; margin: 12px auto; border: 1px solid #000; padding: 12px; }
+            .label { width: 360px; margin: 12px auto; border: 1px solid #000; padding: 12px; page-break-inside: avoid; }
             .head { text-align: center; font-weight: 700; font-size: 13px; letter-spacing: 1px; border-bottom: 1px dashed #999; padding-bottom: 6px; }
-            .set { text-align: center; font-size: 16px; font-weight: 700; margin: 8px 0; }
+            .set { text-align: center; font-size: 16px; font-weight: 700; margin: 8px 0 2px; }
+            .sub { text-align: center; font-size: 11px; color: #555; margin-bottom: 6px; }
             .bc { text-align: center; margin: 6px 0; }
             .batch { text-align: center; font-family: 'Courier New', monospace; font-weight: 700; letter-spacing: 2px; font-size: 14px; }
             table { width: 100%; font-size: 11px; margin-top: 8px; border-collapse: collapse; }
             td { padding: 2px 0; }
             td.k { color: #555; width: 42%; }
             td.v { font-weight: 600; }
-            @media print { @page { margin: 6mm; } }
+            @media print { @page { margin: 6mm; } .label { margin: 0 auto 8mm; } }
           </style>
         </head>
         <body>
-          <div class="label">
-            <div class="head">LABEL STERILISASI CSSD</div>
-            <div class="set">${ready.setName}</div>
-            <div class="bc">${barcodeSvg}</div>
-            <div class="batch">${ready.batch}</div>
-            <table>
-              <tr><td class="k">No. Batch</td><td class="v">${ready.batch}</td></tr>
-              <tr><td class="k">ID Petugas Pengemas</td><td class="v">${ready.packer}</td></tr>
-              <tr><td class="k">Tgl Sterilisasi</td><td class="v">__________</td></tr>
-              <tr><td class="k">Tgl Kedaluwarsa</td><td class="v">__________</td></tr>
-            </table>
-          </div>
+          ${labels}
         </body>
       </html>
     `)
@@ -299,7 +284,7 @@ export function PackagingTab({
   const totalChecked = reqs.reduce((s, r) => s + r.generated_qty, 0)
   const shortage = Math.max(0, totalNeeded - totalChecked)
   const busy =
-    loading || autoFilling || saving || finishing || scanning || checking !== null || unchecking !== null
+    loading || finishing || scanning || checking !== null || unchecking !== null
 
   return (
     <>
@@ -359,10 +344,6 @@ export function PackagingTab({
           <div className="flex w-full items-center justify-between gap-3">
             {error ? (
               <p className="text-sm text-red-600">{error}</p>
-            ) : staged ? (
-              <span className="text-xs text-amber-600">
-                Pratinjau isi otomatis — klik <b>Simpan</b> untuk memperbarui stok.
-              </span>
             ) : (
               <span className="text-xs text-gray-400">
                 Centang {totalChecked}/{totalNeeded} komponen
@@ -374,29 +355,12 @@ export function PackagingTab({
                 Batal
               </Button>
               <Button
-                onClick={handleAutoFill}
-                disabled={busy || shortage === 0}
-                variant="outline"
+                onClick={handleFinish}
+                disabled={busy || totalChecked === 0}
+                className="bg-[#075489] hover:bg-[#075489]/90 text-white"
               >
-                {autoFilling ? "Mengisi..." : "Isi Otomatis"}
+                {finishing ? "Memproses..." : "Selesaikan"}
               </Button>
-              {staged ? (
-                <Button
-                  onClick={handleSave}
-                  disabled={busy}
-                  className="bg-violet-600 hover:bg-violet-700 text-white"
-                >
-                  {saving ? "Menyimpan..." : "Simpan"}
-                </Button>
-              ) : (
-                <Button
-                  onClick={handleFinish}
-                  disabled={busy || totalChecked === 0}
-                  className="bg-[#075489] hover:bg-[#075489]/90 text-white"
-                >
-                  {finishing ? "Memproses..." : "Selesaikan"}
-                </Button>
-              )}
             </div>
           </div>
         }
@@ -455,11 +419,6 @@ export function PackagingTab({
                   Kurang {shortage} — tetap bisa diselesaikan
                 </span>
               )}
-              {staged && (
-                <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-700">
-                  Pratinjau · belum disimpan
-                </span>
-              )}
               {data.order.code_transaction && (
                 <span className="inline-flex items-center gap-1 rounded-full bg-violet-50 px-2 py-0.5 text-xs font-semibold text-violet-700">
                   <Package className="h-3.5 w-3.5" />
@@ -474,30 +433,54 @@ export function PackagingTab({
                 const complete = r.generated_qty >= r.needed_qty
                 const emptySlots = Math.max(0, r.needed_qty - r.generated_qty)
                 return (
-                  <div key={r.key} className="rounded-lg border border-gray-200 px-3 py-2.5">
-                    <div className="flex flex-wrap items-center gap-2">
-                      {complete ? (
-                        <CheckCircle2 className="h-4 w-4 shrink-0 text-green-500" />
-                      ) : (
-                        <Circle className="h-4 w-4 shrink-0 text-gray-300" />
-                      )}
-                      <Badge variant={r.source === "paket" ? "info" : "default"}>
-                        {r.source === "paket" ? "Paket" : "Satuan"}
-                      </Badge>
-                      <span className="font-medium text-gray-800">{r.instrument.name}</span>
-                      {r.source === "paket" && r.package_name && (
-                        <span className="text-xs text-gray-400">· {r.package_name}</span>
-                      )}
-                      <span
-                        className={
-                          "ml-auto text-xs font-semibold " +
-                          (complete ? "text-green-600" : "text-amber-600")
-                        }
+                  <div key={r.key} className="flex gap-3 rounded-lg border border-gray-200 px-3 py-2.5">
+                    {/* Foto instrumen — klik untuk zoom. Bantu verifikasi komponen fisik. */}
+                    {r.instrument.image_url ? (
+                      <button
+                        type="button"
+                        onClick={() => setZoom({ url: r.instrument.image_url as string, name: r.instrument.name })}
+                        title="Klik untuk perbesar"
+                        className="group relative h-14 w-14 shrink-0 cursor-zoom-in overflow-hidden rounded-md border border-gray-200"
                       >
-                        {r.generated_qty}/{r.needed_qty}
-                      </span>
-                    </div>
-                    <div className="mt-2 flex flex-wrap gap-1.5">
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          src={r.instrument.image_url}
+                          alt={r.instrument.name}
+                          className="h-full w-full object-cover transition-transform group-hover:scale-105"
+                        />
+                        <span className="absolute inset-0 flex items-center justify-center bg-black/0 text-white opacity-0 transition-opacity group-hover:bg-black/30 group-hover:opacity-100">
+                          <ZoomIn className="h-4 w-4" />
+                        </span>
+                      </button>
+                    ) : (
+                      <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-md border border-dashed border-gray-200 bg-gray-50 text-gray-300">
+                        <Package className="h-6 w-6" />
+                      </div>
+                    )}
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        {complete ? (
+                          <CheckCircle2 className="h-4 w-4 shrink-0 text-green-500" />
+                        ) : (
+                          <Circle className="h-4 w-4 shrink-0 text-gray-300" />
+                        )}
+                        <Badge variant={r.source === "paket" ? "info" : "default"}>
+                          {r.source === "paket" ? "Paket" : "Satuan"}
+                        </Badge>
+                        <span className="font-medium text-gray-800">{r.instrument.name}</span>
+                        {r.source === "paket" && r.package_name && (
+                          <span className="text-xs text-gray-400">· {r.package_name}</span>
+                        )}
+                        <span
+                          className={
+                            "ml-auto text-xs font-semibold " +
+                            (complete ? "text-green-600" : "text-amber-600")
+                          }
+                        >
+                          {r.generated_qty}/{r.needed_qty}
+                        </span>
+                      </div>
+                      <div className="mt-2 flex flex-wrap gap-1.5">
                       {r.generated_units.map((u) => (
                         <span
                           key={u.id}
@@ -506,21 +489,18 @@ export function PackagingTab({
                           <Check className="h-3 w-3" />
                           {u.code ?? `#${u.id}`}
                           {/* Edit: batalkan centang unit tersimpan (ganti dengan unit lain) */}
-                          {!staged && (
-                            <button
-                              type="button"
-                              onClick={() => handleUncheck(u.id)}
-                              disabled={busy}
-                              title="Batalkan centang / ganti unit"
-                              className="ml-0.5 rounded-full p-0.5 text-green-600 transition-colors hover:bg-green-100 hover:text-red-600 disabled:opacity-50"
-                            >
-                              <X className="h-3 w-3" />
-                            </button>
-                          )}
+                          <button
+                            type="button"
+                            onClick={() => handleUncheck(u.id)}
+                            disabled={busy}
+                            title="Batalkan centang / ganti unit"
+                            className="ml-0.5 rounded-full p-0.5 text-green-600 transition-colors hover:bg-green-100 hover:text-red-600 disabled:opacity-50"
+                          >
+                            <X className="h-3 w-3" />
+                          </button>
                         </span>
                       ))}
-                      {!staged &&
-                        Array.from({ length: emptySlots }).map((_, i) => {
+                      {Array.from({ length: emptySlots }).map((_, i) => {
                           // Kandidat unit tersedia untuk slot ini (kode langsung).
                           const cand = r.available_units[i]
                           if (!cand || !cand.code) {
@@ -551,6 +531,7 @@ export function PackagingTab({
                             </button>
                           )
                         })}
+                      </div>
                     </div>
                   </div>
                 )
@@ -573,11 +554,11 @@ export function PackagingTab({
             </Button>
             <Button
               onClick={printLabel}
-              disabled={!ready?.batch}
+              disabled={!ready || ready.items.length === 0}
               className="bg-[#075489] hover:bg-[#075489]/90 text-white"
             >
               <Printer className="mr-1.5 h-4 w-4" />
-              Cetak Label
+              Cetak Label{ready && ready.items.length > 0 ? ` (${ready.items.length})` : ""}
             </Button>
           </div>
         }
@@ -588,41 +569,93 @@ export function PackagingTab({
               <CheckCircle2 className="h-5 w-5 shrink-0" />
               Inspeksi &amp; packaging selesai — order siap disterilkan.
             </div>
+            <p className="text-xs text-gray-500">
+              {ready.items.length} label sterilisasi (satu per alat) · Batch{" "}
+              <span className="font-mono font-semibold text-gray-700">{ready.batch ?? "—"}</span>
+            </p>
 
-            {/* Preview label sterilisasi */}
-            <div className="rounded-lg border border-gray-300 p-3">
-              <p className="text-center text-[11px] font-bold uppercase tracking-wider text-gray-700 border-b border-dashed border-gray-300 pb-1.5">
-                Label Sterilisasi CSSD
-              </p>
-              <p className="mt-2 text-center text-base font-bold text-gray-900">{ready.setName}</p>
-              <div className="my-1.5 flex justify-center">
-                {ready.batch ? (
-                  <Barcode id="steril-label-barcode" value={ready.batch} height={56} moduleWidth={2} />
-                ) : (
-                  <span className="text-xs text-gray-400">Nomor batch belum tersedia</span>
-                )}
-              </div>
-              <p className="text-center font-mono text-sm font-semibold tracking-wider text-gray-800">
-                {ready.batch ?? "—"}
-              </p>
-              <div className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1 text-[11px]">
-                <span className="text-gray-500">No. Batch</span>
-                <span className="font-semibold text-gray-800">{ready.batch ?? "—"}</span>
-                <span className="text-gray-500">ID Pengemas</span>
-                <span className="font-semibold text-gray-800">{ready.packer}</span>
-                <span className="text-gray-500">Tgl Steril</span>
-                <span className="text-gray-400">menyusul (sterilisasi)</span>
-                <span className="text-gray-500">Tgl Kedaluwarsa</span>
-                <span className="text-gray-400">menyusul (sterilisasi)</span>
-              </div>
+            {/* Preview label sterilisasi — satu per alat instrumen */}
+            <div className="max-h-[55vh] space-y-3 overflow-y-auto pr-1">
+              {ready.items.map((it, i) => {
+                const unit = it.unitCode ?? "—"
+                return (
+                  <div key={`${it.unitCode ?? "x"}-${i}`} className="rounded-lg border border-gray-300 p-3">
+                    <p className="text-center text-[11px] font-bold uppercase tracking-wider text-gray-700 border-b border-dashed border-gray-300 pb-1.5">
+                      Label Sterilisasi CSSD
+                    </p>
+                    <p className="mt-2 text-center text-base font-bold text-gray-900">
+                      {it.instrumentName}
+                    </p>
+                    <p className="text-center text-[11px] text-gray-500">
+                      {it.source === "paket" ? "Paket" : "Satuan"}
+                      {it.source === "paket" && it.packageName ? ` · ${it.packageName}` : ""}
+                    </p>
+                    <div className="my-1.5 flex justify-center">
+                      {it.unitCode ? (
+                        <Barcode
+                          id={`steril-label-barcode-${i}`}
+                          value={it.unitCode}
+                          height={48}
+                          moduleWidth={2}
+                        />
+                      ) : (
+                        <span className="text-xs text-gray-400">Kode unit belum tersedia</span>
+                      )}
+                    </div>
+                    <p className="text-center font-mono text-sm font-semibold tracking-wider text-gray-800">
+                      {unit}
+                    </p>
+                    <div className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1 text-[11px]">
+                      <span className="text-gray-500">Kode Alat</span>
+                      <span className="font-mono font-semibold text-gray-800">{unit}</span>
+                      <span className="text-gray-500">No. Batch</span>
+                      <span className="font-semibold text-gray-800">{ready.batch ?? "—"}</span>
+                      <span className="text-gray-500">ID Pengemas</span>
+                      <span className="font-semibold text-gray-800">{ready.packer}</span>
+                      <span className="text-gray-500">Tgl Steril</span>
+                      <span className="text-gray-400">menyusul (sterilisasi)</span>
+                      <span className="text-gray-500">Tgl Kedaluwarsa</span>
+                      <span className="text-gray-400">menyusul (sterilisasi)</span>
+                    </div>
+                  </div>
+                )
+              })}
             </div>
             <p className="text-xs text-gray-400">
-              Tempel label di kemasan luar. Tgl sterilisasi &amp; kedaluwarsa diisi otomatis setelah
-              batch sterilisasi divalidasi.
+              Tempel satu label pada tiap alat. Tgl sterilisasi &amp; kedaluwarsa diisi otomatis
+              setelah batch sterilisasi divalidasi.
             </p>
           </div>
         )}
       </Modal>
+
+      {/* Zoom foto instrumen — overlay layar penuh, klik di mana saja untuk menutup */}
+      {zoom && (
+        <div
+          className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 p-4"
+          onClick={() => setZoom(null)}
+          role="dialog"
+          aria-modal="true"
+        >
+          <button
+            type="button"
+            onClick={() => setZoom(null)}
+            className="absolute right-4 top-4 rounded-full bg-white/10 p-2 text-white hover:bg-white/20"
+            title="Tutup"
+          >
+            <X className="h-5 w-5" />
+          </button>
+          <div className="flex max-h-full max-w-3xl flex-col items-center gap-2" onClick={(e) => e.stopPropagation()}>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={zoom.url}
+              alt={zoom.name}
+              className="max-h-[80vh] w-auto rounded-lg object-contain shadow-2xl"
+            />
+            <p className="text-sm font-medium text-white">{zoom.name}</p>
+          </div>
+        </div>
+      )}
     </>
   )
 }

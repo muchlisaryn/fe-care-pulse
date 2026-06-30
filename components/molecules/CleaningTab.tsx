@@ -86,6 +86,17 @@ function rangeText(
   return `${lo}–${hi}${suffix}`
 }
 
+// Titik tengah ambang min–max (untuk auto-isi parameter saat scan mesin).
+// "" bila kedua ambang kosong; bila salah satu kosong, pakai yang ada.
+function midpoint(min: string | number | null, max: string | number | null): string {
+  const lo = min === null ? null : Number(min)
+  const hi = max === null ? null : Number(max)
+  if (lo !== null && hi !== null) return String(Math.round((lo + hi) / 2))
+  if (lo !== null) return String(lo)
+  if (hi !== null) return String(hi)
+  return ""
+}
+
 /**
  * Konten tab "Cleaning & Pengemasan" pada halaman monitoring: daftar order tahap
  * cleaning + modal catatan pencucian. `items` sudah difilter & dipaginasi oleh
@@ -164,7 +175,8 @@ export function CleaningTab({
     setAlertMsg(w?.alert ? w.alert_message : null)
   }
 
-  // Scan barcode mesin washer → resolve mesin + ambang parameternya.
+  // Scan barcode mesin washer → resolve mesin + auto-isi nomor mesin, suhu & durasi.
+  // Suhu & durasi diisi titik tengah ambang mesin (selalu lolos validasi `evaluate`).
   async function scanMachine() {
     if (!machineCode.trim() || scanning) return
     setScanning(true)
@@ -175,6 +187,12 @@ export function CleaningTab({
       setMachineInfo(m)
       setWasherMachineId(m.id)
       setMachineNo(m.code)
+      // Auto-isi suhu & durasi dari ambang mesin (titik tengah). Hanya bila mesin
+      // punya ambang — jangan menimpa input operator dengan nilai kosong.
+      const temp = midpoint(m.min_temperature, m.max_temperature)
+      if (temp) setTemperature(temp)
+      const dur = midpoint(m.min_duration_minutes, m.max_duration_minutes)
+      if (dur) setDuration(dur)
     } catch (err) {
       const e = err as { response?: { data?: { message?: string } } }
       setScanError(e.response?.data?.message ?? "Mesin washer tidak ditemukan.")

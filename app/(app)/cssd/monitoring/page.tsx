@@ -57,16 +57,16 @@ import { getEcho } from "@/lib/echo"
 type MonitoringTab = "masuk" | "cleaning" | "packaging" | "sterilization" | "distribusi"
 
 const MONITORING_TABS: MonitoringTab[] = [
-  "masuk",
   "cleaning",
   "packaging",
   "sterilization",
+  "masuk",
   "distribusi",
 ]
 
-// Validasi nilai tab dari URL (?tab=...); fallback ke "masuk" bila tidak dikenal.
+// Validasi nilai tab dari URL (?tab=...); fallback ke tab pertama bila tidak dikenal.
 function parseTab(value: string | null): MonitoringTab {
-  return MONITORING_TABS.includes(value as MonitoringTab) ? (value as MonitoringTab) : "masuk"
+  return MONITORING_TABS.includes(value as MonitoringTab) ? (value as MonitoringTab) : MONITORING_TABS[0]
 }
 
 const ITEMS_PER_PAGE = 20
@@ -352,7 +352,7 @@ function MonitoringCssd() {
   const [returnedDetail, setReturnedDetail] = useState<Record<number, ReturnOrder>>({})
   const [returnedDetailLoading, setReturnedDetailLoading] = useState<Set<number>>(new Set())
 
-  // Proses order masuk: konfirmasi → order pindah ke tahap Cleaning & Pengemasan.
+  // Terima order masuk: konfirmasi → alokasi unit steril (FEFO) → siap distribusi.
   const [processTarget, setProcessTarget] = useState<IncomingOrder | null>(null)
   const [processing, setProcessing] = useState(false)
   const [processError, setProcessError] = useState<string | null>(null)
@@ -562,20 +562,22 @@ function MonitoringCssd() {
     }
   }
 
-  // Proses order masuk: catat waktu proses & pindahkan ke tahap Cleaning.
+  // Terima order masuk: alokasikan unit steril dari gudang (FEFO) & langsung
+  // siapkan distribusi (status → digudang). Order tidak lewat Cleaning lagi karena
+  // barang yang diorder memang sudah steril.
   async function handleProcess() {
     if (!processTarget || processing) return
     setProcessing(true)
     setProcessError(null)
     try {
-      await api.post(`/master/orders/${processTarget.id}/process`)
+      await api.post(`/master/orders/${processTarget.id}/accept-distribution`)
       setProcessTarget(null)
-      refreshMonitoring() // order keluar dari daftar order masuk
+      refreshMonitoring() // order pindah ke Distribution & Tracking
       dispatch(invalidateOrders()) // sinkronkan daftar Order Instrumen
       dispatch(fetchIncomingCount()) // perbarui badge notifikasi sidebar seketika
     } catch (err) {
       const e = err as { response?: { data?: { message?: string } } }
-      setProcessError(e.response?.data?.message ?? "Gagal memproses order.")
+      setProcessError(e.response?.data?.message ?? "Gagal menerima order.")
     } finally {
       setProcessing(false)
     }
@@ -970,10 +972,10 @@ function MonitoringCssd() {
           <div className="flex flex-wrap gap-6 border-b border-gray-200">
             {(
               [
-                { key: "masuk", label: "Order Masuk", count: masukCount },
                 { key: "cleaning", label: "Cleaning & Disinfection", count: cleaningCount },
                 { key: "packaging", label: "Inspection & Packaging", count: packagingCount },
                 { key: "sterilization", label: "Sterilization", count: sterilizationCount },
+                { key: "masuk", label: "Order Masuk", count: masukCount },
                 { key: "distribusi", label: "Distribution & Tracking", count: distribusiBadge },
               ] as { key: MonitoringTab; label: string; count: number }[]
             ).map((t) => {
@@ -1331,11 +1333,11 @@ function MonitoringCssd() {
         </div>
       </Modal>
 
-      {/* Proses order masuk: detail order + konfirmasi → tahap Cleaning */}
+      {/* Terima order masuk: detail order + konfirmasi → alokasi unit steril (FEFO) → distribusi */}
       <Modal
         open={processTarget !== null}
         onClose={processing ? () => {} : () => setProcessTarget(null)}
-        title={processTarget ? `Proses Order — ${processTarget.code}` : "Proses Order"}
+        title={processTarget ? `Terima Order — ${processTarget.code}` : "Terima Order"}
         size="lg"
         footer={
           <div className="flex w-full items-center justify-between gap-3">
@@ -1343,7 +1345,7 @@ function MonitoringCssd() {
               <p className="text-sm text-red-600">{processError}</p>
             ) : (
               <span className="text-xs text-gray-400">
-                Waktu proses dicatat & order pindah ke tahap Cleaning &amp; Disinfection.
+                Unit steril dialokasikan otomatis (FEFO) & order langsung siap didistribusikan.
               </span>
             )}
             <div className="flex shrink-0 gap-2">
@@ -1355,7 +1357,7 @@ function MonitoringCssd() {
                 disabled={processing}
                 className="bg-[#4ba69d] hover:bg-[#4ba69d]/90 text-white"
               >
-                {processing ? "Memproses..." : "Proses"}
+                {processing ? "Memproses..." : "Terima & Siapkan Distribusi"}
               </Button>
             </div>
           </div>
@@ -2010,7 +2012,7 @@ function IncomingOrderCard({
             onClick={onProcess}
             className="rounded-md border border-[#4ba69d] bg-[#4ba69d] px-2 py-1 text-xs font-medium text-white hover:bg-[#4ba69d]/90"
           >
-            Proses
+            Terima &amp; Distribusi
           </button>
           <button
             type="button"

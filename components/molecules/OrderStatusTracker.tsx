@@ -67,13 +67,13 @@ const STATUS_STYLES: Record<OrderStatus, StatusStyle> = {
     iconClassName: "text-emerald-500",
   },
   digudang: {
-    label: "Di Gudang Steril",
+    label: "Siap Distribusi",
     icon: Warehouse,
     className: "bg-teal-50 text-teal-700 ring-1 ring-teal-200",
     iconClassName: "text-teal-500",
   },
   dipinjam: {
-    label: "Distribusi",
+    label: "Terdistribusi",
     icon: Truck,
     className: "bg-blue-50 text-blue-700 ring-1 ring-blue-200",
     iconClassName: "text-blue-500",
@@ -126,39 +126,34 @@ export function OrderStatusBadge({ status }: { status: OrderStatus }) {
 // Tahapan tracking alur CSSD (urut kiri→kanan) yang ditampilkan ke pengguna.
 type Stage = { key: string; label: string; icon: LucideIcon }
 
+// Alur peminjaman: order minta barang yang SUDAH steril, jadi tidak lewat
+// Cleaning/Sterilisasi lagi — begitu diterima, unit steril dialokasikan & order
+// langsung siap distribusi.
 const STAGES: Stage[] = [
   { key: "diterima", label: "Diterima", icon: Inbox },
-  { key: "dicuci", label: "Dicuci", icon: Droplets },
-  { key: "packaging", label: "Packaging", icon: Package },
-  { key: "steril", label: "Steril", icon: ShieldCheck },
   { key: "distribusi", label: "Distribusi", icon: Truck },
+  { key: "kembali", label: "Dikembalikan", icon: Undo2 },
 ]
 
 // Pemetaan status order (DB) → indeks tahap yang sedang berjalan (0-based).
-// -1 berarti belum masuk pipeline (masih "diajukan") atau dibatalkan.
+// -1 berarti belum diterima (masih "diajukan") atau dibatalkan.
 function activeStageIndex(status: OrderStatus): number {
   switch (status) {
-    case "pencucian":
-      return 1 // sudah diterima, sedang dicuci
-    case "pengemasan":
-      return 2 // selesai cuci, sedang packaging
-    case "selesai":
-    case "sterilisasi":
-    case "steril":
     case "digudang":
-      return 3 // tahap steril / gudang steril
+      return 0 // diterima — unit steril dialokasikan, siap distribusi
     case "dipinjam":
+      return 1 // terdistribusi
     case "dikembalikan":
-      return 4 // sudah terdistribusi
+      return 2 // sudah dikembalikan
     default:
       return -1 // diajukan / dibatalkan
   }
 }
 
 /**
- * Stepper horizontal tracking order CSSD: Diterima → Dicuci → Packaging →
- * Steril → Distribusi. Tahap yang sudah dilewati ditandai centang, tahap
- * berjalan disorot, sisanya abu-abu. Status "diajukan" = menunggu diterima,
+ * Stepper horizontal tracking order peminjaman: Diterima → Distribusi →
+ * Dikembalikan. Tahap yang sudah dilewati ditandai centang, tahap berjalan
+ * disorot, sisanya abu-abu. Status "diajukan" = menunggu diterima,
  * "dibatalkan" = order dibatalkan.
  */
 export function OrderStatusTracker({ status }: { status: OrderStatus }) {
