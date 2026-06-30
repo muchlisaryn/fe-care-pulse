@@ -10,6 +10,7 @@ import {
   Check,
   Circle,
   Printer,
+  X,
 } from "lucide-react"
 import { Button } from "@/components/atoms/Button"
 import { Badge } from "@/components/atoms/Badge"
@@ -55,6 +56,7 @@ type PackagingReq = {
   generated_qty: number
   generated_units: { id: number; code: string | null }[]
   available_count: number
+  available_units: { id: number; code: string | null }[]
 }
 type PackagingData = {
   order: {
@@ -85,11 +87,17 @@ export function PackagingTab({
   const [data, setData] = useState<PackagingData | null>(null)
   const [loading, setLoading] = useState(false)
   const [autoFilling, setAutoFilling] = useState(false)
+  const [saving, setSaving] = useState(false)
   const [finishing, setFinishing] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // Isi Otomatis menghasilkan PRATINJAU (belum potong stok). `staged` = ada
+  // pratinjau yang belum disimpan; stok baru terpotong saat klik Simpan.
+  const [staged, setStaged] = useState(false)
   const [scanCode, setScanCode] = useState("")
   const [scanning, setScanning] = useState(false)
   const [checking, setChecking] = useState<string | null>(null)
+  // instrument_stock_id unit yang sedang dibatalkan centangnya.
+  const [unchecking, setUnchecking] = useState<number | null>(null)
   const [scanMsg, setScanMsg] = useState<{ type: "ok" | "err"; text: string } | null>(null)
   const [ready, setReady] = useState<SterilLabel | null>(null)
   // ID petugas pengemas = user yang login.
@@ -101,6 +109,7 @@ export function PackagingTab({
     setError(null)
     setScanCode("")
     setScanMsg(null)
+    setStaged(false)
     setLoading(true)
     try {
       const res = await api.get(`/master/orders/${order.id}/packaging`)
@@ -120,6 +129,7 @@ export function PackagingTab({
     try {
       const res = await api.post(`/master/orders/${active.id}/pack/scan`, { code: scanCode.trim() })
       setData(res.data.data)
+      setStaged(false)
       setScanMsg({ type: "ok", text: res.data.message ?? "Unit tercentang." })
       setScanCode("")
     } catch (e) {
@@ -129,15 +139,16 @@ export function PackagingTab({
     }
   }
 
-  // Centang manual satu komponen (alokasi 1 unit tersedia, tanpa scan barcode).
-  async function handleCheck(reqKey: string) {
+  // Centang satu unit tersedia berdasarkan KODE-nya (klik kode unit langsung).
+  async function handleCheckCode(code: string) {
     if (!active || checking) return
-    setChecking(reqKey)
+    setChecking(code)
     setScanMsg(null)
     try {
-      const res = await api.post(`/master/orders/${active.id}/pack/check`, { key: reqKey })
+      const res = await api.post(`/master/orders/${active.id}/pack/scan`, { code })
       setData(res.data.data)
-      setScanMsg({ type: "ok", text: res.data.message ?? "Komponen tercentang." })
+      setStaged(false)
+      setScanMsg({ type: "ok", text: res.data.message ?? "Unit tercentang." })
     } catch (e) {
       setScanMsg({ type: "err", text: errMsg(e) })
     } finally {
@@ -145,18 +156,55 @@ export function PackagingTab({
     }
   }
 
-  // Isi otomatis sisa komponen dari stok (jalan pintas, lewati inspeksi manual).
+  // Batalkan centang satu unit yang sudah tersimpan (edit/ganti alokasi).
+  async function handleUncheck(stockId: number) {
+    if (!active || unchecking !== null) return
+    setUnchecking(stockId)
+    setScanMsg(null)
+    try {
+      const res = await api.post(`/master/orders/${active.id}/pack/uncheck`, {
+        instrument_stock_id: stockId,
+      })
+      setData(res.data.data)
+      setStaged(false)
+      setScanMsg({ type: "ok", text: res.data.message ?? "Centang dibatalkan." })
+    } catch (e) {
+      setScanMsg({ type: "err", text: errMsg(e) })
+    } finally {
+      setUnchecking(null)
+    }
+  }
+
+  // Isi otomatis sisa komponen dari stok — PRATINJAU saja (belum potong stok).
+  // Stok baru diperbarui saat klik Simpan.
   async function handleAutoFill() {
     if (!active || autoFilling) return
     setAutoFilling(true)
     setError(null)
     try {
-      const res = await api.post(`/master/orders/${active.id}/pack`)
+      const res = await api.post(`/master/orders/${active.id}/pack`, { preview: true })
       setData(res.data.data)
+      setStaged(true)
     } catch (e) {
       setError(errMsg(e))
     } finally {
       setAutoFilling(false)
+    }
+  }
+
+  // Simpan hasil Isi Otomatis → commit alokasi unit (stok terpotong di sini).
+  async function handleSave() {
+    if (!active || saving) return
+    setSaving(true)
+    setError(null)
+    try {
+      const res = await api.post(`/master/orders/${active.id}/pack`)
+      setData(res.data.data)
+      setStaged(false)
+    } catch (e) {
+      setError(errMsg(e))
+    } finally {
+      setSaving(false)
     }
   }
 
@@ -250,7 +298,8 @@ export function PackagingTab({
   const totalNeeded = reqs.reduce((s, r) => s + r.needed_qty, 0)
   const totalChecked = reqs.reduce((s, r) => s + r.generated_qty, 0)
   const shortage = Math.max(0, totalNeeded - totalChecked)
-  const busy = loading || autoFilling || finishing || scanning || checking !== null
+  const busy =
+    loading || autoFilling || saving || finishing || scanning || checking !== null || unchecking !== null
 
   return (
     <>
@@ -310,6 +359,10 @@ export function PackagingTab({
           <div className="flex w-full items-center justify-between gap-3">
             {error ? (
               <p className="text-sm text-red-600">{error}</p>
+            ) : staged ? (
+              <span className="text-xs text-amber-600">
+                Pratinjau isi otomatis — klik <b>Simpan</b> untuk memperbarui stok.
+              </span>
             ) : (
               <span className="text-xs text-gray-400">
                 Centang {totalChecked}/{totalNeeded} komponen
@@ -327,13 +380,23 @@ export function PackagingTab({
               >
                 {autoFilling ? "Mengisi..." : "Isi Otomatis"}
               </Button>
-              <Button
-                onClick={handleFinish}
-                disabled={busy || totalChecked === 0}
-                className="bg-[#075489] hover:bg-[#075489]/90 text-white"
-              >
-                {finishing ? "Memproses..." : "Selesaikan"}
-              </Button>
+              {staged ? (
+                <Button
+                  onClick={handleSave}
+                  disabled={busy}
+                  className="bg-violet-600 hover:bg-violet-700 text-white"
+                >
+                  {saving ? "Menyimpan..." : "Simpan"}
+                </Button>
+              ) : (
+                <Button
+                  onClick={handleFinish}
+                  disabled={busy || totalChecked === 0}
+                  className="bg-[#075489] hover:bg-[#075489]/90 text-white"
+                >
+                  {finishing ? "Memproses..." : "Selesaikan"}
+                </Button>
+              )}
             </div>
           </div>
         }
@@ -392,6 +455,11 @@ export function PackagingTab({
                   Kurang {shortage} — tetap bisa diselesaikan
                 </span>
               )}
+              {staged && (
+                <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-700">
+                  Pratinjau · belum disimpan
+                </span>
+              )}
               {data.order.code_transaction && (
                 <span className="inline-flex items-center gap-1 rounded-full bg-violet-50 px-2 py-0.5 text-xs font-semibold text-violet-700">
                   <Package className="h-3.5 w-3.5" />
@@ -437,29 +505,52 @@ export function PackagingTab({
                         >
                           <Check className="h-3 w-3" />
                           {u.code ?? `#${u.id}`}
+                          {/* Edit: batalkan centang unit tersimpan (ganti dengan unit lain) */}
+                          {!staged && (
+                            <button
+                              type="button"
+                              onClick={() => handleUncheck(u.id)}
+                              disabled={busy}
+                              title="Batalkan centang / ganti unit"
+                              className="ml-0.5 rounded-full p-0.5 text-green-600 transition-colors hover:bg-green-100 hover:text-red-600 disabled:opacity-50"
+                            >
+                              <X className="h-3 w-3" />
+                            </button>
+                          )}
                         </span>
                       ))}
-                      {Array.from({ length: emptySlots }).map((_, i) => (
-                        <button
-                          key={`empty-${i}`}
-                          type="button"
-                          onClick={() => handleCheck(r.key)}
-                          disabled={busy || r.available_count === 0}
-                          title={
-                            r.available_count === 0
-                              ? "Stok tidak tersedia"
-                              : "Klik untuk centang (alokasi 1 unit)"
+                      {!staged &&
+                        Array.from({ length: emptySlots }).map((_, i) => {
+                          // Kandidat unit tersedia untuk slot ini (kode langsung).
+                          const cand = r.available_units[i]
+                          if (!cand || !cand.code) {
+                            return (
+                              <span
+                                key={`empty-${i}`}
+                                className="inline-flex items-center gap-1 rounded border border-dashed border-gray-300 px-1.5 py-0.5 text-[11px] text-gray-400"
+                              >
+                                stok habis
+                              </span>
+                            )
                           }
-                          className="inline-flex items-center gap-1 rounded border border-dashed border-gray-300 px-1.5 py-0.5 text-[11px] text-gray-500 transition-colors hover:border-[#4ba69d] hover:text-[#4ba69d] disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:border-gray-300 disabled:hover:text-gray-500"
-                        >
-                          {checking === r.key ? (
-                            <Circle className="h-3 w-3 animate-pulse" />
-                          ) : (
-                            <Check className="h-3 w-3" />
-                          )}
-                          {r.available_count === 0 ? "stok habis" : "centang"}
-                        </button>
-                      ))}
+                          return (
+                            <button
+                              key={cand.id}
+                              type="button"
+                              onClick={() => handleCheckCode(cand.code as string)}
+                              disabled={busy}
+                              title="Klik untuk centang unit ini"
+                              className="inline-flex items-center gap-1 rounded border border-dashed border-gray-300 px-1.5 py-0.5 font-mono text-[11px] font-semibold text-gray-500 transition-colors hover:border-[#4ba69d] hover:bg-[#4ba69d]/5 hover:text-[#4ba69d] disabled:cursor-not-allowed disabled:opacity-50"
+                            >
+                              {checking === cand.code ? (
+                                <Circle className="h-3 w-3 animate-pulse" />
+                              ) : (
+                                <Check className="h-3 w-3" />
+                              )}
+                              {cand.code}
+                            </button>
+                          )
+                        })}
                     </div>
                   </div>
                 )
