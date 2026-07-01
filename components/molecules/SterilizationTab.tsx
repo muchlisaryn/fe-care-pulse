@@ -231,7 +231,6 @@ export function SterilizationTab({
                         )}
                       </div>
                       <div className="mt-1 flex flex-wrap gap-x-4 gap-y-0.5 text-xs text-gray-500">
-                        <span>Ruangan: {order.room?.name ?? "—"}</span>
                         <span>Selesai packaging: {formatDateTime(order.processed_at)}</span>
                         <span>{order.unit_count} unit</span>
                         {inBatch && order.sterilization && (
