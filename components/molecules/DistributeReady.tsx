@@ -155,8 +155,8 @@ export function DistributeReady({
                 Ambil dari Gudang ({active.unit_count} unit)
               </p>
               <div className="space-y-1">
-                {active.units.map((u) => (
-                  <div key={u.id} className="flex items-center justify-between gap-2 text-sm">
+                {active.units.map((u, idx) => (
+                  <div key={`${u.id}-${idx}`} className="flex items-center justify-between gap-2 text-sm">
                     <span>
                       <span className="font-mono text-xs font-semibold text-[#075489] bg-[#075489]/8 px-1.5 py-0.5 rounded">
                         {u.code ?? `#${u.id}`}
