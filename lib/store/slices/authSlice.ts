@@ -3,7 +3,7 @@ import api from "@/lib/axios";
 
 export type AuthSubMenu = {
   name: string;
-  url: string;
+  url: string | null;
 };
 
 export type AuthMenuGroup = {

@@ -1,7 +1,7 @@
 "use client"
 
 import { useMemo, useState } from "react"
-import { ShieldCheck, FlaskConical, CheckCircle2, AlertTriangle, Layers } from "lucide-react"
+import { ShieldCheck, FlaskConical, CheckCircle2, AlertTriangle, Layers, ZoomIn, X, ChevronDown } from "lucide-react"
 import { Button } from "@/components/atoms/Button"
 import { Badge } from "@/components/atoms/Badge"
 import { Input } from "@/components/atoms/Input"
@@ -54,6 +54,7 @@ const NO_INSTRUMENT = "(Tanpa nama instrumen)"
 
 type UnitGroup = {
   instrument: string
+  image: string | null
   source: SterilizeUnit["source"] | null
   package_name: string | null
   units: SterilizeUnit[]
@@ -67,7 +68,7 @@ function groupUnits(units: SterilizeUnit[]): UnitGroup[] {
     const key = u.instrument ?? NO_INSTRUMENT
     let g = index.get(key)
     if (!g) {
-      g = { instrument: key, source: u.source, package_name: u.package_name, units: [] }
+      g = { instrument: key, image: u.image_url ?? null, source: u.source, package_name: u.package_name, units: [] }
       index.set(key, g)
       groups.push(g)
     }
@@ -111,9 +112,15 @@ const emptyForm = {
 export function SterilizationTab({
   items,
   onChanged,
+  // Pembangun URL aksi — default berbasis order (dipakai monitoring). Halaman
+  // Produksi meng-override ke endpoint pipeline PKG (/master/packaging/{id}/...).
+  sterilizeUrl = (id: number) => `/master/orders/${id}/sterilize`,
+  validateUrl = (id: number) => `/master/orders/${id}/sterilize/validate`,
 }: {
   items: SterilizeOrder[]
   onChanged: () => void
+  sterilizeUrl?: (id: number) => string
+  validateUrl?: (id: number) => string
 }) {
   const [active, setActive] = useState<SterilizeOrder | null>(null)
   const [form, setForm] = useState(emptyForm)
@@ -130,6 +137,10 @@ export function SterilizationTab({
   })
   const [vSaving, setVSaving] = useState<"selesai" | "gagal" | null>(null)
   const [vError, setVError] = useState<string | null>(null)
+  // Foto instrumen yang sedang di-zoom (klik thumbnail) — null = tidak ada.
+  const [zoom, setZoom] = useState<{ url: string; name: string } | null>(null)
+  // Tampil/sembunyikan daftar unit yang akan disterilkan.
+  const [showUnits, setShowUnits] = useState(true)
 
   // Unit batch dikelompokkan per instrumen untuk daftar yang enak dibaca.
   const unitGroups = useMemo(() => groupUnits(active?.units ?? []), [active])
@@ -172,7 +183,7 @@ export function SterilizationTab({
     setError(null)
     try {
       const num = (v: string) => (v.trim() === "" ? null : Number(v))
-      const res = await api.post(`/master/orders/${active.id}/sterilize`, {
+      const res = await api.post(sterilizeUrl(active.id), {
         machine: form.machine.trim(),
         method: form.method,
         cycle_number: form.cycle_number.trim() || null,
@@ -212,7 +223,7 @@ export function SterilizationTab({
     setVSaving(result)
     setVError(null)
     try {
-      await api.post(`/master/orders/${validating.id}/sterilize/validate`, {
+      await api.post(validateUrl(validating.id), {
         result,
         chemical_indicator: vForm.chemical_indicator.trim() || null,
         biological_indicator: vForm.biological_indicator.trim() || null,
@@ -238,20 +249,37 @@ export function SterilizationTab({
                 key={order.id}
                 className={
                   "rounded-lg border border-gray-200 border-l-4 " +
-                  (inBatch ? "border-l-amber-400" : "border-l-sky-400")
+                  (inBatch ? "border-l-[#075489]" : "border-l-[#075489]")
                 }
               >
                 <div className="flex items-start justify-between gap-2 px-3 py-2.5">
                   <div className="flex min-w-0 items-start gap-2">
-                    <ShieldCheck
-                      className={"mt-0.5 h-4 w-4 shrink-0 " + (inBatch ? "text-amber-500" : "text-sky-500")}
-                    />
+                    {order.image_url ? (
+                      <button
+                        type="button"
+                        onClick={() => setZoom({ url: order.image_url as string, name: order.borrowed_by ?? "Set" })}
+                        title="Klik untuk perbesar"
+                        className="group relative mt-0.5 h-9 w-9 shrink-0 cursor-zoom-in overflow-hidden rounded-md border border-gray-200"
+                      >
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          src={order.image_url}
+                          alt={order.borrowed_by ?? "Set"}
+                          className="h-full w-full object-cover transition-transform group-hover:scale-105"
+                        />
+                        <span className="absolute inset-0 flex items-center justify-center bg-black/0 text-white opacity-0 transition group-hover:bg-black/30 group-hover:opacity-100">
+                          <ZoomIn className="h-3.5 w-3.5" />
+                        </span>
+                      </button>
+                    ) : (
+                      <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-[#075489]" />
+                    )}
                     <div className="min-w-0">
                       <div className="flex flex-wrap items-center gap-2">
                         <span className="text-sm font-semibold text-gray-900">
                           {order.borrowed_by ?? "—"}
                         </span>
-                        <span className="font-mono text-xs font-semibold text-sky-700 bg-sky-100 px-2 py-0.5 rounded">
+                        <span className="font-mono text-xs font-semibold text-[#075489] bg-[#075489]/10 px-2 py-0.5 rounded">
                           {order.code_transaction ?? order.code}
                         </span>
                         {inBatch ? (
@@ -266,7 +294,7 @@ export function SterilizationTab({
                         {inBatch && order.sterilization && (
                           <span>
                             Batch:{" "}
-                            <span className="font-mono font-semibold text-amber-700">
+                            <span className="font-mono font-semibold text-[#075489]">
                               {order.sterilization.code}
                             </span>
                           </span>
@@ -278,7 +306,7 @@ export function SterilizationTab({
                     <button
                       type="button"
                       onClick={() => openValidate(order)}
-                      className="shrink-0 self-center rounded-md border border-amber-500 bg-amber-500 px-3 py-1.5 text-xs font-medium text-white hover:bg-amber-600"
+                      className="shrink-0 self-center rounded-md border border-[#075489] bg-[#075489] px-3 py-1.5 text-xs font-medium text-white hover:bg-[#075489]/90"
                     >
                       Validasi Hasil
                     </button>
@@ -286,7 +314,7 @@ export function SterilizationTab({
                     <button
                       type="button"
                       onClick={() => openBatch(order)}
-                      className="shrink-0 self-center rounded-md border border-sky-500 bg-sky-500 px-3 py-1.5 text-xs font-medium text-white hover:bg-sky-600"
+                      className="shrink-0 self-center rounded-md border border-[#075489] bg-[#075489] px-3 py-1.5 text-xs font-medium text-white hover:bg-[#075489]/90"
                     >
                       Buat Batch Sterilisasi
                     </button>
@@ -329,12 +357,17 @@ export function SterilizationTab({
       >
         {active && (
           <div className="space-y-5">
-            {/* Unit yang akan disterilkan — dikelompokkan per instrumen */}
+            {/* Unit yang akan disterilkan — dikelompokkan per instrumen (bisa disembunyikan) */}
             <div>
-              <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-400">
-                Unit Disterilkan ({active.unit_count})
-              </p>
-              {unitGroups.length === 0 ? (
+              <button
+                type="button"
+                onClick={() => setShowUnits((v) => !v)}
+                className="mb-2 flex w-full items-center justify-between gap-2 text-xs font-semibold uppercase tracking-wide text-gray-400 hover:text-gray-600"
+              >
+                <span>Unit Disterilkan ({active.unit_count})</span>
+                <ChevronDown className={"h-4 w-4 transition-transform " + (showUnits ? "rotate-180" : "")} />
+              </button>
+              {!showUnits ? null : unitGroups.length === 0 ? (
                 <div className="rounded-lg border border-gray-200 bg-gray-50 px-4 py-3">
                   <p className="text-sm text-gray-400">Tidak ada unit.</p>
                 </div>
@@ -343,14 +376,33 @@ export function SterilizationTab({
                   {unitGroups.map((g) => (
                     <div key={g.instrument} className="px-3 py-2.5">
                       <div className="flex items-center gap-2">
-                        <Layers className="h-4 w-4 shrink-0 text-sky-500" />
+                        {g.image ? (
+                          <button
+                            type="button"
+                            onClick={() => setZoom({ url: g.image as string, name: g.instrument })}
+                            title="Klik untuk perbesar"
+                            className="group relative h-8 w-8 shrink-0 cursor-zoom-in overflow-hidden rounded-md border border-gray-200"
+                          >
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                            <img
+                              src={g.image}
+                              alt={g.instrument}
+                              className="h-full w-full object-cover transition-transform group-hover:scale-105"
+                            />
+                            <span className="absolute inset-0 flex items-center justify-center bg-black/0 text-white opacity-0 transition group-hover:bg-black/30 group-hover:opacity-100">
+                              <ZoomIn className="h-3.5 w-3.5" />
+                            </span>
+                          </button>
+                        ) : (
+                          <Layers className="h-4 w-4 shrink-0 text-[#075489]" />
+                        )}
                         <span className="min-w-0 truncate text-sm font-medium text-gray-800">
                           {g.instrument}
                         </span>
                         {g.source === "paket" && g.package_name && (
                           <span className="truncate text-xs text-gray-400">· {g.package_name}</span>
                         )}
-                        <span className="ml-auto inline-flex shrink-0 items-center rounded-full bg-sky-100 px-2 py-0.5 text-xs font-semibold text-sky-700">
+                        <span className="ml-auto inline-flex shrink-0 items-center rounded-full bg-[#075489]/10 px-2 py-0.5 text-xs font-semibold text-[#075489]">
                           {g.units.length} unit
                         </span>
                       </div>
@@ -358,7 +410,7 @@ export function SterilizationTab({
                         {g.units.map((u) => (
                           <span
                             key={u.id}
-                            className="rounded bg-sky-50 px-1.5 py-0.5 font-mono text-[11px] font-semibold text-sky-700"
+                            className="rounded bg-[#075489]/10 px-1.5 py-0.5 font-mono text-[11px] font-semibold text-[#075489]"
                           >
                             {u.code ?? `#${u.id}`}
                           </span>
@@ -532,9 +584,9 @@ export function SterilizationTab({
             </div>
 
             {/* Karantina: input/koreksi indikator + kedaluwarsa */}
-            <div className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-4 py-2.5">
-              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" />
-              <p className="text-xs text-amber-700">
+            <div className="flex items-start gap-2 rounded-lg border border-[#075489]/20 bg-[#075489]/5 px-4 py-2.5">
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-[#075489]" />
+              <p className="text-xs text-[#075489]">
                 Kontrol kualitas (karantina): isi hasil indikator sebelum memvalidasi.
               </p>
             </div>
@@ -614,13 +666,41 @@ export function SterilizationTab({
                 Steril / Gagal.
               </p>
             </div>
-            <div className="mt-1 inline-flex items-center gap-2 rounded-lg bg-sky-50 px-3 py-1.5">
-              <FlaskConical className="h-4 w-4 text-sky-500" />
-              <span className="font-mono text-sm font-semibold text-sky-700">{done.batch}</span>
+            <div className="mt-1 inline-flex items-center gap-2 rounded-lg bg-[#075489]/10 px-3 py-1.5">
+              <FlaskConical className="h-4 w-4 text-[#075489]" />
+              <span className="font-mono text-sm font-semibold text-[#075489]">{done.batch}</span>
             </div>
           </div>
         )}
       </Modal>
+
+      {/* Zoom foto instrumen — overlay layar penuh, klik di mana saja untuk menutup */}
+      {zoom && (
+        <div
+          className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 p-4"
+          onClick={() => setZoom(null)}
+          role="dialog"
+          aria-modal="true"
+        >
+          <button
+            type="button"
+            onClick={() => setZoom(null)}
+            className="absolute right-4 top-4 rounded-full bg-white/10 p-2 text-white hover:bg-white/20"
+            title="Tutup"
+          >
+            <X className="h-5 w-5" />
+          </button>
+          <div className="flex max-h-full max-w-3xl flex-col items-center gap-2" onClick={(e) => e.stopPropagation()}>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={zoom.url}
+              alt={zoom.name}
+              className="max-h-[80vh] w-auto rounded-lg object-contain shadow-2xl"
+            />
+            <p className="text-sm font-medium text-white">{zoom.name}</p>
+          </div>
+        </div>
+      )}
     </>
   )
 }

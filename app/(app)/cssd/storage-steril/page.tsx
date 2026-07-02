@@ -5,7 +5,6 @@ import {
   Warehouse,
   Search,
   ScanLine,
-  PackageCheck,
   CalendarClock,
   AlertTriangle,
   MapPin,
@@ -27,6 +26,7 @@ import { Modal } from "@/components/molecules/Modal"
 import { useAppDispatch, useAppSelector } from "@/lib/store/hooks"
 import {
   fetchStorageIncoming,
+  fetchProductionStorageIncoming,
   fetchStorageInventory,
   invalidateStorage,
   type StorageIncomingOrder,
@@ -61,17 +61,26 @@ export default function StorageSterilPage() {
   const dispatch = useAppDispatch()
   const {
     incoming,
-    incomingLoading,
     incomingLoaded,
+    productionIncoming,
+    productionIncomingLoaded,
     inventory,
     inventoryLoading,
     inventoryLoaded,
   } = useAppSelector((s) => s.storage)
 
+  // Gabungan order steril + batch produksi steril (yang belum tersimpan penuh)
+  // untuk daftar "Perlu Disimpan". Order sudah otomatis keluar saat digudang;
+  // batch produksi disaring di sini karena statusnya tidak berpindah.
+  const incomingAll = useMemo(
+    () => [...incoming, ...productionIncoming.filter((o) => o.stored_count < o.unit_count)],
+    [incoming, productionIncoming],
+  )
+
   const [tab, setTab] = useState<StorageTab>("simpan")
   const [search, setSearch] = useState("")
   // Inventaris: pengelompokan + status lipat per grup.
-  const [groupBy, setGroupBy] = useState<"rak" | "order" | "none">("rak")
+  const [groupBy, setGroupBy] = useState<"rak" | "batch">("rak")
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
   const toggleGroup = (key: string) =>
     setExpanded((prev) => {
@@ -95,11 +104,13 @@ export default function StorageSterilPage() {
   // sementara refetch berjalan di latar — spinner hanya tampil saat load pertama.
   useEffect(() => {
     dispatch(fetchStorageIncoming())
+    dispatch(fetchProductionStorageIncoming())
     dispatch(fetchStorageInventory())
   }, [dispatch])
 
   function refresh() {
     dispatch(fetchStorageIncoming())
+    dispatch(fetchProductionStorageIncoming())
     dispatch(fetchStorageInventory())
   }
 
@@ -148,7 +159,7 @@ export default function StorageSterilPage() {
     setSaving(true)
     setError(null)
     try {
-      await api.post(`/master/orders/${active.id}/store`, { items })
+      await api.post(active.store_url ?? `/master/orders/${active.id}/store`, { items })
       setActive(null)
       dispatch(invalidateStorage())
       refresh()
@@ -190,15 +201,15 @@ export default function StorageSterilPage() {
 
   const q = search.trim().toLowerCase()
   const incomingFiltered = useMemo(() => {
-    if (!q) return incoming
-    return incoming.filter(
+    if (!q) return incomingAll
+    return incomingAll.filter(
       (o) =>
         o.code.toLowerCase().includes(q) ||
         (o.code_transaction ?? "").toLowerCase().includes(q) ||
         (o.borrowed_by ?? "").toLowerCase().includes(q) ||
         (o.room?.name ?? "").toLowerCase().includes(q),
     )
-  }, [incoming, q])
+  }, [incomingAll, q])
 
   const inventoryFiltered = useMemo(() => {
     if (!q) return inventory
@@ -213,13 +224,9 @@ export default function StorageSterilPage() {
 
   // Kelompokkan inventaris (per rak / per order) agar ringkas & bisa dilipat.
   const inventoryGroups = useMemo(() => {
-    if (groupBy === "none") return []
     const map = new Map<string, typeof inventoryFiltered>()
     for (const r of inventoryFiltered) {
-      const key =
-        groupBy === "rak"
-          ? r.rack_code
-          : r.order?.code_transaction ?? r.order?.code ?? "Tanpa Order"
+      const key = groupBy === "rak" ? r.rack_code : r.batch ?? "Tanpa Batch"
       const arr = map.get(key) ?? []
       arr.push(r)
       map.set(key, arr)
@@ -250,7 +257,7 @@ export default function StorageSterilPage() {
           <div className="flex flex-wrap gap-6 border-b border-gray-200">
             {(
               [
-                { key: "simpan", label: "Perlu Disimpan", count: incoming.length },
+                { key: "simpan", label: "Perlu Disimpan", count: incomingAll.length },
                 { key: "inventaris", label: "Inventaris Gudang", count: inventory.length },
               ] as { key: StorageTab; label: string; count: number }[]
             ).map((t) => {
@@ -297,31 +304,31 @@ export default function StorageSterilPage() {
         </div>
 
         {tab === "simpan" ? (
-          incomingLoading && !incomingLoaded ? (
+          !incomingLoaded && !productionIncomingLoaded ? (
             <div className="py-16 text-center text-sm text-gray-400">Memuat data...</div>
           ) : incomingFiltered.length === 0 ? (
             <div className="py-16 text-center text-sm text-gray-400">
-              {q ? "Tidak ada order yang cocok." : "Belum ada order steril yang perlu disimpan."}
+              {q ? "Tidak ada batch yang cocok." : "Belum ada order / batch steril yang perlu disimpan."}
             </div>
           ) : (
             <div className="space-y-2 p-4">
               {incomingFiltered.map((order) => (
                 <div
-                  key={order.id}
-                  className="rounded-lg border border-gray-200 border-l-4 border-l-emerald-400"
+                  key={`${order.source ?? "order"}-${order.id}`}
+                  className="rounded-lg border border-gray-200 border-l-4 border-l-[#075489]"
                 >
                   <div className="flex items-start justify-between gap-2 px-3 py-2.5">
                     <div className="flex min-w-0 items-start gap-2">
-                      <PackageCheck className="mt-0.5 h-4 w-4 shrink-0 text-emerald-500" />
                       <div className="min-w-0">
                         <div className="flex flex-wrap items-center gap-2">
                           <span className="text-sm font-semibold text-gray-900">
-                            {order.borrowed_by ?? "—"}
+                            {order.source === "produksi" ? `Batch ${order.code}` : (order.borrowed_by ?? "—")}
                           </span>
-                          <span className="font-mono text-xs font-semibold text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded">
-                            {order.code_transaction ?? order.code}
-                          </span>
-                          <Badge variant="success">Steril</Badge>
+                          {order.source !== "produksi" && (
+                            <span className="font-mono text-xs font-semibold text-[#075489] bg-[#075489]/10 px-2 py-0.5 rounded">
+                              {order.code_transaction ?? order.code}
+                            </span>
+                          )}
                           {order.stored_count > 0 && order.stored_count < order.unit_count && (
                             <Badge variant="warning">
                               {order.stored_count}/{order.unit_count} tersimpan
@@ -337,7 +344,7 @@ export default function StorageSterilPage() {
                     <button
                       type="button"
                       onClick={() => openStore(order)}
-                      className="shrink-0 self-center rounded-md border border-emerald-500 bg-emerald-500 px-3 py-1.5 text-xs font-medium text-white hover:bg-emerald-600"
+                      className="shrink-0 self-center rounded-md border border-[#075489] bg-[#075489] px-3 py-1.5 text-xs font-medium text-white hover:bg-[#075489]/90"
                     >
                       Simpan ke Rak
                     </button>
@@ -358,66 +365,15 @@ export default function StorageSterilPage() {
             <div className="flex justify-end">
               <Select
                 value={groupBy}
-                onChange={(e) => setGroupBy(e.target.value as "rak" | "order" | "none")}
+                onChange={(e) => setGroupBy(e.target.value as "rak" | "batch")}
                 className="w-auto"
               >
                 <option value="rak">Per Rak</option>
-                <option value="order">Per Order</option>
-                <option value="none">Datar (semua)</option>
+                <option value="batch">Per Batch</option>
               </Select>
             </div>
 
-            {groupBy === "none" ? (
-              <div className="overflow-x-auto rounded-lg border border-gray-100">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="border-b border-gray-100 bg-gray-50 text-xs font-semibold uppercase tracking-wide text-gray-400">
-                      <th className="py-2.5 px-4 text-left">Unit</th>
-                      <th className="py-2.5 px-4 text-left">Lokasi Rak</th>
-                      <th className="py-2.5 px-4 text-left">Order</th>
-                      <th className="py-2.5 px-4 text-left">Kedaluwarsa</th>
-                      <th className="py-2.5 px-4 text-left">Status</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-gray-50">
-                    {inventoryFiltered.map((r) => (
-                      <tr key={r.id} className={r.alert ? "bg-red-50/60" : undefined}>
-                        <td className="py-2.5 px-4">
-                          <span className="font-mono text-xs font-semibold text-[#075489] bg-[#075489]/8 px-2 py-0.5 rounded">
-                            {r.unit.code ?? `#${r.unit.id}`}
-                          </span>
-                          <p className="mt-0.5 text-xs text-gray-500">{r.unit.instrument ?? "—"}</p>
-                        </td>
-                        <td className="py-2.5 px-4">
-                          <span className="inline-flex items-center gap-1 font-medium text-gray-800">
-                            <MapPin className="h-3.5 w-3.5 text-gray-400" />
-                            {r.rack_code}
-                          </span>
-                        </td>
-                        <td className="py-2.5 px-4 font-mono text-xs text-gray-600">
-                          {r.order?.code_transaction ?? r.order?.code ?? "—"}
-                        </td>
-                        <td className="py-2.5 px-4">
-                          <span className={r.alert ? "font-semibold text-red-600" : "text-gray-700"}>
-                            {formatDate(r.expiry_date)}
-                          </span>
-                        </td>
-                        <td className="py-2.5 px-4">
-                          {r.expired ? (
-                            <Badge variant="danger">Kedaluwarsa</Badge>
-                          ) : r.alert ? (
-                            <Badge variant="danger">{r.days_to_expiry}h lagi</Badge>
-                          ) : (
-                            <Badge variant="success">Di Gudang Steril</Badge>
-                          )}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            ) : (
-              <div className="space-y-2">
+            <div className="space-y-2">
                 {inventoryGroups.map((g) => {
                   const open = q ? true : expanded.has(g.key)
                   return (
@@ -459,16 +415,14 @@ export default function StorageSterilPage() {
                                 {r.unit.code ?? `#${r.unit.id}`}
                               </span>
                               <span className="text-gray-700">{r.unit.instrument ?? "—"}</span>
-                              {groupBy === "order" && (
+                              {groupBy === "batch" && (
                                 <span className="inline-flex items-center gap-1 text-xs text-gray-500">
                                   <MapPin className="h-3 w-3" />
                                   {r.rack_code}
                                 </span>
                               )}
-                              {groupBy === "rak" && r.order && (
-                                <span className="font-mono text-xs text-gray-500">
-                                  {r.order.code_transaction ?? r.order.code}
-                                </span>
+                              {groupBy === "rak" && r.batch && (
+                                <span className="font-mono text-xs text-gray-500">{r.batch}</span>
                               )}
                               <span
                                 className={
@@ -493,7 +447,6 @@ export default function StorageSterilPage() {
                   )
                 })}
               </div>
-            )}
           </div>
         )}
       </Card>
@@ -520,7 +473,7 @@ export default function StorageSterilPage() {
               <Button
                 onClick={saveStorage}
                 disabled={saving}
-                className="bg-emerald-600 hover:bg-emerald-700 text-white"
+                className="bg-[#075489] hover:bg-[#075489]/90 text-white"
               >
                 {saving ? "Menyimpan..." : "Simpan ke Gudang"}
               </Button>
@@ -546,7 +499,7 @@ export default function StorageSterilPage() {
                         applyAll()
                       }
                     }}
-                    placeholder="mis. RAK-A-2 / Rak A Baris 2"
+                    placeholder=""
                     className="pl-9 font-mono"
                   />
                 </div>
@@ -566,12 +519,15 @@ export default function StorageSterilPage() {
                 const groupRack = firstUnstored ? rackById[firstUnstored.id] ?? "" : g.units[0]?.rack_code ?? ""
                 const isPaket = g.source === "paket"
                 const title = isPaket ? g.packageName : g.units[0]?.instrument ?? "—"
-                const photo = g.units[0]?.image_url ?? null
+                // Paket → gambar SET (katalog); satuan → gambar instrumen. Fallback komponen pertama.
+                const photo = isPaket
+                  ? g.units[0]?.package_image ?? g.units[0]?.image_url ?? null
+                  : g.units[0]?.image_url ?? null
                 return (
                   <div key={g.key} className="rounded-lg border border-gray-200 px-3 py-2.5">
                     <div className="flex flex-wrap items-center gap-2">
-                      {/* Foto instrumen menggantikan ikon; klik untuk zoom. Fallback ke ikon bila tak ada foto. */}
-                      {!isPaket && photo ? (
+                      {/* Foto set/instrumen menggantikan ikon; klik untuk zoom. Fallback ke ikon bila tak ada foto. */}
+                      {photo ? (
                         <button
                           type="button"
                           onClick={() => setZoom({ url: photo, name: title ?? "Instrumen" })}
@@ -589,7 +545,7 @@ export default function StorageSterilPage() {
                           </span>
                         </button>
                       ) : (
-                        <Boxes className="h-4 w-4 shrink-0 text-emerald-500" />
+                        <Boxes className="h-4 w-4 shrink-0 text-[#075489]" />
                       )}
                       <Badge variant={isPaket ? "info" : "default"}>{isPaket ? "Paket" : "Satuan"}</Badge>
                       <span className="text-sm font-medium text-gray-800">{title}</span>
@@ -620,9 +576,20 @@ export default function StorageSterilPage() {
                       {g.units.map((u) => (
                         <span
                           key={u.id}
-                          className="font-mono text-[11px] font-semibold text-[#075489] bg-[#075489]/8 px-1.5 py-0.5 rounded"
+                          className="inline-flex items-center gap-1 font-mono text-[11px] font-semibold text-[#075489] bg-[#075489]/8 px-1.5 py-0.5 rounded"
                           title={u.instrument ?? undefined}
                         >
+                          {u.image_url && (
+                            <button
+                              type="button"
+                              onClick={() => setZoom({ url: u.image_url as string, name: u.instrument ?? u.code ?? "Instrumen" })}
+                              title="Klik untuk perbesar"
+                              className="h-4 w-4 shrink-0 cursor-zoom-in overflow-hidden rounded-sm border border-gray-200"
+                            >
+                              {/* eslint-disable-next-line @next/next/no-img-element */}
+                              <img src={u.image_url} alt={u.instrument ?? ""} className="h-full w-full object-cover" />
+                            </button>
+                          )}
                           {u.code ?? `#${u.id}`}
                         </span>
                       ))}

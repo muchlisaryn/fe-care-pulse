@@ -208,6 +208,7 @@ export function Sidebar({ className, collapsed = false, onExpand, onClose }: Sid
           {isOpen && (
             <div className="ml-4 mt-0.5 flex flex-col gap-0.5 border-l-2 border-gray-100 pl-3">
               {menu.menu!.map((sub, subIdx) => {
+                if (!sub.url) return null
                 const subActive = isActivePath(sub.url)
                 return (
                   <Link
@@ -317,6 +318,7 @@ export function Sidebar({ className, collapsed = false, onExpand, onClose }: Sid
                 {hoveredMenu.name}
               </p>
               {hoveredMenu.menu?.map((sub, subIdx) => {
+                if (!sub.url) return null
                 const subActive = isActivePath(sub.url)
                 return (
                   <Link

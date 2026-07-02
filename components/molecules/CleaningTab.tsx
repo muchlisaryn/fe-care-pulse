@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from "react"
 import {
-  Droplets,
   ChevronRight,
   ChevronDown,
   Package,
@@ -10,6 +9,8 @@ import {
   AlertTriangle,
   XCircle,
   ListChecks,
+  ZoomIn,
+  X,
 } from "lucide-react"
 import { Input } from "@/components/atoms/Input"
 import { Button } from "@/components/atoms/Button"
@@ -198,8 +199,17 @@ export function CleaningTab({
     setAlertMsg(w?.alert ? w.alert_message : null)
   }
 
-  // Pilih mesin washer dari dropdown → auto-isi nomor mesin, suhu & durasi.
-  // Suhu & durasi diisi titik tengah ambang mesin (selalu lolos validasi `evaluate`).
+  // Terapkan mesin terpilih → auto-isi nomor mesin, suhu & durasi (titik tengah
+  // ambang). Di-set tanpa syarat agar saat ganti mesin data di bawah ikut terupdate.
+  function applyMachine(m: ScannedMachine) {
+    setMachineInfo(m)
+    setWasherMachineId(m.id)
+    setMachineNo(m.code)
+    setTemperature(midpoint(m.min_temperature, m.max_temperature))
+    setDuration(midpoint(m.min_duration_minutes, m.max_duration_minutes))
+  }
+
+  // Pilih mesin washer dari dropdown.
   function selectMachine(idStr: string) {
     const m = machines.find((x) => String(x.id) === idStr)
     if (!m) {
@@ -207,14 +217,7 @@ export function CleaningTab({
       setMachineInfo(null)
       return
     }
-    setMachineInfo(m)
-    setWasherMachineId(m.id)
-    setMachineNo(m.code)
-    // Selalu segarkan suhu & durasi mengikuti mesin yang dipilih (titik tengah
-    // ambang). Di-set tanpa syarat agar saat ganti mesin data di bawah ikut
-    // terupdate; mesin tanpa ambang akan mengosongkan field (sesuai pilihan).
-    setTemperature(midpoint(m.min_temperature, m.max_temperature))
-    setDuration(midpoint(m.min_duration_minutes, m.max_duration_minutes))
+    applyMachine(m)
   }
 
   // Payload parameter pencucian bersama (dipakai Simpan & Tandai Gagal).
@@ -354,7 +357,7 @@ export function CleaningTab({
                 <Button
                   onClick={saveWashing}
                   disabled={saving}
-                  className="bg-[#4ba69d] hover:bg-[#4ba69d]/90 text-white"
+                  className="bg-[#075489] hover:bg-[#075489]/90 text-white"
                 >
                   {saving ? "Menyimpan..." : "Simpan"}
                 </Button>
@@ -399,7 +402,7 @@ export function CleaningTab({
                   searchPlaceholder="Cari kode / nama mesin..."
                 />
                 {machineInfo && (
-                  <div className="flex flex-wrap items-center gap-2 rounded-lg border border-[#4ba69d]/30 bg-[#4ba69d]/5 px-3 py-2 text-xs">
+                  <div className="flex flex-wrap items-center gap-2 rounded-lg border border-[#075489]/30 bg-[#075489]/5 px-3 py-2 text-xs">
                     <Badge variant="info">{machineInfo.code}</Badge>
                     <span className="font-medium text-gray-800">{machineInfo.name}</span>
                     {rangeText(machineInfo.min_temperature, machineInfo.max_temperature, "°C") && (
@@ -567,7 +570,7 @@ export function CleaningTab({
               <Button
                 onClick={completeWashing}
                 disabled={completingId !== null}
-                className="bg-[#4ba69d] hover:bg-[#4ba69d]/90 text-white"
+                className="bg-[#075489] hover:bg-[#075489]/90 text-white"
               >
                 {completingId !== null ? "Menyelesaikan..." : "Selesaikan"}
               </Button>
@@ -578,8 +581,8 @@ export function CleaningTab({
         {confirmTarget && (
           <div className="space-y-4">
             <div className="flex items-start gap-3">
-              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[#4ba69d]/10">
-                <CheckCircle2 className="h-5 w-5 text-[#4ba69d]" />
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[#075489]/10">
+                <CheckCircle2 className="h-5 w-5 text-[#075489]" />
               </div>
               <p className="pt-1.5 text-sm leading-relaxed text-gray-600">
                 Pastikan proses cleaning &amp; disinfection untuk{" "}
@@ -615,9 +618,22 @@ export function CleaningTab({
 // - Packaging = ungu.
 function stageBorder(stage: "cleaning" | "packaging", processed: boolean): string {
   if (stage === "packaging") {
-    return processed ? "border-l-violet-500" : "border-l-violet-300"
+    return processed ? "border-l-[#075489]" : "border-l-[#075489]/40"
   }
-  return processed ? "border-l-yellow-500" : "border-l-yellow-300"
+  return processed ? "border-l-[#075489]" : "border-l-[#075489]/40"
+}
+
+// Rincian isi sebuah paket dalam order: instrumen penyusun + jumlah unitnya.
+function paketBreakdown(order: CleaningOrder, packageName: string) {
+  const map = new Map<string, { name: string; qty: number }>()
+  for (const u of order.units ?? []) {
+    if (u.source !== "paket" || u.package_name !== packageName) continue
+    const name = u.instrument?.name ?? "Instrumen"
+    const cur = map.get(name) ?? { name, qty: 0 }
+    cur.qty += 1
+    map.set(name, cur)
+  }
+  return [...map.values()]
 }
 
 // Satu kartu order pada tahap cleaning, dengan badge status pencucian.
@@ -639,6 +655,8 @@ function CleaningOrderCard({
   const inProcess = !washed && isWashingFilled(order)
   // "Terproses" untuk warna garis: cleaning → catatan terisi; packaging → sudah selesai cuci.
   const processed = stage === "packaging" ? washed : inProcess
+  // Paket yang isinya sedang ditampilkan (klik chip paket).
+  const [openPaket, setOpenPaket] = useState<string | null>(null)
   return (
     <div
       className={
@@ -652,7 +670,6 @@ function CleaningOrderCard({
           className="flex min-w-0 flex-1 items-start justify-between gap-2 px-2 py-2.5 text-left"
         >
           <div className="flex min-w-0 items-start gap-2">
-            <Droplets className="mt-0.5 h-4 w-4 shrink-0 text-[#4ba69d]" />
             <div className="min-w-0 flex-1">
               {/* Baris atas: kode batch + status pencucian. */}
               <div className="flex flex-wrap items-center gap-2">
@@ -668,24 +685,43 @@ function CleaningOrderCard({
                 )}
               </div>
 
-              {/* Nama paket / instrumen sebagai chip — tetap ringkas walau banyak. */}
+              {/* Nama paket / instrumen sebagai chip — paket bisa diklik utk lihat isi. */}
               {order.items?.length ? (
                 <div className="mt-1.5 flex flex-wrap items-center gap-1">
-                  {order.items.slice(0, 4).map((it, i) => (
-                    <span
-                      key={`${it.name}-${i}`}
-                      title={it.type === "paket" ? it.name : `${it.name} ×${it.quantity}`}
-                      className="inline-flex max-w-[180px] items-center gap-1 rounded-md bg-gray-50 px-1.5 py-0.5 text-xs text-gray-700 ring-1 ring-gray-200"
-                    >
-                      {it.type === "paket" && (
-                        <Package className="h-3 w-3 shrink-0 text-[#4ba69d]" />
-                      )}
-                      <span className="truncate font-medium">{it.name}</span>
-                      {it.type !== "paket" && (
-                        <span className="shrink-0 text-gray-400">×{it.quantity}</span>
-                      )}
-                    </span>
-                  ))}
+                  {order.items.slice(0, 4).map((it, i) => {
+                    const isPaket = it.type === "paket"
+                    const open = openPaket === it.name
+                    return (
+                      <span
+                        key={`${it.name}-${i}`}
+                        onClick={
+                          isPaket
+                            ? (e) => {
+                                e.stopPropagation()
+                                setOpenPaket(open ? null : it.name)
+                              }
+                            : undefined
+                        }
+                        title={isPaket ? "Lihat isi set" : `${it.name} ×${it.quantity}`}
+                        className={
+                          "inline-flex max-w-[200px] items-center gap-1 rounded-md px-1.5 py-0.5 text-xs ring-1 " +
+                          (isPaket
+                            ? "cursor-pointer " +
+                              (open
+                                ? "bg-[#075489]/10 text-[#075489] ring-[#075489]/30"
+                                : "bg-gray-50 text-gray-700 ring-gray-200 hover:bg-gray-100")
+                            : "bg-gray-50 text-gray-700 ring-gray-200")
+                        }
+                      >
+                        <span className="truncate font-medium">{it.name}</span>
+                        {isPaket ? (
+                          <ChevronDown className={"h-3 w-3 shrink-0 transition-transform " + (open ? "rotate-180" : "")} />
+                        ) : (
+                          <span className="shrink-0 text-gray-400">×{it.quantity}</span>
+                        )}
+                      </span>
+                    )
+                  })}
                   {order.items.length > 4 && (
                     <span className="rounded-md bg-[#075489]/8 px-1.5 py-0.5 text-xs font-medium text-[#075489]">
                       +{order.items.length - 4} lainnya
@@ -696,6 +732,26 @@ function CleaningOrderCard({
                 <p className="mt-1 truncate text-sm font-semibold text-gray-900">
                   {order.borrowed_by ?? "—"}
                 </p>
+              )}
+
+              {/* Rincian isi paket yang dipilih. */}
+              {openPaket && (
+                <div
+                  onClick={(e) => e.stopPropagation()}
+                  className="mt-1.5 rounded-md border border-gray-100 bg-gray-50 px-2 py-1.5"
+                >
+                  <p className="mb-1 text-[11px] font-semibold text-gray-500">Isi {openPaket}:</p>
+                  <div className="flex flex-wrap gap-1">
+                    {paketBreakdown(order, openPaket).map((p) => (
+                      <span
+                        key={p.name}
+                        className="rounded bg-white px-1.5 py-0.5 text-[11px] text-gray-600 ring-1 ring-gray-200"
+                      >
+                        {p.name} ×{p.qty}
+                      </span>
+                    ))}
+                  </div>
+                </div>
               )}
 
               {order.washing?.machine_no && (
@@ -722,7 +778,7 @@ function CleaningOrderCard({
                 type="button"
                 onClick={onComplete}
                 disabled={completing}
-                className="rounded-md border border-[#4ba69d] bg-[#4ba69d] px-2 py-1 text-xs font-medium text-white hover:bg-[#4ba69d]/90 disabled:opacity-60"
+                className="rounded-md border border-[#075489] bg-[#075489] px-2 py-1 text-xs font-medium text-white hover:bg-[#075489]/90 disabled:opacity-60"
               >
                 {completing ? "Memproses..." : "Selesai"}
               </button>
@@ -730,7 +786,7 @@ function CleaningOrderCard({
               <button
                 type="button"
                 onClick={onOpen}
-                className="rounded-md border border-[#4ba69d] px-2 py-1 text-xs font-medium text-[#4ba69d] hover:bg-[#4ba69d]/10"
+                className="rounded-md border border-[#075489] px-2 py-1 text-xs font-medium text-[#075489] hover:bg-[#075489]/10"
               >
                 Proses
               </button>
@@ -758,15 +814,16 @@ function InstrumentList({
   defaultOpen?: boolean
 }) {
   const [open, setOpen] = useState(defaultOpen)
+  const [zoom, setZoom] = useState<{ url: string; name: string } | null>(null)
   const hasUnits = (order.units?.length ?? 0) > 0
 
-  // Kelompokkan unit fisik per instrumen agar ringkas (nama + daftar kode).
+  // Kelompokkan unit fisik per instrumen agar ringkas (nama + gambar + daftar kode).
   const grouped = hasUnits
     ? Object.values(
-        order.units.reduce<Record<string, { name: string; units: CleaningUnit[] }>>((acc, u) => {
+        order.units.reduce<Record<string, { name: string; image: string | null; units: CleaningUnit[] }>>((acc, u) => {
           const name = u.instrument?.name ?? u.package_name ?? "Instrumen"
           const key = String(u.instrument?.id ?? name)
-          ;(acc[key] ??= { name, units: [] }).units.push(u)
+          ;(acc[key] ??= { name, image: u.instrument?.image_url ?? null, units: [] }).units.push(u)
           return acc
         }, {})
       )
@@ -800,8 +857,26 @@ function InstrumentList({
           {grouped.map((g) => (
             <li key={g.name} className="px-3 py-2">
               <div className="flex items-center justify-between gap-2">
-                <span className="text-sm font-medium text-gray-800">{g.name}</span>
-                <span className="text-xs text-gray-400">{g.units.length} unit</span>
+                <span className="flex min-w-0 items-center gap-2">
+                  {g.image ? (
+                    <button
+                      type="button"
+                      onClick={() => setZoom({ url: g.image as string, name: g.name })}
+                      title="Klik untuk perbesar"
+                      className="group relative h-8 w-8 shrink-0 cursor-zoom-in overflow-hidden rounded-md border border-gray-200"
+                    >
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src={g.image} alt={g.name} className="h-full w-full object-cover transition-transform group-hover:scale-105" />
+                      <span className="absolute inset-0 flex items-center justify-center bg-black/0 text-white opacity-0 transition group-hover:bg-black/30 group-hover:opacity-100">
+                        <ZoomIn className="h-3.5 w-3.5" />
+                      </span>
+                    </button>
+                  ) : (
+                    <Package className="h-4 w-4 shrink-0 text-[#075489]" />
+                  )}
+                  <span className="truncate text-sm font-medium text-gray-800">{g.name}</span>
+                </span>
+                <span className="shrink-0 text-xs text-gray-400">{g.units.length} unit</span>
               </div>
               <div className="mt-1 flex flex-wrap gap-1.5">
                 {g.units.map((u) => (
@@ -833,6 +908,30 @@ function InstrumentList({
         <p className="rounded-lg border border-dashed border-gray-200 px-3 py-2 text-xs text-gray-400">
           Belum ada rincian instrumen.
         </p>
+      )}
+
+      {/* Zoom foto instrumen — overlay layar penuh */}
+      {zoom && (
+        <div
+          className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 p-4"
+          onClick={() => setZoom(null)}
+          role="dialog"
+          aria-modal="true"
+        >
+          <button
+            type="button"
+            onClick={() => setZoom(null)}
+            className="absolute right-4 top-4 rounded-full bg-white/10 p-2 text-white hover:bg-white/20"
+            title="Tutup"
+          >
+            <X className="h-5 w-5" />
+          </button>
+          <div className="flex max-h-full max-w-3xl flex-col items-center gap-2" onClick={(e) => e.stopPropagation()}>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={zoom.url} alt={zoom.name} className="max-h-[80vh] w-auto rounded-lg object-contain shadow-2xl" />
+            <p className="text-sm font-medium text-white">{zoom.name}</p>
+          </div>
+        </div>
       )}
     </div>
   )

@@ -21,6 +21,8 @@ import templateCPReducer from "./slices/templateClinicalPathwaySlice"
 import asesmenCPReducer from "./slices/asesmenClinicalPathwaySlice"
 import cleaningReducer from "./slices/cleaningSlice"
 import sterilizePipelineReducer from "./slices/sterilizePipelineSlice"
+import productionPackagingReducer from "./slices/productionPackagingSlice"
+import productionSterilizeReducer from "./slices/productionSterilizeSlice"
 import storageReducer from "./slices/storageSlice"
 import distributeReducer from "./slices/distributeSlice"
 
@@ -44,6 +46,8 @@ export const store = configureStore({
     monitoring: monitoringReducer,
     cleaning: cleaningReducer,
     sterilizePipeline: sterilizePipelineReducer,
+    productionPackaging: productionPackagingReducer,
+    productionSterilize: productionSterilizeReducer,
     storage: storageReducer,
     distribute: distributeReducer,
     icd10: icd10Reducer,

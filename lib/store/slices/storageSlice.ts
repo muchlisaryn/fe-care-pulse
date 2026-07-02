@@ -7,18 +7,24 @@ export type StorageIncomingUnit = {
   code: string | null
   instrument: string | null
   image_url: string | null
+  // Gambar SET (katalog paket) — untuk thumbnail grup paket.
+  package_image?: string | null
   source: "satuan" | "paket"
   package_name: string | null
   stored: boolean
   rack_code: string | null
 }
 
-// Order steril yang perlu disimpan ke gudang.
+// Order / batch produksi steril yang perlu disimpan ke gudang.
 export type StorageIncomingOrder = {
   id: number
   code: string
   code_transaction: string | null
   status: string
+  // Asal batch: "order" (peminjaman) atau "produksi" (pipeline produksi).
+  source?: "order" | "produksi"
+  // Endpoint untuk menyimpan unit batch ini ke rak.
+  store_url?: string
   borrowed_by: string | null
   room: { id: number; name: string } | null
   processed_at: string | null
@@ -39,12 +45,16 @@ export type StorageInventoryRow = {
   expired: boolean
   unit: { id: number; code: string | null; instrument: string | null }
   order: { id: number; code: string; code_transaction: string | null } | null
+  batch: string | null
 }
 
 type StorageState = {
   incoming: StorageIncomingOrder[]
   incomingLoading: boolean
   incomingLoaded: boolean
+  productionIncoming: StorageIncomingOrder[]
+  productionIncomingLoading: boolean
+  productionIncomingLoaded: boolean
   inventory: StorageInventoryRow[]
   inventoryLoading: boolean
   inventoryLoaded: boolean
@@ -55,6 +65,9 @@ const initialState: StorageState = {
   incoming: [],
   incomingLoading: false,
   incomingLoaded: false,
+  productionIncoming: [],
+  productionIncomingLoading: false,
+  productionIncomingLoaded: false,
   inventory: [],
   inventoryLoading: false,
   inventoryLoaded: false,
@@ -78,6 +91,10 @@ async function fetchAllPages<T>(url: string): Promise<T[]> {
 
 export const fetchStorageIncoming = createAsyncThunk("storage/incoming", () =>
   fetchAllPages<StorageIncomingOrder>("/master/storage/incoming"),
+)
+
+export const fetchProductionStorageIncoming = createAsyncThunk("storage/productionIncoming", () =>
+  fetchAllPages<StorageIncomingOrder>("/master/storage/production-incoming"),
 )
 
 export const fetchStorageInventory = createAsyncThunk("storage/inventory", () =>
@@ -105,6 +122,18 @@ const storageSlice = createSlice({
       })
       .addCase(fetchStorageIncoming.rejected, (state) => {
         state.incomingLoading = false
+      })
+      .addCase(fetchProductionStorageIncoming.pending, (state) => {
+        state.productionIncomingLoading = true
+      })
+      .addCase(fetchProductionStorageIncoming.fulfilled, (state, action) => {
+        state.productionIncoming = action.payload
+        state.productionIncomingLoading = false
+        state.productionIncomingLoaded = true
+        state.dirty = false
+      })
+      .addCase(fetchProductionStorageIncoming.rejected, (state) => {
+        state.productionIncomingLoading = false
       })
       .addCase(fetchStorageInventory.pending, (state) => {
         state.inventoryLoading = true

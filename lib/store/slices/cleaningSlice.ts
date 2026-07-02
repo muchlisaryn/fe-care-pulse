@@ -34,7 +34,7 @@ export type CleaningUnit = {
   package_name: string | null
   instrument_stock_id: number | null
   code: string | null
-  instrument: { id: number; name: string } | null
+  instrument: { id: number; name: string; image_url?: string | null } | null
   status: string | null
   condition_out: { id: number; name: string } | null
 }

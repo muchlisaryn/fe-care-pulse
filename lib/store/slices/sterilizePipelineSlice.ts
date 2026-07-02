@@ -6,6 +6,7 @@ export type SterilizeUnit = {
   id: number
   code: string | null
   instrument: string | null
+  image_url?: string | null
   source: "satuan" | "paket"
   package_name: string | null
 }
@@ -35,8 +36,11 @@ export type SterilizeOrder = {
   code_transaction: string | null
   status: "selesai" | "sterilisasi"
   borrowed_by: string | null
-  room: { id: number; name: string } | null
-  order_date: string | null
+  // Gambar set/instrumen utama batch (untuk header kartu). Opsional (order-based null).
+  image_url?: string | null
+  // Opsional: pipeline produksi (batch PKG) tidak punya ruangan / tanggal order.
+  room?: { id: number; name: string } | null
+  order_date?: string | null
   processed_at: string | null
   unit_count: number
   units: SterilizeUnit[]

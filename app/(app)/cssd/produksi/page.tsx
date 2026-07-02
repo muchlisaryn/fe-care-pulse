@@ -2,7 +2,7 @@
 
 import { Suspense, useEffect, useMemo, useState } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
-import { Factory, Plus, Trash2, Boxes, Package, Search } from "lucide-react"
+import { Plus, Trash2, Package, Search, ZoomIn } from "lucide-react"
 import { Button } from "@/components/atoms/Button"
 import { Input } from "@/components/atoms/Input"
 import { Label } from "@/components/atoms/Label"
@@ -10,14 +10,16 @@ import { Badge } from "@/components/atoms/Badge"
 import { Textarea } from "@/components/atoms/Textarea"
 import { SelectSearch } from "@/components/atoms/SelectSearch"
 import { Card } from "@/components/molecules/Card"
+import { Modal } from "@/components/molecules/Modal"
 import { PageHeader } from "@/components/molecules/PageHeader"
 import { Pagination } from "@/components/molecules/Pagination"
 import { useAppDispatch, useAppSelector } from "@/lib/store/hooks"
 import { fetchCleaning } from "@/lib/store/slices/cleaningSlice"
-import { fetchSterilizePipeline } from "@/lib/store/slices/sterilizePipelineSlice"
+import { fetchProductionPackaging } from "@/lib/store/slices/productionPackagingSlice"
+import { fetchProductionSterilize } from "@/lib/store/slices/productionSterilizeSlice"
 import { CleaningTab } from "@/components/molecules/CleaningTab"
-import { PackagingTab } from "@/components/molecules/PackagingTab"
-import { SterilizationTab } from "@/components/molecules/SterilizationTab"
+import { ProductionPackagingTab } from "@/components/molecules/ProductionPackagingTab"
+import { ProductionSterilizationTab } from "@/components/molecules/ProductionSterilizationTab"
 import api from "@/lib/axios"
 
 // Tab halaman Produksi CSSD: form produksi + tahapan pipeline reprocessing.
@@ -25,9 +27,9 @@ type ProduksiTab = "produksi" | "cleaning" | "packaging" | "sterilization"
 const ITEMS_PER_PAGE = 20
 
 // Jenis instrumen (master) — untuk produksi satuan.
-type InstrumentType = { id: number; code: string; name: string }
+type InstrumentType = { id: number; code: string; name: string; image_url?: string | null }
 // Katalog paket/set instrumen (Master › Set Instrumen, tipe `paket`).
-type PaketCatalog = { id: number; code: string; name: string }
+type PaketCatalog = { id: number; code: string; name: string; image_url?: string | null }
 // Rincian isi paket (jenis instrumen + jumlah per set).
 type PaketItem = { instrument_id: number; quantity: number; instrument?: { name: string } | null }
 
@@ -39,6 +41,7 @@ type ProduksiLine = {
   refId: number // instrument_id (satuan) / instrument_catalog_id (paket)
   name: string
   quantity: string // teks agar boleh kosong sementara; divalidasi saat submit
+  image?: string | null // gambar instrumen/paket — ditampilkan sebagai thumbnail baris
   items?: PaketItem[] // rincian isi paket (untuk type `paket`) — ditampilkan sebagai detail
 }
 
@@ -72,17 +75,21 @@ function ProduksiCssdPage() {
   // Tracking Order, kini dipantau dari halaman Produksi.
   const cleaning = useAppSelector((s) => s.cleaning.items)
   const cleaningLoading = useAppSelector((s) => s.cleaning.loading)
-  const sterilizePipeline = useAppSelector((s) => s.sterilizePipeline.items)
-  const sterilizeLoading = useAppSelector((s) => s.sterilizePipeline.loading)
+  const packaging = useAppSelector((s) => s.productionPackaging.items)
+  const packagingLoading = useAppSelector((s) => s.productionPackaging.loading)
+  const sterilizePipeline = useAppSelector((s) => s.productionSterilize.items)
+  const sterilizeLoading = useAppSelector((s) => s.productionSterilize.loading)
 
   useEffect(() => {
     dispatch(fetchCleaning())
-    dispatch(fetchSterilizePipeline())
+    dispatch(fetchProductionPackaging())
+    dispatch(fetchProductionSterilize())
   }, [dispatch])
 
   function refreshPipeline() {
     dispatch(fetchCleaning())
-    dispatch(fetchSterilizePipeline())
+    dispatch(fetchProductionPackaging())
+    dispatch(fetchProductionSterilize())
   }
 
   const q = search.trim().toLowerCase()
@@ -98,7 +105,17 @@ function ProduksiCssdPage() {
     )
   }, [cleaning, q])
   const cleaningItems = useMemo(() => cleaningFiltered.filter((o) => o.status === "pencucian"), [cleaningFiltered])
-  const packagingItems = useMemo(() => cleaningFiltered.filter((o) => o.status === "pengemasan"), [cleaningFiltered])
+  const packagingItems = useMemo(() => {
+    if (!q) return packaging
+    return packaging.filter(
+      (o) =>
+        o.code.toLowerCase().includes(q) ||
+        (o.code_transaction ?? "").toLowerCase().includes(q) ||
+        (o.borrowed_by ?? "").toLowerCase().includes(q) ||
+        o.items.some((it) => it.name.toLowerCase().includes(q)) ||
+        o.units.some((u) => (u.code ?? "").toLowerCase().includes(q)),
+    )
+  }, [packaging, q])
   const sterilizationItems = useMemo(() => {
     if (!q) return sterilizePipeline
     return sterilizePipeline.filter(
@@ -106,7 +123,6 @@ function ProduksiCssdPage() {
         o.code.toLowerCase().includes(q) ||
         (o.code_transaction ?? "").toLowerCase().includes(q) ||
         (o.borrowed_by ?? "").toLowerCase().includes(q) ||
-        (o.room?.name ?? "").toLowerCase().includes(q) ||
         o.units.some((u) => (u.code ?? "").toLowerCase().includes(q)),
     )
   }, [sterilizePipeline, q])
@@ -121,7 +137,8 @@ function ProduksiCssdPage() {
   // Pagination tahap pipeline (tab non-produksi). Slice ber-tipe spesifik dihitung
   // di JSX agar props tiap Tab tidak ber-tipe union.
   const activeCount = tabCount[tab]
-  const pipelineLoading = tab === "sterilization" ? sterilizeLoading : cleaningLoading
+  const pipelineLoading =
+    tab === "sterilization" ? sterilizeLoading : tab === "packaging" ? packagingLoading : cleaningLoading
   const totalPages = Math.ceil(activeCount / ITEMS_PER_PAGE)
   const pageStart = (page - 1) * ITEMS_PER_PAGE
 
@@ -131,6 +148,9 @@ function ProduksiCssdPage() {
     // Catat tab aktif di URL: /cssd/produksi (form) atau /cssd/produksi?tab=cleaning
     router.replace(next === "produksi" ? "/cssd/produksi" : `/cssd/produksi?tab=${next}`, { scroll: false })
   }
+
+  // Pratinjau / zoom gambar instrumen/paket di daftar produksi.
+  const [previewImage, setPreviewImage] = useState<{ src: string; name: string } | null>(null)
 
   const [mode, setMode] = useState<AddMode>("satuan")
   const [lines, setLines] = useState<ProduksiLine[]>([])
@@ -223,6 +243,7 @@ function ProduksiCssdPage() {
             refId: picked.id,
             name: picked.name,
             quantity: String(qty),
+            image: picked.image_url ?? null,
             // Simpan rincian isi paket agar bisa ditampilkan sebagai detail di daftar.
             items: mode === "paket" ? paketItems : undefined,
           },
@@ -363,13 +384,13 @@ function ProduksiCssdPage() {
                 />
               )}
               {tab === "packaging" && (
-                <PackagingTab
+                <ProductionPackagingTab
                   items={packagingItems.slice(pageStart, pageStart + ITEMS_PER_PAGE)}
                   onChanged={refreshPipeline}
                 />
               )}
               {tab === "sterilization" && (
-                <SterilizationTab
+                <ProductionSterilizationTab
                   items={sterilizationItems.slice(pageStart, pageStart + ITEMS_PER_PAGE)}
                   onChanged={refreshPipeline}
                 />
@@ -392,7 +413,6 @@ function ProduksiCssdPage() {
         {/* Form tambah baris */}
         <Card className="space-y-4 p-5 lg:col-span-2">
           <div className="flex items-center gap-2">
-            <Factory className="h-4 w-4 text-[#075489]" />
             <h2 className="text-sm font-semibold text-gray-800">Tambah Alat untuk Diproduksi</h2>
           </div>
 
@@ -410,7 +430,6 @@ function ProduksiCssdPage() {
                     : "border-gray-200 text-gray-500 hover:bg-gray-50")
                 }
               >
-                {m === "satuan" ? <Boxes className="h-3.5 w-3.5" /> : <Package className="h-3.5 w-3.5" />}
                 {m === "satuan" ? "Satuan" : "Paket / Set"}
               </button>
             ))}
@@ -472,9 +491,6 @@ function ProduksiCssdPage() {
         <Card className="flex flex-col p-5 lg:col-span-3">
           <div className="mb-4 flex items-center justify-between">
             <div className="flex items-center gap-2">
-              <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-[#075489]/10 text-[#075489]">
-                <Boxes className="h-4 w-4" />
-              </span>
               <h2 className="text-sm font-semibold text-gray-800">Daftar Produksi</h2>
             </div>
             {lines.length > 0 && (
@@ -486,9 +502,6 @@ function ProduksiCssdPage() {
 
           {lines.length === 0 ? (
             <div className="flex flex-1 flex-col items-center justify-center gap-3 rounded-xl border border-dashed border-gray-200 bg-gray-50/50 py-14 text-center">
-              <span className="flex h-12 w-12 items-center justify-center rounded-full bg-gray-100 text-gray-300">
-                <Boxes className="h-6 w-6" />
-              </span>
               <p className="text-sm text-gray-400">Belum ada alat. Tambahkan dari panel kiri.</p>
             </div>
           ) : (
@@ -509,15 +522,33 @@ function ProduksiCssdPage() {
                       className={"absolute inset-y-0 left-0 w-1 " + (isPaket ? "bg-[#4ba69d]" : "bg-[#075489]")}
                     />
                     <div className="flex items-center gap-3 py-2.5 pl-4 pr-3">
-                      {/* Nomor urut baris. */}
-                      <span
-                        className={
-                          "flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-xs font-bold text-white " +
-                          (isPaket ? "bg-[#4ba69d]" : "bg-[#075489]")
-                        }
-                      >
-                        {i + 1}
-                      </span>
+                      {/* Gambar instrumen/paket (klik untuk zoom; fallback: nomor urut baris). */}
+                      {l.image ? (
+                        <button
+                          type="button"
+                          onClick={() => setPreviewImage({ src: l.image!, name: l.name })}
+                          title="Lihat gambar"
+                          className={
+                            "group/thumb relative h-10 w-10 shrink-0 cursor-zoom-in overflow-hidden rounded-lg ring-1 transition hover:ring-2 " +
+                            (isPaket ? "ring-[#4ba69d]/30 hover:ring-[#4ba69d]/60" : "ring-[#075489]/20 hover:ring-[#075489]/50")
+                          }
+                        >
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img src={l.image} alt={l.name} className="h-full w-full object-cover" />
+                          <span className="absolute inset-0 hidden items-center justify-center bg-black/30 text-white group-hover/thumb:flex">
+                            <ZoomIn className="h-4 w-4" />
+                          </span>
+                        </button>
+                      ) : (
+                        <span
+                          className={
+                            "flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-xs font-bold text-white " +
+                            (isPaket ? "bg-[#4ba69d]" : "bg-[#075489]")
+                          }
+                        >
+                          {i + 1}
+                        </span>
+                      )}
                       <div className="min-w-0 flex-1">
                         <div className="flex flex-wrap items-center gap-2">
                           <span className="truncate text-sm font-semibold text-gray-800">{l.name}</span>
@@ -586,13 +617,36 @@ function ProduksiCssdPage() {
               disabled={saving || lines.length === 0}
               className="bg-[#4ba69d] hover:bg-[#4ba69d]/90 text-white shadow-sm"
             >
-              <Factory className="mr-1.5 h-4 w-4" />
               {saving ? "Memproses..." : "Mulai Produksi"}
             </Button>
           </div>
         </Card>
       </div>
       )}
+
+      {/* Pratinjau / zoom gambar instrumen/paket */}
+      <Modal
+        open={previewImage !== null}
+        onClose={() => setPreviewImage(null)}
+        title={previewImage?.name ?? "Gambar"}
+        size="lg"
+        footer={
+          <Button variant="outline" onClick={() => setPreviewImage(null)}>
+            Tutup
+          </Button>
+        }
+      >
+        {previewImage && (
+          <div className="flex justify-center">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={previewImage.src}
+              alt={previewImage.name}
+              className="max-h-[70vh] w-auto rounded-lg object-contain"
+            />
+          </div>
+        )}
+      </Modal>
     </div>
   )
 }

@@ -1,0 +1,536 @@
+"use client"
+
+import { useMemo, useState } from "react"
+import { FlaskConical, CheckCircle2, AlertTriangle, Layers, X, ChevronDown } from "lucide-react"
+import { Button } from "@/components/atoms/Button"
+import { Badge } from "@/components/atoms/Badge"
+import { Input } from "@/components/atoms/Input"
+import { Label } from "@/components/atoms/Label"
+import { Select } from "@/components/atoms/Select"
+import { Textarea } from "@/components/atoms/Textarea"
+import { Modal } from "@/components/molecules/Modal"
+import api from "@/lib/axios"
+import type { ProdSterilizeOrder, ProdSterilizeUnit } from "@/lib/store/slices/productionSterilizeSlice"
+
+function formatDateTime(value: string | null) {
+  if (!value) return "—"
+  const d = new Date(value)
+  if (Number.isNaN(d.getTime())) return value
+  return d.toLocaleString("id-ID", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })
+}
+
+function nowLocalInput(): string {
+  const d = new Date()
+  d.setMinutes(d.getMinutes() - d.getTimezoneOffset())
+  return d.toISOString().slice(0, 16)
+}
+
+const STERILE_SHELF_LIFE_DAYS = 7
+function defaultExpiry(sterilizedAt: string | null | undefined): string {
+  const base = sterilizedAt ? new Date(sterilizedAt) : new Date()
+  if (Number.isNaN(base.getTime())) return ""
+  base.setDate(base.getDate() + STERILE_SHELF_LIFE_DAYS)
+  base.setMinutes(base.getMinutes() - base.getTimezoneOffset())
+  return base.toISOString().slice(0, 10)
+}
+
+function errMsg(e: unknown): string {
+  const x = e as { response?: { data?: { message?: string } } }
+  return x.response?.data?.message ?? "Terjadi kesalahan."
+}
+
+const NO_INSTRUMENT = "(Tanpa nama instrumen)"
+
+type UnitGroup = { instrument: string; image: string | null; source: ProdSterilizeUnit["source"] | null; units: ProdSterilizeUnit[] }
+
+function groupUnits(units: ProdSterilizeUnit[]): UnitGroup[] {
+  const groups: UnitGroup[] = []
+  const index = new Map<string, UnitGroup>()
+  for (const u of units) {
+    const key = u.instrument ?? NO_INSTRUMENT
+    let g = index.get(key)
+    if (!g) {
+      g = { instrument: key, image: u.image_url ?? null, source: u.source, units: [] }
+      index.set(key, g)
+      groups.push(g)
+    }
+    g.units.push(u)
+  }
+  return groups
+}
+
+const METHOD_OPTIONS = [
+  { value: "uap", label: "Uap (Steam / Autoclave)" },
+  { value: "eo", label: "Ethylene Oxide (EO)" },
+  { value: "plasma", label: "Plasma H2O2" },
+  { value: "panas_kering", label: "Panas Kering" },
+]
+const METHOD_DEFAULTS: Record<string, { temperature: string; duration_minutes: string }> = {
+  uap: { temperature: "134", duration_minutes: "30" },
+  eo: { temperature: "55", duration_minutes: "180" },
+  plasma: { temperature: "50", duration_minutes: "47" },
+  panas_kering: { temperature: "170", duration_minutes: "60" },
+}
+const emptyForm = { machine: "", method: "uap", cycle_number: "", temperature: "", duration_minutes: "", sterilized_at: "", expiry_date: "", note: "" }
+
+/**
+ * Tab Sterilisasi pipeline PRODUKSI. Beberapa item "Siap Disterilkan" (satuan/paket)
+ * bisa dicentang lalu digabung menjadi SATU batch sterilisasi (disterilkan bersamaan),
+ * lalu batch divalidasi Steril/Gagal.
+ */
+export function ProductionSterilizationTab({
+  items,
+  onChanged,
+}: {
+  items: ProdSterilizeOrder[]
+  onChanged: () => void
+}) {
+  const ready = useMemo(() => items.filter((o) => o.kind === "ready"), [items])
+
+  // PKG id yang dicentang untuk digabung ke batch.
+  const [selected, setSelected] = useState<Set<number>>(new Set())
+  const [batchOpen, setBatchOpen] = useState(false)
+  const [form, setForm] = useState(emptyForm)
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [done, setDone] = useState<{ batch: string; count: number } | null>(null)
+
+  // Validasi hasil batch.
+  const [validating, setValidating] = useState<ProdSterilizeOrder | null>(null)
+  const [vForm, setVForm] = useState({ chemical_indicator: "", biological_indicator: "", expiry_date: "", note: "" })
+  const [vSaving, setVSaving] = useState<"selesai" | "gagal" | null>(null)
+  const [vError, setVError] = useState<string | null>(null)
+
+  const [zoom, setZoom] = useState<{ url: string; name: string } | null>(null)
+  // Kartu yang daftar unitnya sedang ditampilkan.
+  const [openUnits, setOpenUnits] = useState<Set<string>>(new Set())
+
+  const selectedReady = useMemo(() => ready.filter((o) => selected.has(o.id)), [ready, selected])
+  const selectedUnitCount = selectedReady.reduce((s, o) => s + o.unit_count, 0)
+
+  function toggleSelect(id: number) {
+    setSelected((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  function toggleUnits(key: string) {
+    setOpenUnits((prev) => {
+      const next = new Set(prev)
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
+      return next
+    })
+  }
+
+  function openBatch() {
+    if (selectedReady.length === 0) return
+    setError(null)
+    const preset = METHOD_DEFAULTS[emptyForm.method]
+    setForm({ ...emptyForm, sterilized_at: nowLocalInput(), temperature: preset?.temperature ?? "", duration_minutes: preset?.duration_minutes ?? "" })
+    setBatchOpen(true)
+  }
+
+  function changeMethod(method: string) {
+    const preset = METHOD_DEFAULTS[method]
+    setForm((f) => ({ ...f, method, temperature: preset?.temperature ?? f.temperature, duration_minutes: preset?.duration_minutes ?? f.duration_minutes }))
+  }
+
+  async function createBatch() {
+    if (saving || selectedReady.length === 0) return
+    if (!form.machine.trim()) return setError("Nama / nomor mesin sterilisator wajib diisi.")
+    if (!form.sterilized_at) return setError("Waktu sterilisasi wajib diisi.")
+    setSaving(true)
+    setError(null)
+    try {
+      const num = (v: string) => (v.trim() === "" ? null : Number(v))
+      const res = await api.post("/master/sterilization-pipeline/batch", {
+        packaging_ids: selectedReady.map((o) => o.id),
+        machine: form.machine.trim(),
+        method: form.method,
+        cycle_number: form.cycle_number.trim() || null,
+        temperature: num(form.temperature),
+        duration_minutes: num(form.duration_minutes),
+        sterilized_at: new Date(form.sterilized_at).toISOString(),
+        expiry_date: form.expiry_date || null,
+        note: form.note.trim() || null,
+      })
+      setDone({ batch: res.data?.data?.code ?? "—", count: selectedReady.length })
+      setBatchOpen(false)
+      setSelected(new Set())
+      onChanged()
+    } catch (e) {
+      setError(errMsg(e))
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  function openValidate(order: ProdSterilizeOrder) {
+    setValidating(order)
+    setVError(null)
+    const b = order.sterilization
+    setVForm({
+      chemical_indicator: b?.chemical_indicator ?? "",
+      biological_indicator: b?.biological_indicator ?? "",
+      expiry_date: b?.expiry_date ?? defaultExpiry(b?.sterilized_at),
+      note: "",
+    })
+  }
+
+  async function submitValidate(result: "selesai" | "gagal") {
+    if (!validating || vSaving) return
+    setVSaving(result)
+    setVError(null)
+    try {
+      await api.post(`/master/sterilization-pipeline/${validating.id}/validate`, {
+        result,
+        chemical_indicator: vForm.chemical_indicator.trim() || null,
+        biological_indicator: vForm.biological_indicator.trim() || null,
+        expiry_date: vForm.expiry_date || null,
+        note: vForm.note.trim() || null,
+      })
+      setValidating(null)
+      onChanged()
+    } catch (e) {
+      setVError(errMsg(e))
+    } finally {
+      setVSaving(null)
+    }
+  }
+
+  return (
+    <>
+      {/* Toolbar aksi gabung batch */}
+      {ready.length > 0 && (
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-[#075489]/20 bg-[#075489]/5 px-3 py-2">
+          <span className="text-xs text-gray-600">
+            {selected.size > 0
+              ? `${selected.size} item dipilih · ${selectedUnitCount} unit`
+              : "Centang beberapa item untuk digabung ke satu batch sterilisasi."}
+          </span>
+          <Button
+            type="button"
+            onClick={openBatch}
+            disabled={selected.size === 0}
+            className="bg-[#075489] hover:bg-[#075489]/90 text-white"
+          >
+            Buat Batch
+          </Button>
+        </div>
+      )}
+
+      <div className="space-y-2">
+        {items.map((order) => {
+          const inBatch = order.kind === "batch"
+          const key = `${order.kind}-${order.id}`
+          const checked = selected.has(order.id)
+          // Batch: default terbuka (detail instrumen langsung tampil), toggle utk menutup.
+          // Ready: default tertutup.
+          const unitsOpen = inBatch ? !openUnits.has(key) : openUnits.has(key)
+          const groups = groupUnits(order.units)
+          return (
+            <div key={key} className="rounded-lg border border-gray-200 border-l-4 border-l-[#075489]">
+              <div className="flex items-start justify-between gap-2 px-3 py-2.5">
+                <div className="flex min-w-0 items-start gap-2">
+                  {!inBatch && (
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      onChange={() => toggleSelect(order.id)}
+                      className="mt-1 h-4 w-4 shrink-0 accent-[#075489]"
+                      title="Pilih untuk digabung ke batch"
+                    />
+                  )}
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="text-sm font-semibold text-gray-900">
+                        {inBatch ? `Batch ${order.code}` : (order.borrowed_by ?? "—")}
+                      </span>
+                      {!inBatch && (
+                        <span className="font-mono text-xs font-semibold text-[#075489] bg-[#075489]/10 px-2 py-0.5 rounded">
+                          {order.code}
+                        </span>
+                      )}
+                      {inBatch ? <Badge variant="warning">Menunggu Validasi</Badge> : <Badge variant="info">Siap Disterilkan</Badge>}
+                    </div>
+                    <div className="mt-1 flex flex-wrap gap-x-4 gap-y-0.5 text-xs text-gray-500">
+                      <span>{order.unit_count} unit</span>
+                      {order.code_transaction && <span>{order.code_transaction}</span>}
+                      {inBatch && order.sterilization && <span>Mesin: {order.sterilization.machine ?? "—"}</span>}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => toggleUnits(key)}
+                      className="mt-1.5 flex items-center gap-1 text-xs font-medium text-gray-400 hover:text-gray-600"
+                    >
+                      <Layers className="h-3.5 w-3.5" />
+                      Unit Disterilkan ({order.unit_count})
+                      <ChevronDown className={"h-3.5 w-3.5 transition-transform " + (unitsOpen ? "rotate-180" : "")} />
+                    </button>
+                    {unitsOpen && (
+                      <div className="mt-1.5 divide-y divide-gray-100 rounded-lg border border-gray-200 bg-white">
+                        {groups.map((g) => (
+                          <div key={g.instrument} className="px-3 py-2">
+                            <div className="flex items-center gap-2">
+                              {g.image ? (
+                                <button
+                                  type="button"
+                                  onClick={() => setZoom({ url: g.image as string, name: g.instrument })}
+                                  className="group relative h-7 w-7 shrink-0 cursor-zoom-in overflow-hidden rounded border border-gray-200"
+                                >
+                                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                                  <img src={g.image} alt={g.instrument} className="h-full w-full object-cover" />
+                                </button>
+                              ) : (
+                                <Layers className="h-4 w-4 shrink-0 text-[#075489]" />
+                              )}
+                              <span className="min-w-0 truncate text-sm font-medium text-gray-800">{g.instrument}</span>
+                              <span className="ml-auto inline-flex shrink-0 items-center rounded-full bg-[#075489]/10 px-2 py-0.5 text-xs font-semibold text-[#075489]">
+                                {g.units.length} unit
+                              </span>
+                            </div>
+                            <div className="mt-1 flex flex-wrap gap-1.5">
+                              {g.units.map((u) => (
+                                <span key={u.id} className="rounded bg-[#075489]/10 px-1.5 py-0.5 font-mono text-[11px] font-semibold text-[#075489]">
+                                  {u.code ?? `#${u.id}`}
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+                {inBatch && (
+                  <button
+                    type="button"
+                    onClick={() => openValidate(order)}
+                    className="shrink-0 self-center rounded-md border border-[#075489] bg-[#075489] px-3 py-1.5 text-xs font-medium text-white hover:bg-[#075489]/90"
+                  >
+                    Validasi Hasil
+                  </button>
+                )}
+              </div>
+            </div>
+          )
+        })}
+      </div>
+
+      {/* Modal buat batch gabungan */}
+      <Modal
+        open={batchOpen}
+        onClose={saving ? () => {} : () => setBatchOpen(false)}
+        title={`Buat Batch Sterilisasi — ${selectedReady.length} item`}
+        size="lg"
+        footer={
+          <div className="flex w-full items-center justify-between gap-3">
+            {error ? (
+              <p className="text-sm text-red-600">{error}</p>
+            ) : (
+              <span className="text-xs text-gray-400">
+                {selectedReady.length} item · {selectedUnitCount} unit digabung ke satu batch.
+              </span>
+            )}
+            <div className="flex shrink-0 gap-2">
+              <Button variant="outline" onClick={() => setBatchOpen(false)} disabled={saving}>
+                Batal
+              </Button>
+              <Button onClick={createBatch} disabled={saving} className="bg-[#075489] hover:bg-[#075489]/90 text-white">
+                {saving ? "Membuat..." : "Buat Batch"}
+              </Button>
+            </div>
+          </div>
+        }
+      >
+        <div className="space-y-5">
+          <div className="rounded-lg border border-gray-200 bg-gray-50 px-4 py-3">
+            <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-gray-400">Item dalam batch</p>
+            <div className="flex flex-wrap gap-1.5">
+              {selectedReady.map((o) => (
+                <span key={o.id} className="inline-flex items-center gap-1 rounded-md bg-white px-1.5 py-0.5 text-xs text-gray-700 ring-1 ring-gray-200">
+                  <span className="font-medium">{o.borrowed_by ?? o.code}</span>
+                  <span className="text-gray-400">· {o.unit_count} unit</span>
+                </span>
+              ))}
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <div className="space-y-1.5">
+              <Label htmlFor="pstr-machine">Mesin Sterilisator *</Label>
+              <Input id="pstr-machine" value={form.machine} onChange={(e) => setForm((f) => ({ ...f, machine: e.target.value }))} placeholder="mis. Autoclave-01" />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="pstr-method">Metode</Label>
+              <Select id="pstr-method" value={form.method} onChange={(e) => changeMethod(e.target.value)}>
+                {METHOD_OPTIONS.map((m) => (
+                  <option key={m.value} value={m.value}>
+                    {m.label}
+                  </option>
+                ))}
+              </Select>
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="pstr-cycle">Nomor Siklus</Label>
+              <Input id="pstr-cycle" value={form.cycle_number} onChange={(e) => setForm((f) => ({ ...f, cycle_number: e.target.value }))} placeholder="mis. C-12" />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label htmlFor="pstr-temp">Suhu (°C)</Label>
+                <Input id="pstr-temp" type="number" step="0.01" value={form.temperature} onChange={(e) => setForm((f) => ({ ...f, temperature: e.target.value }))} placeholder="mis. 134" />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="pstr-dur">Durasi (mnt)</Label>
+                <Input id="pstr-dur" type="number" min={0} value={form.duration_minutes} onChange={(e) => setForm((f) => ({ ...f, duration_minutes: e.target.value }))} placeholder="mis. 30" />
+              </div>
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="pstr-at">Waktu Sterilisasi *</Label>
+              <Input id="pstr-at" type="datetime-local" value={form.sterilized_at} onChange={(e) => setForm((f) => ({ ...f, sterilized_at: e.target.value }))} />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="pstr-exp">Tanggal Kedaluwarsa Steril</Label>
+              <Input id="pstr-exp" type="date" value={form.expiry_date} onChange={(e) => setForm((f) => ({ ...f, expiry_date: e.target.value }))} />
+            </div>
+          </div>
+
+          <div className="space-y-1.5">
+            <Label htmlFor="pstr-note">Catatan</Label>
+            <Textarea id="pstr-note" value={form.note} onChange={(e) => setForm((f) => ({ ...f, note: e.target.value }))} placeholder="Opsional" />
+          </div>
+        </div>
+      </Modal>
+
+      {/* Modal validasi hasil */}
+      <Modal
+        open={validating !== null}
+        onClose={vSaving ? () => {} : () => setValidating(null)}
+        title={validating ? `Validasi Sterilisasi — ${validating.sterilization?.code ?? validating.code}` : "Validasi Sterilisasi"}
+        size="lg"
+        footer={
+          <div className="flex w-full items-center justify-between gap-3">
+            {vError ? (
+              <p className="text-sm text-red-600">{vError}</p>
+            ) : (
+              <span className="text-xs text-gray-400">Steril → alat siap rilis. Gagal → batch kembali ke antrean siap-steril.</span>
+            )}
+            <div className="flex shrink-0 gap-2">
+              <Button variant="outline" onClick={() => setValidating(null)} disabled={vSaving !== null}>
+                Batal
+              </Button>
+              <Button onClick={() => submitValidate("gagal")} disabled={vSaving !== null} className="bg-red-600 hover:bg-red-700 text-white">
+                {vSaving === "gagal" ? "Memproses..." : "Tandai Gagal"}
+              </Button>
+              <Button onClick={() => submitValidate("selesai")} disabled={vSaving !== null} className="bg-green-600 hover:bg-green-700 text-white">
+                {vSaving === "selesai" ? "Memproses..." : "Tandai Steril"}
+              </Button>
+            </div>
+          </div>
+        }
+      >
+        {validating && (
+          <div className="space-y-5">
+            <div className="grid grid-cols-2 gap-x-4 gap-y-2 rounded-lg border border-gray-200 bg-gray-50 px-4 py-3 text-sm sm:grid-cols-3">
+              <Info label="Mesin" value={validating.sterilization?.machine} />
+              <Info label="Metode" value={validating.sterilization?.method} />
+              <Info label="No. Siklus" value={validating.sterilization?.cycle_number} />
+              <Info label="Suhu" value={validating.sterilization?.temperature ? `${Number(validating.sterilization.temperature)}°C` : null} />
+              <Info label="Durasi" value={validating.sterilization?.duration_minutes != null ? `${validating.sterilization.duration_minutes} mnt` : null} />
+              <Info label="Waktu" value={formatDateTime(validating.sterilization?.sterilized_at ?? null)} />
+            </div>
+
+            <div className="flex items-start gap-2 rounded-lg border border-[#075489]/20 bg-[#075489]/5 px-4 py-2.5">
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-[#075489]" />
+              <p className="text-xs text-[#075489]">Kontrol kualitas (karantina): isi hasil indikator sebelum memvalidasi.</p>
+            </div>
+
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <div className="space-y-1.5">
+                <Label htmlFor="pv-chem">Indikator Kimia</Label>
+                <Select id="pv-chem" value={vForm.chemical_indicator} onChange={(e) => setVForm((f) => ({ ...f, chemical_indicator: e.target.value }))}>
+                  <option value="">— Pilih —</option>
+                  <option value="Berhasil">Berhasil</option>
+                  <option value="Tidak Berhasil">Tidak Berhasil</option>
+                </Select>
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="pv-bio">Indikator Biologis</Label>
+                <Select id="pv-bio" value={vForm.biological_indicator} onChange={(e) => setVForm((f) => ({ ...f, biological_indicator: e.target.value }))}>
+                  <option value="">— Pilih —</option>
+                  <option value="Negatif">Negatif</option>
+                  <option value="Positif">Positif</option>
+                </Select>
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="pv-exp">Tanggal Kedaluwarsa Steril</Label>
+                <Input id="pv-exp" type="date" value={vForm.expiry_date} onChange={(e) => setVForm((f) => ({ ...f, expiry_date: e.target.value }))} />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="pv-note">Catatan</Label>
+                <Input id="pv-note" value={vForm.note} onChange={(e) => setVForm((f) => ({ ...f, note: e.target.value }))} placeholder="Opsional" />
+              </div>
+            </div>
+          </div>
+        )}
+      </Modal>
+
+      {/* Modal hasil batch dibuat */}
+      <Modal
+        open={done !== null}
+        onClose={() => setDone(null)}
+        title="Batch Sterilisasi Dibuat"
+        size="sm"
+        footer={
+          <div className="flex w-full justify-end gap-2">
+            <Button onClick={() => setDone(null)} className="bg-[#075489] hover:bg-[#075489]/90 text-white">
+              Tutup
+            </Button>
+          </div>
+        }
+      >
+        {done && (
+          <div className="flex flex-col items-center gap-3 py-2 text-center">
+            <div className="flex h-14 w-14 items-center justify-center rounded-full bg-green-50">
+              <CheckCircle2 className="h-7 w-7 text-green-600" />
+            </div>
+            <p className="text-sm text-gray-600">
+              {done.count} item digabung ke batch. Setelah siklus selesai, klik <b>Validasi Hasil</b> pada kartunya.
+            </p>
+            <div className="mt-1 inline-flex items-center gap-2 rounded-lg bg-[#075489]/10 px-3 py-1.5">
+              <FlaskConical className="h-4 w-4 text-[#075489]" />
+              <span className="font-mono text-sm font-semibold text-[#075489]">{done.batch}</span>
+            </div>
+          </div>
+        )}
+      </Modal>
+
+      {/* Zoom foto */}
+      {zoom && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 p-4" onClick={() => setZoom(null)} role="dialog" aria-modal="true">
+          <button type="button" onClick={() => setZoom(null)} className="absolute right-4 top-4 rounded-full bg-white/10 p-2 text-white hover:bg-white/20" title="Tutup">
+            <X className="h-5 w-5" />
+          </button>
+          <div className="flex max-h-full max-w-3xl flex-col items-center gap-2" onClick={(e) => e.stopPropagation()}>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={zoom.url} alt={zoom.name} className="max-h-[80vh] w-auto rounded-lg object-contain shadow-2xl" />
+            <p className="text-sm font-medium text-white">{zoom.name}</p>
+          </div>
+        </div>
+      )}
+    </>
+  )
+}
+
+function Info({ label, value }: { label: string; value: string | null | undefined }) {
+  return (
+    <div className="space-y-0.5">
+      <p className="text-xs font-semibold uppercase tracking-wide text-gray-400">{label}</p>
+      {value ? <p className="text-sm text-gray-800">{value}</p> : <span className="text-xs text-gray-400">—</span>}
+    </div>
+  )
+}
