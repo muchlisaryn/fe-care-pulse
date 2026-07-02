@@ -1,7 +1,7 @@
 "use client"
 
-import { useState } from "react"
-import { ShieldCheck, FlaskConical, CheckCircle2, AlertTriangle } from "lucide-react"
+import { useMemo, useState } from "react"
+import { ShieldCheck, FlaskConical, CheckCircle2, AlertTriangle, Layers } from "lucide-react"
 import { Button } from "@/components/atoms/Button"
 import { Badge } from "@/components/atoms/Badge"
 import { Input } from "@/components/atoms/Input"
@@ -10,7 +10,7 @@ import { Select } from "@/components/atoms/Select"
 import { Textarea } from "@/components/atoms/Textarea"
 import { Modal } from "@/components/molecules/Modal"
 import api from "@/lib/axios"
-import type { SterilizeOrder } from "@/lib/store/slices/sterilizePipelineSlice"
+import type { SterilizeOrder, SterilizeUnit } from "@/lib/store/slices/sterilizePipelineSlice"
 
 function formatDateTime(value: string | null) {
   if (!value) return "—"
@@ -47,6 +47,33 @@ function defaultExpiry(sterilizedAt: string | null | undefined): string {
   base.setDate(base.getDate() + STERILE_SHELF_LIFE_DAYS)
   base.setMinutes(base.getMinutes() - base.getTimezoneOffset())
   return base.toISOString().slice(0, 10)
+}
+
+// Placeholder saat unit tidak punya nama instrumen (jangan render kosong).
+const NO_INSTRUMENT = "(Tanpa nama instrumen)"
+
+type UnitGroup = {
+  instrument: string
+  source: SterilizeUnit["source"] | null
+  package_name: string | null
+  units: SterilizeUnit[]
+}
+
+// Kelompokkan unit per nama instrumen, urut sesuai kemunculan pertama.
+function groupUnits(units: SterilizeUnit[]): UnitGroup[] {
+  const groups: UnitGroup[] = []
+  const index = new Map<string, UnitGroup>()
+  for (const u of units) {
+    const key = u.instrument ?? NO_INSTRUMENT
+    let g = index.get(key)
+    if (!g) {
+      g = { instrument: key, source: u.source, package_name: u.package_name, units: [] }
+      index.set(key, g)
+      groups.push(g)
+    }
+    g.units.push(u)
+  }
+  return groups
 }
 
 const METHOD_OPTIONS = [
@@ -103,6 +130,9 @@ export function SterilizationTab({
   })
   const [vSaving, setVSaving] = useState<"selesai" | "gagal" | null>(null)
   const [vError, setVError] = useState<string | null>(null)
+
+  // Unit batch dikelompokkan per instrumen untuk daftar yang enak dibaca.
+  const unitGroups = useMemo(() => groupUnits(active?.units ?? []), [active])
 
   function openBatch(order: SterilizeOrder) {
     setActive(order)
@@ -299,23 +329,42 @@ export function SterilizationTab({
       >
         {active && (
           <div className="space-y-5">
-            {/* Unit yang akan disterilkan */}
-            <div className="rounded-lg border border-gray-200 bg-gray-50 px-4 py-3">
+            {/* Unit yang akan disterilkan — dikelompokkan per instrumen */}
+            <div>
               <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-400">
                 Unit Disterilkan ({active.unit_count})
               </p>
-              {active.units.length === 0 ? (
-                <p className="text-sm text-gray-400">Tidak ada unit.</p>
+              {unitGroups.length === 0 ? (
+                <div className="rounded-lg border border-gray-200 bg-gray-50 px-4 py-3">
+                  <p className="text-sm text-gray-400">Tidak ada unit.</p>
+                </div>
               ) : (
-                <div className="flex flex-wrap gap-1.5">
-                  {active.units.map((u) => (
-                    <span
-                      key={u.id}
-                      className="font-mono text-[11px] font-semibold text-sky-700 bg-sky-100 px-1.5 py-0.5 rounded"
-                      title={u.instrument ?? undefined}
-                    >
-                      {u.code ?? `#${u.id}`}
-                    </span>
+                <div className="divide-y divide-gray-200 overflow-hidden rounded-lg border border-gray-200 bg-white">
+                  {unitGroups.map((g) => (
+                    <div key={g.instrument} className="px-3 py-2.5">
+                      <div className="flex items-center gap-2">
+                        <Layers className="h-4 w-4 shrink-0 text-sky-500" />
+                        <span className="min-w-0 truncate text-sm font-medium text-gray-800">
+                          {g.instrument}
+                        </span>
+                        {g.source === "paket" && g.package_name && (
+                          <span className="truncate text-xs text-gray-400">· {g.package_name}</span>
+                        )}
+                        <span className="ml-auto inline-flex shrink-0 items-center rounded-full bg-sky-100 px-2 py-0.5 text-xs font-semibold text-sky-700">
+                          {g.units.length} unit
+                        </span>
+                      </div>
+                      <div className="mt-1.5 flex flex-wrap gap-1.5">
+                        {g.units.map((u) => (
+                          <span
+                            key={u.id}
+                            className="rounded bg-sky-50 px-1.5 py-0.5 font-mono text-[11px] font-semibold text-sky-700"
+                          >
+                            {u.code ?? `#${u.id}`}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
                   ))}
                 </div>
               )}
