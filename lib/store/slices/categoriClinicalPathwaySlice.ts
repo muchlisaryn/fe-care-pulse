@@ -3,7 +3,7 @@ import api from "@/lib/axios"
 
 export type CategoriClinicalPathway = {
   id: number
-  urutan: number
+  sort_order: number
   label: string
   created_by?: string | null
   updated_by?: string | null

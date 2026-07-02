@@ -16,68 +16,68 @@ import { DataTable, type Column } from "@/components/molecules/DataTable"
 import { useAppSelector } from "@/lib/store/hooks"
 import api from "@/lib/axios"
 
-type Category = { id: number; urutan: number; label: string }
+type Category = { id: number; sort_order: number; label: string }
 
 type Point = {
   id: number
-  categori_id: number
+  category_id: number
   parent_id: number | null
   label: string
-  pengisi: string
-  hari_wajib: number[] | null
-  urutan: number
+  filled_by: string
+  required_days: number[] | null
+  sort_order: number
 }
 
 type AsesmenPointValue = {
   point_id: number
-  checked_hari: number[] | null
-  keterangan: string | null
+  checked_days: number[] | null
+  note: string | null
 }
 
 type Asesmen = {
   id: number
   template_id: number
-  no_rm: string
-  nama_pasien: string
-  jenis_kelamin: "L" | "P"
-  tanggal_lahir: string
-  diagnosa_masuk: string
-  penyakit_utama: string | null
-  penyakit_penyerta: string | null
-  komplikasi: string | null
-  tindakan: string | null
-  bb: string | null
-  tb: string | null
-  tanggal_jam_masuk: string
-  tanggal_jam_keluar: string | null
-  lama_rawat: number | null
-  rencana_rawat: string | null
-  ruang_id: number | null
-  rujukan: boolean
+  medical_record_no: string
+  patient_name: string
+  gender: "L" | "P"
+  birth_date: string
+  admission_diagnosis: string
+  primary_disease: string | null
+  comorbidity: string | null
+  complication: string | null
+  procedure: string | null
+  weight: string | null
+  height: string | null
+  admitted_at: string
+  discharged_at: string | null
+  length_of_stay: number | null
+  care_plan: string | null
+  room_id: number | null
+  is_referral: boolean
   template?: {
     id: number
-    maksimal_hari: number
+    max_days: number
     icd10?: { code: string; display: string } | null
   } | null
-  ruang?: { id: number; name: string } | null
+  room?: { id: number; name: string } | null
   points?: AsesmenPointValue[]
-  verifikasi_dokter_by: string | null
-  verifikasi_dokter_at: string | null
-  verifikasi_perawat_by: string | null
-  verifikasi_perawat_at: string | null
-  verifikasi_pelaksana_by: string | null
-  verifikasi_pelaksana_at: string | null
+  doctor_verified_by: string | null
+  doctor_verified_at: string | null
+  nurse_verified_by: string | null
+  nurse_verified_at: string | null
+  executor_verified_by: string | null
+  executor_verified_at: string | null
 }
 
 type VerifRole = "dokter" | "perawat" | "pelaksana"
 
 type Varian = {
   id: number
-  asesmen_id: number
-  tanggal_waktu: string
-  varian: string
-  alasan: string | null
-  paraf: string
+  assessment_id: number
+  occurred_at: string
+  variance: string
+  reason: string | null
+  initials: string
 }
 
 const PENGISI_LABEL: Record<string, string> = {
@@ -101,7 +101,7 @@ const jkLabel = (v: string) => (v === "L" ? "Laki-laki" : v === "P" ? "Perempuan
 const fmtDate = (s: string | null) => (s ? s.slice(0, 10) : "—")
 const fmtDateTime = (s: string | null) => (s ? s.slice(0, 16).replace("T", " ") : "—")
 
-type PointValue = { checked: number[]; keterangan: string }
+type PointValue = { checked: number[]; note: string }
 type SaveStatus = "saving" | "saved" | "error"
 
 export default function IsiAsesmenPage() {
@@ -121,7 +121,7 @@ export default function IsiAsesmenPage() {
   const [varians, setVarians] = useState<Varian[]>([])
   const [varianModal, setVarianModal] = useState<"tambah" | "edit" | null>(null)
   const [varianEditId, setVarianEditId] = useState<number | null>(null)
-  const [varianForm, setVarianForm] = useState({ tanggal_waktu: "", varian: "", alasan: "" })
+  const [varianForm, setVarianForm] = useState({ occurred_at: "", variance: "", reason: "" })
   const [varianSaving, setVarianSaving] = useState(false)
   const [varianError, setVarianError] = useState<string | null>(null)
   const [varianDeleteTarget, setVarianDeleteTarget] = useState<Varian | null>(null)
@@ -140,6 +140,7 @@ export default function IsiAsesmenPage() {
   // Timer debounce per-poin untuk auto-save keterangan.
   const ketTimers = useRef<Record<number, ReturnType<typeof setTimeout>>>({})
 
+  // Muat detail asesmen, kategori, poin, dan nilai ceklis awal.
   useEffect(() => {
     let active = true
     async function load() {
@@ -166,13 +167,13 @@ export default function IsiAsesmenPage() {
         const initial: Record<number, PointValue> = {}
         for (const v of a.points ?? []) {
           initial[v.point_id] = {
-            checked: v.checked_hari ?? [],
-            keterangan: v.keterangan ?? "",
+            checked: v.checked_days ?? [],
+            note: v.note ?? "",
           }
         }
 
         setAsesmen(a)
-        setCategories(cats.sort((x, y) => x.urutan - y.urutan))
+        setCategories(cats.sort((x, y) => x.sort_order - y.sort_order))
         setPoints(ptRes.data.data as Point[])
         setValues(initial)
       } finally {
@@ -185,12 +186,12 @@ export default function IsiAsesmenPage() {
     }
   }, [asesmenId])
 
-  const maxHari = asesmen?.template?.maksimal_hari ?? 0
+  const maxHari = asesmen?.template?.max_days ?? 0
   const days = Array.from({ length: maxHari }, (_, i) => i + 1)
 
-  const dokterVerified = !!asesmen?.verifikasi_dokter_at
-  const perawatVerified = !!asesmen?.verifikasi_perawat_at
-  const pelaksanaVerified = !!asesmen?.verifikasi_pelaksana_at
+  const dokterVerified = !!asesmen?.doctor_verified_at
+  const perawatVerified = !!asesmen?.nurse_verified_at
+  const pelaksanaVerified = !!asesmen?.executor_verified_at
 
   // Poin terkunci (tak bisa diedit) bila peran pengisinya sudah verifikasi,
   // atau bila pelaksana sudah verifikasi (clinical pathway selesai → kunci semua).
@@ -201,16 +202,18 @@ export default function IsiAsesmenPage() {
     return false
   }
 
+  // Ambil nilai ceklis satu poin (default kosong bila belum diisi).
   const valueOf = (pointId: number): PointValue =>
-    values[pointId] ?? { checked: [], keterangan: "" }
+    values[pointId] ?? { checked: [], note: "" }
 
+  // Auto-save nilai ceklis satu poin ke backend.
   const save = useCallback(
     async (pointId: number, next: PointValue) => {
       setStatus((s) => ({ ...s, [pointId]: "saving" }))
       try {
         await api.put(`/clinical-pathway/asesmen/${asesmenId}/points/${pointId}`, {
-          checked_hari: next.checked,
-          keterangan: next.keterangan || null,
+          checked_days: next.checked,
+          note: next.note || null,
         })
         setStatus((s) => ({ ...s, [pointId]: "saved" }))
       } catch {
@@ -220,6 +223,7 @@ export default function IsiAsesmenPage() {
     [asesmenId],
   )
 
+  // Verifikasi / batal verifikasi clinical pathway untuk satu peran.
   async function handleVerify(role: VerifRole, action: "verify" | "batal") {
     setVerifying(role)
     setVerifyError(null)
@@ -257,6 +261,7 @@ export default function IsiAsesmenPage() {
     }
   }
 
+  // Tutup preview PDF & bebaskan object URL.
   function closePdf() {
     setPdfOpen(false)
     if (pdfUrl) {
@@ -265,6 +270,7 @@ export default function IsiAsesmenPage() {
     }
   }
 
+  // Unduh file PDF yang sedang dipratinjau.
   function downloadPdf() {
     if (!pdfUrl) return
     const a = document.createElement("a")
@@ -290,39 +296,42 @@ export default function IsiAsesmenPage() {
     reloadVarian()
   }, [reloadVarian])
 
+  // Buka modal tambah varian (reset form).
   function openTambahVarian() {
     setVarianEditId(null)
-    setVarianForm({ tanggal_waktu: "", varian: "", alasan: "" })
+    setVarianForm({ occurred_at: "", variance: "", reason: "" })
     setVarianError(null)
     setVarianModal("tambah")
   }
 
+  // Buka modal edit varian — isi form dari baris terpilih.
   function openEditVarian(row: Varian) {
     setVarianEditId(row.id)
     setVarianForm({
-      tanggal_waktu: (row.tanggal_waktu ?? "").slice(0, 16),
-      varian: row.varian,
-      alasan: row.alasan ?? "",
+      occurred_at: (row.occurred_at ?? "").slice(0, 16),
+      variance: row.variance,
+      reason: row.reason ?? "",
     })
     setVarianError(null)
     setVarianModal("edit")
   }
 
+  // Validasi lalu simpan (create/update) catatan varian.
   async function handleSaveVarian() {
-    if (!varianForm.tanggal_waktu) {
+    if (!varianForm.occurred_at) {
       setVarianError("Tanggal & waktu wajib diisi.")
       return
     }
-    if (!varianForm.varian.trim()) {
+    if (!varianForm.variance.trim()) {
       setVarianError("Varian yang terjadi wajib diisi.")
       return
     }
     setVarianSaving(true)
     setVarianError(null)
     const payload = {
-      tanggal_waktu: varianForm.tanggal_waktu,
-      varian: varianForm.varian.trim(),
-      alasan: varianForm.alasan.trim() || null,
+      occurred_at: varianForm.occurred_at,
+      variance: varianForm.variance.trim(),
+      reason: varianForm.reason.trim() || null,
     }
     try {
       if (varianModal === "tambah") {
@@ -340,6 +349,7 @@ export default function IsiAsesmenPage() {
     }
   }
 
+  // Hapus catatan varian terpilih.
   async function handleDeleteVarian() {
     if (!varianDeleteTarget) return
     setVarianDeletingId(varianDeleteTarget.id)
@@ -355,25 +365,25 @@ export default function IsiAsesmenPage() {
   const varianColumns: Column<Varian>[] = [
     {
       header: "Tanggal & Waktu",
-      cell: (row) => <span className="text-gray-700">{fmtDateTime(row.tanggal_waktu)}</span>,
+      cell: (row) => <span className="text-gray-700">{fmtDateTime(row.occurred_at)}</span>,
       className: "w-44",
     },
     {
       header: "Varian yang Terjadi",
-      cell: (row) => <span className="whitespace-pre-wrap text-gray-900">{row.varian}</span>,
+      cell: (row) => <span className="whitespace-pre-wrap text-gray-900">{row.variance}</span>,
     },
     {
       header: "Alasan Varian Terjadi",
       cell: (row) =>
-        row.alasan ? (
-          <span className="whitespace-pre-wrap text-gray-700">{row.alasan}</span>
+        row.reason ? (
+          <span className="whitespace-pre-wrap text-gray-700">{row.reason}</span>
         ) : (
           <span className="text-gray-400 text-xs">—</span>
         ),
     },
     {
       header: "Paraf",
-      cell: (row) => <span className="font-medium text-gray-700">{row.paraf}</span>,
+      cell: (row) => <span className="font-medium text-gray-700">{row.initials}</span>,
       className: "w-32",
     },
   ]
@@ -381,9 +391,10 @@ export default function IsiAsesmenPage() {
   // Cek kunci berdasarkan pointId (cari peran pengisinya).
   function isPointIdLocked(pointId: number) {
     const p = points.find((x) => x.id === pointId)
-    return p ? isPointLocked(p.pengisi) : false
+    return p ? isPointLocked(p.filled_by) : false
   }
 
+  // Toggle ceklis satu hari pada satu poin (lalu auto-save).
   function toggleDay(pointId: number, day: number) {
     if (isPointIdLocked(pointId)) return
     const current = valueOf(pointId)
@@ -396,9 +407,10 @@ export default function IsiAsesmenPage() {
     save(pointId, next) // ceklis → simpan langsung
   }
 
-  function changeKeterangan(pointId: number, keterangan: string) {
+  // Ubah keterangan poin (auto-save dengan debounce).
+  function changeKeterangan(pointId: number, note: string) {
     if (isPointIdLocked(pointId)) return
-    const next = { ...valueOf(pointId), keterangan }
+    const next = { ...valueOf(pointId), note }
     setValues((v) => ({ ...v, [pointId]: next }))
     setStatus((s) => ({ ...s, [pointId]: "saving" }))
     // Debounce simpan keterangan.
@@ -406,13 +418,16 @@ export default function IsiAsesmenPage() {
     ketTimers.current[pointId] = setTimeout(() => save(pointId, next), 600)
   }
 
+  // Anak langsung dari sebuah poin, terurut.
   const childrenOf = (parentId: number) =>
-    points.filter((p) => p.parent_id === parentId).sort((a, b) => a.urutan - b.urutan || a.id - b.id)
+    points.filter((p) => p.parent_id === parentId).sort((a, b) => a.sort_order - b.sort_order || a.id - b.id)
+  // Poin level atas dalam satu kategori.
   const topPointsOf = (catId: number) =>
     points
-      .filter((p) => p.categori_id === catId && p.parent_id === null)
-      .sort((a, b) => a.urutan - b.urutan || a.id - b.id)
+      .filter((p) => p.category_id === catId && p.parent_id === null)
+      .sort((a, b) => a.sort_order - b.sort_order || a.id - b.id)
 
+  // Teks status auto-save per poin.
   function statusText(pointId: number) {
     const s = status[pointId]
     if (s === "saving") return <span className="text-xs text-gray-400">Menyimpan...</span>
@@ -429,14 +444,14 @@ export default function IsiAsesmenPage() {
   // Satu baris poin — layout menyamping: label | ceklis hari | keterangan.
   function renderRow(point: Point, number: string, depth: number) {
     const val = valueOf(point.id)
-    const wajib = point.hari_wajib ?? []
+    const wajib = point.required_days ?? []
     const hasChildren = childrenOf(point.id).length > 0
-    const locked = isPointLocked(point.pengisi)
+    const locked = isPointLocked(point.filled_by)
 
     // Poin yang punya sub-poin jadi kelompok (header) — tanpa ceklis & keterangan.
     if (hasChildren) {
       return (
-        <div key={point.id} className={"px-3 py-1.5 " + pengisiRowBg(point.pengisi)}>
+        <div key={point.id} className={"px-3 py-1.5 " + pengisiRowBg(point.filled_by)}>
           <div
             className="flex flex-wrap items-center gap-2"
             style={{ paddingLeft: depth > 0 ? depth * 24 : undefined }}
@@ -445,7 +460,7 @@ export default function IsiAsesmenPage() {
               {number}
             </span>
             <span className="font-semibold text-gray-900">{point.label}</span>
-            <Badge variant="info">{PENGISI_LABEL[point.pengisi] ?? point.pengisi}</Badge>
+            <Badge variant="info">{PENGISI_LABEL[point.filled_by] ?? point.filled_by}</Badge>
           </div>
         </div>
       )
@@ -456,7 +471,7 @@ export default function IsiAsesmenPage() {
         key={point.id}
         className={
           "flex flex-col gap-1 px-3 py-1.5 lg:flex-row lg:items-start lg:gap-4 " +
-          pengisiRowBg(point.pengisi)
+          pengisiRowBg(point.filled_by)
         }
       >
         {/* Label */}
@@ -469,7 +484,7 @@ export default function IsiAsesmenPage() {
               {number}
             </span>
             <span className="font-medium text-gray-900">{point.label}</span>
-            <Badge variant="info">{PENGISI_LABEL[point.pengisi] ?? point.pengisi}</Badge>
+            <Badge variant="info">{PENGISI_LABEL[point.filled_by] ?? point.filled_by}</Badge>
           </div>
         </div>
 
@@ -511,7 +526,7 @@ export default function IsiAsesmenPage() {
         <div className="lg:w-56 lg:shrink-0">
           <Input
             placeholder="Keterangan..."
-            value={val.keterangan}
+            value={val.note}
             disabled={locked}
             onChange={(e) => changeKeterangan(point.id, e.target.value)}
           />
@@ -632,25 +647,25 @@ export default function IsiAsesmenPage() {
           <Card>
             <h3 className="mb-3 text-sm font-semibold text-gray-900">Data Pasien</h3>
             <dl className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm sm:grid-cols-3 lg:grid-cols-4">
-              <Field label="No RM" value={asesmen.no_rm} />
-              <Field label="Nama Pasien" value={asesmen.nama_pasien} />
-              <Field label="Jenis Kelamin" value={jkLabel(asesmen.jenis_kelamin)} />
-              <Field label="Tanggal Lahir" value={fmtDate(asesmen.tanggal_lahir)} />
-              <Field label="Diagnosa Masuk" value={asesmen.diagnosa_masuk} />
-              <Field label="Penyakit Utama" value={asesmen.penyakit_utama} />
-              <Field label="Penyakit Penyerta" value={asesmen.penyakit_penyerta} />
-              <Field label="Komplikasi" value={asesmen.komplikasi} />
-              <Field label="Tindakan" value={asesmen.tindakan} />
-              <Field label="BB / TB" value={`${asesmen.bb ?? "—"} kg / ${asesmen.tb ?? "—"} cm`} />
-              <Field label="Masuk" value={fmtDateTime(asesmen.tanggal_jam_masuk)} />
-              <Field label="Keluar" value={fmtDateTime(asesmen.tanggal_jam_keluar)} />
+              <Field label="No RM" value={asesmen.medical_record_no} />
+              <Field label="Nama Pasien" value={asesmen.patient_name} />
+              <Field label="Jenis Kelamin" value={jkLabel(asesmen.gender)} />
+              <Field label="Tanggal Lahir" value={fmtDate(asesmen.birth_date)} />
+              <Field label="Diagnosa Masuk" value={asesmen.admission_diagnosis} />
+              <Field label="Penyakit Utama" value={asesmen.primary_disease} />
+              <Field label="Penyakit Penyerta" value={asesmen.comorbidity} />
+              <Field label="Komplikasi" value={asesmen.complication} />
+              <Field label="Tindakan" value={asesmen.procedure} />
+              <Field label="BB / TB" value={`${asesmen.weight ?? "—"} kg / ${asesmen.height ?? "—"} cm`} />
+              <Field label="Masuk" value={fmtDateTime(asesmen.admitted_at)} />
+              <Field label="Keluar" value={fmtDateTime(asesmen.discharged_at)} />
               <Field
                 label="Lama Rawat"
-                value={asesmen.lama_rawat != null ? `${asesmen.lama_rawat} hari` : null}
+                value={asesmen.length_of_stay != null ? `${asesmen.length_of_stay} hari` : null}
               />
-              <Field label="Rencana Rawat" value={asesmen.rencana_rawat} />
-              <Field label="Ruang Rawat" value={asesmen.ruang?.name ?? null} />
-              <Field label="Rujukan" value={asesmen.rujukan ? "Ya" : "Tidak"} />
+              <Field label="Rencana Rawat" value={asesmen.care_plan} />
+              <Field label="Ruang Rawat" value={asesmen.room?.name ?? null} />
+              <Field label="Rujukan" value={asesmen.is_referral ? "Ya" : "Tidak"} />
             </dl>
           </Card>
 
@@ -704,7 +719,7 @@ export default function IsiAsesmenPage() {
                   <Card key={cat.id}>
                     <div className="flex items-center gap-2 border-b border-gray-100 pb-3">
                       <span className="flex h-7 min-w-[28px] items-center justify-center rounded-md bg-[#075489] px-2 text-sm font-semibold text-white">
-                        {cat.urutan}
+                        {cat.sort_order}
                       </span>
                       <span className="text-base font-semibold text-gray-900">{cat.label}</span>
                     </div>
@@ -714,7 +729,7 @@ export default function IsiAsesmenPage() {
                           key={p.id}
                           className="divide-y divide-gray-100 overflow-hidden rounded-lg border border-gray-200"
                         >
-                          {rowsForTop(p, `${cat.urutan}.${i + 1}`)}
+                          {rowsForTop(p, `${cat.sort_order}.${i + 1}`)}
                         </div>
                       ))}
                     </div>
@@ -797,20 +812,20 @@ export default function IsiAsesmenPage() {
               {verifItem(
                 "dokter",
                 "Dokter Penanggung Jawab",
-                asesmen.verifikasi_dokter_by,
-                asesmen.verifikasi_dokter_at,
+                asesmen.doctor_verified_by,
+                asesmen.doctor_verified_at,
               )}
               {verifItem(
                 "perawat",
                 "Perawat Penanggung Jawab",
-                asesmen.verifikasi_perawat_by,
-                asesmen.verifikasi_perawat_at,
+                asesmen.nurse_verified_by,
+                asesmen.nurse_verified_at,
               )}
               {verifItem(
                 "pelaksana",
                 "Pelaksana Verifikasi",
-                asesmen.verifikasi_pelaksana_by,
-                asesmen.verifikasi_pelaksana_at,
+                asesmen.executor_verified_by,
+                asesmen.executor_verified_at,
                 {
                   disabled: !(dokterVerified && perawatVerified),
                   disabledHint: "Menunggu verifikasi dokter & perawat penanggung jawab.",
@@ -851,9 +866,9 @@ export default function IsiAsesmenPage() {
                 <Input
                   id="varian-tgl"
                   type="datetime-local"
-                  value={varianForm.tanggal_waktu}
+                  value={varianForm.occurred_at}
                   onChange={(e) =>
-                    setVarianForm((f) => ({ ...f, tanggal_waktu: e.target.value }))
+                    setVarianForm((f) => ({ ...f, occurred_at: e.target.value }))
                   }
                 />
               </div>
@@ -864,8 +879,8 @@ export default function IsiAsesmenPage() {
                 <Textarea
                   id="varian-isi"
                   rows={3}
-                  value={varianForm.varian}
-                  onChange={(e) => setVarianForm((f) => ({ ...f, varian: e.target.value }))}
+                  value={varianForm.variance}
+                  onChange={(e) => setVarianForm((f) => ({ ...f, variance: e.target.value }))}
                 />
               </div>
               <div className="space-y-1.5">
@@ -873,8 +888,8 @@ export default function IsiAsesmenPage() {
                 <Textarea
                   id="varian-alasan"
                   rows={3}
-                  value={varianForm.alasan}
-                  onChange={(e) => setVarianForm((f) => ({ ...f, alasan: e.target.value }))}
+                  value={varianForm.reason}
+                  onChange={(e) => setVarianForm((f) => ({ ...f, reason: e.target.value }))}
                 />
               </div>
               <div className="space-y-1.5">

@@ -34,52 +34,52 @@ type TemplateListItem = {
   id: number
   is_active: boolean
   points_count?: number
-  keterangan?: string | null
+  description?: string | null
   icd10?: { code: string; display: string } | null
 }
 
 type FormState = {
   template_id: string
-  no_rm: string
-  nama_pasien: string
-  jenis_kelamin: "L" | "P"
-  tanggal_lahir: string
-  diagnosa_masuk: string
-  penyakit_utama: string
-  penyakit_penyerta: string
-  komplikasi: string
-  tindakan: string
-  bb: string
-  tb: string
-  tanggal_jam_masuk: string
-  tanggal_jam_keluar: string
-  lama_rawat: string
-  rencana_rawat: string
-  ruang_id: string
-  kelas: string
-  rujukan: boolean
+  medical_record_no: string
+  patient_name: string
+  gender: "L" | "P"
+  birth_date: string
+  admission_diagnosis: string
+  primary_disease: string
+  comorbidity: string
+  complication: string
+  procedure: string
+  weight: string
+  height: string
+  admitted_at: string
+  discharged_at: string
+  length_of_stay: string
+  care_plan: string
+  room_id: string
+  ward_class: string
+  is_referral: boolean
 }
 
 const emptyForm: FormState = {
   template_id: "",
-  no_rm: "",
-  nama_pasien: "",
-  jenis_kelamin: "L",
-  tanggal_lahir: "",
-  diagnosa_masuk: "",
-  penyakit_utama: "",
-  penyakit_penyerta: "",
-  komplikasi: "",
-  tindakan: "",
-  bb: "",
-  tb: "",
-  tanggal_jam_masuk: "",
-  tanggal_jam_keluar: "",
-  lama_rawat: "",
-  rencana_rawat: "",
-  ruang_id: "",
-  kelas: "",
-  rujukan: false,
+  medical_record_no: "",
+  patient_name: "",
+  gender: "L",
+  birth_date: "",
+  admission_diagnosis: "",
+  primary_disease: "",
+  comorbidity: "",
+  complication: "",
+  procedure: "",
+  weight: "",
+  height: "",
+  admitted_at: "",
+  discharged_at: "",
+  length_of_stay: "",
+  care_plan: "",
+  room_id: "",
+  ward_class: "",
+  is_referral: false,
 }
 
 const jkLabel = (v: string) => (v === "L" ? "Laki-laki" : v === "P" ? "Perempuan" : v)
@@ -126,11 +126,13 @@ export default function AsesmenPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
+  // Submit pencarian (nama pasien / diagnosa masuk).
   function handleSearch(e: React.FormEvent) {
     e.preventDefault()
     dispatch(setAsesmenCPSearch(searchInput))
   }
 
+  // Helper set satu field form.
   function set<K extends keyof FormState>(key: K, value: FormState[K]) {
     setForm((f) => ({ ...f, [key]: value }))
   }
@@ -150,7 +152,7 @@ export default function AsesmenPage() {
           if ((t.points_count ?? 0) === 0) continue
           const code = t.icd10?.code ?? "—"
           const display = t.icd10?.display ?? "Tanpa diagnosa"
-          const ket = t.keterangan?.trim()
+          const ket = t.description?.trim()
           const label = ket ? `${code} — ${display} (${ket})` : `${code} — ${display}`
           opts.push({ value: String(t.id), label })
         }
@@ -180,6 +182,7 @@ export default function AsesmenPage() {
     setRoomOptions(opts)
   }
 
+  // Buka modal tambah asesmen (reset form + muat pilihan formulir & ruangan).
   function openTambah() {
     setEditId(null)
     setForm(emptyForm)
@@ -189,49 +192,51 @@ export default function AsesmenPage() {
     loadRooms()
   }
 
+  // Buka modal edit — isi form dari data baris terpilih.
   function openEdit(row: AsesmenClinicalPathway) {
     setEditId(row.id)
     setEditDiagnosa(diagnosaText(row))
     loadRooms()
     setForm({
       template_id: String(row.template_id),
-      no_rm: row.no_rm,
-      nama_pasien: row.nama_pasien,
-      jenis_kelamin: row.jenis_kelamin ?? "L",
-      tanggal_lahir: (row.tanggal_lahir ?? "").slice(0, 10),
-      diagnosa_masuk: row.diagnosa_masuk ?? "",
-      penyakit_utama: row.penyakit_utama ?? "",
-      penyakit_penyerta: row.penyakit_penyerta ?? "",
-      komplikasi: row.komplikasi ?? "",
-      tindakan: row.tindakan ?? "",
-      bb: row.bb ?? "",
-      tb: row.tb ?? "",
-      tanggal_jam_masuk: (row.tanggal_jam_masuk ?? "").slice(0, 16),
-      tanggal_jam_keluar: (row.tanggal_jam_keluar ?? "").slice(0, 16),
-      lama_rawat: row.lama_rawat != null ? String(row.lama_rawat) : "",
-      rencana_rawat: row.rencana_rawat ?? "",
-      ruang_id: row.ruang_id != null ? String(row.ruang_id) : "",
-      kelas: row.kelas ?? "",
-      rujukan: row.rujukan,
+      medical_record_no: row.medical_record_no,
+      patient_name: row.patient_name,
+      gender: row.gender ?? "L",
+      birth_date: (row.birth_date ?? "").slice(0, 10),
+      admission_diagnosis: row.admission_diagnosis ?? "",
+      primary_disease: row.primary_disease ?? "",
+      comorbidity: row.comorbidity ?? "",
+      complication: row.complication ?? "",
+      procedure: row.procedure ?? "",
+      weight: row.weight ?? "",
+      height: row.height ?? "",
+      admitted_at: (row.admitted_at ?? "").slice(0, 16),
+      discharged_at: (row.discharged_at ?? "").slice(0, 16),
+      length_of_stay: row.length_of_stay != null ? String(row.length_of_stay) : "",
+      care_plan: row.care_plan ?? "",
+      room_id: row.room_id != null ? String(row.room_id) : "",
+      ward_class: row.ward_class ?? "",
+      is_referral: row.is_referral,
     })
     setFormError(null)
     setModal("edit")
   }
 
+  // Validasi ringan lalu simpan (create/update) asesmen.
   async function handleSave() {
     if (modal === "tambah" && !form.template_id) {
       fail("Pilih diagnosa (formulir) dulu.")
       return
     }
-    if (!form.no_rm.trim()) {
+    if (!form.medical_record_no.trim()) {
       fail("No RM wajib diisi.")
       return
     }
-    if (!form.nama_pasien.trim()) {
+    if (!form.patient_name.trim()) {
       fail("Nama pasien wajib diisi.")
       return
     }
-    if (!form.ruang_id) {
+    if (!form.room_id) {
       fail("Ruang rawat wajib diisi.")
       return
     }
@@ -239,24 +244,24 @@ export default function AsesmenPage() {
     setFormError(null)
     const payload = {
       template_id: Number(form.template_id),
-      no_rm: form.no_rm.trim(),
-      nama_pasien: form.nama_pasien.trim(),
-      jenis_kelamin: form.jenis_kelamin,
-      tanggal_lahir: form.tanggal_lahir,
-      diagnosa_masuk: form.diagnosa_masuk.trim(),
-      penyakit_utama: form.penyakit_utama.trim() || null,
-      penyakit_penyerta: form.penyakit_penyerta.trim() || null,
-      komplikasi: form.komplikasi.trim() || null,
-      tindakan: form.tindakan.trim() || null,
-      bb: form.bb !== "" ? Number(form.bb) : null,
-      tb: form.tb !== "" ? Number(form.tb) : null,
-      tanggal_jam_masuk: form.tanggal_jam_masuk,
-      tanggal_jam_keluar: form.tanggal_jam_keluar || null,
-      lama_rawat: form.lama_rawat !== "" ? Number(form.lama_rawat) : null,
-      rencana_rawat: form.rencana_rawat.trim() || null,
-      ruang_id: form.ruang_id !== "" ? Number(form.ruang_id) : null,
-      kelas: form.kelas.trim() || null,
-      rujukan: form.rujukan,
+      medical_record_no: form.medical_record_no.trim(),
+      patient_name: form.patient_name.trim(),
+      gender: form.gender,
+      birth_date: form.birth_date,
+      admission_diagnosis: form.admission_diagnosis.trim(),
+      primary_disease: form.primary_disease.trim() || null,
+      comorbidity: form.comorbidity.trim() || null,
+      complication: form.complication.trim() || null,
+      procedure: form.procedure.trim() || null,
+      weight: form.weight !== "" ? Number(form.weight) : null,
+      height: form.height !== "" ? Number(form.height) : null,
+      admitted_at: form.admitted_at,
+      discharged_at: form.discharged_at || null,
+      length_of_stay: form.length_of_stay !== "" ? Number(form.length_of_stay) : null,
+      care_plan: form.care_plan.trim() || null,
+      room_id: form.room_id !== "" ? Number(form.room_id) : null,
+      ward_class: form.ward_class.trim() || null,
+      is_referral: form.is_referral,
     }
     try {
       let newId: number | null = null
@@ -281,21 +286,21 @@ export default function AsesmenPage() {
   const columns: Column<AsesmenClinicalPathway>[] = [
     {
       header: "No RM",
-      cell: (row) => <span className="font-mono text-xs text-gray-700">{row.no_rm}</span>,
+      cell: (row) => <span className="font-mono text-xs text-gray-700">{row.medical_record_no}</span>,
       className: "w-28",
     },
     {
       header: "Nama Pasien",
-      cell: (row) => <span className="font-medium text-gray-900">{row.nama_pasien}</span>,
+      cell: (row) => <span className="font-medium text-gray-900">{row.patient_name}</span>,
     },
     {
       header: "L/P",
-      cell: (row) => <Badge variant="default">{jkLabel(row.jenis_kelamin)}</Badge>,
+      cell: (row) => <Badge variant="default">{jkLabel(row.gender)}</Badge>,
       className: "w-28",
     },
     {
       header: "Diagnosa Masuk",
-      cell: (row) => <span className="text-gray-700">{row.diagnosa_masuk}</span>,
+      cell: (row) => <span className="text-gray-700">{row.admission_diagnosis}</span>,
     },
     {
       header: "Formulir (Diagnosa)",
@@ -314,8 +319,8 @@ export default function AsesmenPage() {
     {
       header: "Tgl Masuk",
       cell: (row) =>
-        row.tanggal_jam_masuk ? (
-          <span className="text-gray-700">{row.tanggal_jam_masuk.slice(0, 16).replace("T", " ")}</span>
+        row.admitted_at ? (
+          <span className="text-gray-700">{row.admitted_at.slice(0, 16).replace("T", " ")}</span>
         ) : (
           dash
         ),
@@ -324,7 +329,7 @@ export default function AsesmenPage() {
     {
       header: "Status",
       cell: (row) =>
-        row.verifikasi_pelaksana_at ? (
+        row.executor_verified_at ? (
           <Badge variant="success">Selesai</Badge>
         ) : (
           <Badge variant="warning">Belum Terverifikasi</Badge>
@@ -469,7 +474,11 @@ export default function AsesmenPage() {
               <Label htmlFor="norm">
                 No RM <span className="text-red-500">*</span>
               </Label>
-              <Input id="norm" value={form.no_rm} onChange={(e) => set("no_rm", e.target.value)} />
+              <Input
+                id="norm"
+                value={form.medical_record_no}
+                onChange={(e) => set("medical_record_no", e.target.value)}
+              />
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="nama">
@@ -477,8 +486,8 @@ export default function AsesmenPage() {
               </Label>
               <Input
                 id="nama"
-                value={form.nama_pasien}
-                onChange={(e) => set("nama_pasien", e.target.value)}
+                value={form.patient_name}
+                onChange={(e) => set("patient_name", e.target.value)}
               />
             </div>
             <div className="space-y-1.5">
@@ -487,8 +496,8 @@ export default function AsesmenPage() {
               </Label>
               <Select
                 id="ruang"
-                value={form.ruang_id}
-                onChange={(e) => set("ruang_id", e.target.value)}
+                value={form.room_id}
+                onChange={(e) => set("room_id", e.target.value)}
               >
                 <option value="">Pilih ruangan...</option>
                 {roomOptions.map((r) => (
@@ -502,8 +511,8 @@ export default function AsesmenPage() {
               <Label htmlFor="kelas">Kelas</Label>
               <Input
                 id="kelas"
-                value={form.kelas}
-                onChange={(e) => set("kelas", e.target.value)}
+                value={form.ward_class}
+                onChange={(e) => set("ward_class", e.target.value)}
                 placeholder="mis. Kelas 1, VIP"
               />
             </div>
@@ -511,8 +520,8 @@ export default function AsesmenPage() {
               <Label htmlFor="jk">Jenis Kelamin</Label>
               <Select
                 id="jk"
-                value={form.jenis_kelamin}
-                onChange={(e) => set("jenis_kelamin", e.target.value as "L" | "P")}
+                value={form.gender}
+                onChange={(e) => set("gender", e.target.value as "L" | "P")}
               >
                 <option value="L">Laki-laki</option>
                 <option value="P">Perempuan</option>
@@ -523,48 +532,48 @@ export default function AsesmenPage() {
               <Input
                 id="tgllahir"
                 type="date"
-                value={form.tanggal_lahir}
-                onChange={(e) => set("tanggal_lahir", e.target.value)}
+                value={form.birth_date}
+                onChange={(e) => set("birth_date", e.target.value)}
               />
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="dxmasuk">Diagnosa Masuk</Label>
               <Input
                 id="dxmasuk"
-                value={form.diagnosa_masuk}
-                onChange={(e) => set("diagnosa_masuk", e.target.value)}
+                value={form.admission_diagnosis}
+                onChange={(e) => set("admission_diagnosis", e.target.value)}
               />
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="penyakitutama">Penyakit Utama</Label>
               <Input
                 id="penyakitutama"
-                value={form.penyakit_utama}
-                onChange={(e) => set("penyakit_utama", e.target.value)}
+                value={form.primary_disease}
+                onChange={(e) => set("primary_disease", e.target.value)}
               />
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="penyakitpenyerta">Penyakit Penyerta</Label>
               <Input
                 id="penyakitpenyerta"
-                value={form.penyakit_penyerta}
-                onChange={(e) => set("penyakit_penyerta", e.target.value)}
+                value={form.comorbidity}
+                onChange={(e) => set("comorbidity", e.target.value)}
               />
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="komplikasi">Komplikasi</Label>
               <Input
                 id="komplikasi"
-                value={form.komplikasi}
-                onChange={(e) => set("komplikasi", e.target.value)}
+                value={form.complication}
+                onChange={(e) => set("complication", e.target.value)}
               />
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="tindakan">Tindakan</Label>
               <Input
                 id="tindakan"
-                value={form.tindakan}
-                onChange={(e) => set("tindakan", e.target.value)}
+                value={form.procedure}
+                onChange={(e) => set("procedure", e.target.value)}
               />
             </div>
             <div className="space-y-1.5">
@@ -574,8 +583,8 @@ export default function AsesmenPage() {
                 type="number"
                 min={0}
                 step="0.1"
-                value={form.bb}
-                onChange={(e) => set("bb", e.target.value)}
+                value={form.weight}
+                onChange={(e) => set("weight", e.target.value)}
               />
             </div>
             <div className="space-y-1.5">
@@ -585,8 +594,8 @@ export default function AsesmenPage() {
                 type="number"
                 min={0}
                 step="0.1"
-                value={form.tb}
-                onChange={(e) => set("tb", e.target.value)}
+                value={form.height}
+                onChange={(e) => set("height", e.target.value)}
               />
             </div>
             <div className="space-y-1.5">
@@ -594,8 +603,8 @@ export default function AsesmenPage() {
               <Input
                 id="masuk"
                 type="datetime-local"
-                value={form.tanggal_jam_masuk}
-                onChange={(e) => set("tanggal_jam_masuk", e.target.value)}
+                value={form.admitted_at}
+                onChange={(e) => set("admitted_at", e.target.value)}
               />
             </div>
             <div className="space-y-1.5">
@@ -603,8 +612,8 @@ export default function AsesmenPage() {
               <Input
                 id="keluar"
                 type="datetime-local"
-                value={form.tanggal_jam_keluar}
-                onChange={(e) => set("tanggal_jam_keluar", e.target.value)}
+                value={form.discharged_at}
+                onChange={(e) => set("discharged_at", e.target.value)}
               />
             </div>
             <div className="space-y-1.5">
@@ -613,24 +622,24 @@ export default function AsesmenPage() {
                 id="lamarawat"
                 type="number"
                 min={0}
-                value={form.lama_rawat}
-                onChange={(e) => set("lama_rawat", e.target.value)}
+                value={form.length_of_stay}
+                onChange={(e) => set("length_of_stay", e.target.value)}
               />
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="rencanarawat">Rencana Rawat</Label>
               <Input
                 id="rencanarawat"
-                value={form.rencana_rawat}
-                onChange={(e) => set("rencana_rawat", e.target.value)}
+                value={form.care_plan}
+                onChange={(e) => set("care_plan", e.target.value)}
               />
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="rujukan">Rujukan</Label>
               <Select
                 id="rujukan"
-                value={form.rujukan ? "ya" : "tidak"}
-                onChange={(e) => set("rujukan", e.target.value === "ya")}
+                value={form.is_referral ? "ya" : "tidak"}
+                onChange={(e) => set("is_referral", e.target.value === "ya")}
               >
                 <option value="tidak">Tidak</option>
                 <option value="ya">Ya</option>

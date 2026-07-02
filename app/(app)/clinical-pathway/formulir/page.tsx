@@ -70,8 +70,8 @@ export default function TemplateClinicalPathwayPage() {
     setDiagnosa(
       row.icd10 ? { id: row.icd10.id, code: row.icd10.code, display: row.icd10.display } : null,
     )
-    setMaksimalHari(String(row.maksimal_hari))
-    setKeterangan(row.keterangan ?? "")
+    setMaksimalHari(String(row.max_days))
+    setKeterangan(row.description ?? "")
     setIsActive(row.is_active)
     setFormError(null)
     setModal("edit")
@@ -90,8 +90,8 @@ export default function TemplateClinicalPathwayPage() {
     setFormError(null)
     const payload = {
       icd10_id: diagnosa.id,
-      maksimal_hari: Number(maksimalHari),
-      keterangan: keterangan.trim() || null,
+      max_days: Number(maksimalHari),
+      description: keterangan.trim() || null,
       is_active: isActive,
     }
     try {
@@ -141,13 +141,13 @@ export default function TemplateClinicalPathwayPage() {
     },
     {
       header: "Maksimal Hari",
-      cell: (row) => <span className="text-gray-700">{row.maksimal_hari} hari</span>,
+      cell: (row) => <span className="text-gray-700">{row.max_days} hari</span>,
       className: "w-32",
     },
     {
       header: "Keterangan",
       cell: (row) =>
-        row.keterangan ? <span className="text-gray-700">{row.keterangan}</span> : dash,
+        row.description ? <span className="text-gray-700">{row.description}</span> : dash,
     },
     {
       header: "Status",

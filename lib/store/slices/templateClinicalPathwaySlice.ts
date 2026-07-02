@@ -4,8 +4,8 @@ import api from "@/lib/axios"
 export type TemplateClinicalPathway = {
   id: number
   icd10_id: number
-  maksimal_hari: number
-  keterangan: string | null
+  max_days: number
+  description: string | null
   is_active: boolean
   icd10?: { id: number; code: string; display: string; version: string } | null
   created_at?: string

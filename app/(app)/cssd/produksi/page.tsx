@@ -244,7 +244,6 @@ function ProduksiCssdPage() {
     setLines((prev) => prev.map((l, i) => (i === index ? { ...l, quantity: value } : l)))
   }
 
-  const totalQty = lines.reduce((s, l) => s + (Number(l.quantity) || 0), 0)
 
   async function submit() {
     if (saving) return
@@ -471,56 +470,96 @@ function ProduksiCssdPage() {
 
         {/* Daftar baris + submit */}
         <Card className="flex flex-col p-5 lg:col-span-3">
-          <h2 className="mb-3 text-sm font-semibold text-gray-800">
-            Daftar Produksi {lines.length > 0 && <span className="text-gray-400">({lines.length} jenis)</span>}
-          </h2>
+          <div className="mb-4 flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-[#075489]/10 text-[#075489]">
+                <Boxes className="h-4 w-4" />
+              </span>
+              <h2 className="text-sm font-semibold text-gray-800">Daftar Produksi</h2>
+            </div>
+            {lines.length > 0 && (
+              <span className="inline-flex items-center rounded-full bg-[#075489]/10 px-2.5 py-1 text-xs font-semibold text-[#075489]">
+                {lines.length} jenis
+              </span>
+            )}
+          </div>
 
           {lines.length === 0 ? (
-            <div className="flex flex-1 items-center justify-center rounded-lg border border-dashed border-gray-200 py-12 text-center text-sm text-gray-400">
-              Belum ada alat. Tambahkan dari panel kiri.
+            <div className="flex flex-1 flex-col items-center justify-center gap-3 rounded-xl border border-dashed border-gray-200 bg-gray-50/50 py-14 text-center">
+              <span className="flex h-12 w-12 items-center justify-center rounded-full bg-gray-100 text-gray-300">
+                <Boxes className="h-6 w-6" />
+              </span>
+              <p className="text-sm text-gray-400">Belum ada alat. Tambahkan dari panel kiri.</p>
             </div>
           ) : (
-            <div className="space-y-2">
+            <div className="space-y-2.5">
               {lines.map((l, i) => {
                 const sets = Number(l.quantity) || 0
+                const isPaket = l.type === "paket"
                 return (
-                  <div key={`${l.type}-${l.refId}`} className="rounded-lg border border-gray-200 px-3 py-2">
-                    <div className="flex items-center gap-3">
-                      <Badge variant={l.type === "paket" ? "info" : "default"}>
-                        {l.type === "paket" ? "Paket" : "Satuan"}
-                      </Badge>
-                      <span className="min-w-0 flex-1 truncate text-sm font-medium text-gray-800">{l.name}</span>
-                      <Input
-                        type="number"
-                        min={1}
-                        value={l.quantity}
-                        onChange={(e) => setLineQty(i, e.target.value)}
-                        className="h-9 w-20 text-center"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => removeLine(i)}
-                        className="rounded-md p-1.5 text-gray-400 hover:bg-red-50 hover:text-red-600"
-                        title="Hapus"
+                  <div
+                    key={`${l.type}-${l.refId}`}
+                    className={
+                      "group relative overflow-hidden rounded-xl border bg-white shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md " +
+                      (isPaket ? "border-[#4ba69d]/30" : "border-[#075489]/20")
+                    }
+                  >
+                    {/* Aksen warna kiri sesuai tipe (paket = teal, satuan = biru). */}
+                    <span
+                      className={"absolute inset-y-0 left-0 w-1 " + (isPaket ? "bg-[#4ba69d]" : "bg-[#075489]")}
+                    />
+                    <div className="flex items-center gap-3 py-2.5 pl-4 pr-3">
+                      {/* Nomor urut baris. */}
+                      <span
+                        className={
+                          "flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-xs font-bold text-white " +
+                          (isPaket ? "bg-[#4ba69d]" : "bg-[#075489]")
+                        }
                       >
-                        <Trash2 className="h-4 w-4" />
-                      </button>
-                    </div>
+                        {i + 1}
+                      </span>
+                      <div className="min-w-0 flex-1">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="truncate text-sm font-semibold text-gray-800">{l.name}</span>
+                          <Badge variant={isPaket ? "info" : "default"}>{isPaket ? "Paket" : "Satuan"}</Badge>
+                        </div>
 
-                    {/* Detail isi paket: instrumen × total unit (per-set × jumlah set) */}
-                    {l.type === "paket" && l.items && l.items.length > 0 && (
-                      <div className="mt-2 flex flex-wrap items-center gap-1.5 border-t border-gray-100 pl-9 pt-2">
-                        <span className="text-xs text-gray-400">Isi:</span>
-                        {l.items.map((it) => (
-                          <span
-                            key={it.instrument_id}
-                            className="rounded bg-gray-50 px-1.5 py-0.5 text-xs text-gray-600 ring-1 ring-gray-200"
-                          >
-                            {it.instrument?.name ?? `#${it.instrument_id}`} ×{it.quantity * sets}
-                          </span>
-                        ))}
+                        {/* Detail isi paket: instrumen × total unit (per-set × jumlah set) */}
+                        {isPaket && l.items && l.items.length > 0 && (
+                          <div className="mt-1.5 flex flex-wrap items-center gap-1">
+                            <span className="inline-flex items-center gap-1 text-[11px] text-gray-400">
+                              <Package className="h-3 w-3" /> Isi:
+                            </span>
+                            {l.items.map((it) => (
+                              <span
+                                key={it.instrument_id}
+                                className="rounded-md bg-[#4ba69d]/10 px-1.5 py-0.5 text-[11px] font-medium text-[#4ba69d] ring-1 ring-[#4ba69d]/20"
+                              >
+                                {it.instrument?.name ?? `#${it.instrument_id}`} ×{it.quantity * sets}
+                              </span>
+                            ))}
+                          </div>
+                        )}
                       </div>
-                    )}
+                      <div className="flex shrink-0 items-center gap-1.5">
+                        <Input
+                          type="number"
+                          min={1}
+                          value={l.quantity}
+                          onChange={(e) => setLineQty(i, e.target.value)}
+                          className="h-9 w-16 text-center font-semibold"
+                        />
+                        <span className="w-6 text-[11px] text-gray-400">{isPaket ? "set" : "unit"}</span>
+                        <button
+                          type="button"
+                          onClick={() => removeLine(i)}
+                          className="rounded-md p-1.5 text-gray-400 transition-colors hover:bg-red-50 hover:text-red-600"
+                          title="Hapus"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </button>
+                      </div>
+                    </div>
                   </div>
                 )
               })}
@@ -539,15 +578,13 @@ function ProduksiCssdPage() {
 
           {formError && <p className="mt-3 text-sm text-red-600">{formError}</p>}
 
-          <div className="mt-4 flex items-center justify-between gap-3 border-t border-gray-100 pt-4">
-            <span className="text-xs text-gray-400">
-              Total {totalQty} unit · {lines.length} jenis · masuk tahap Cleaning
-            </span>
+          <div className="mt-4 flex flex-col gap-3 border-t border-gray-100 pt-4 sm:flex-row sm:items-center sm:justify-between">
+            <span className="text-xs text-gray-400">Masuk tahap Cleaning</span>
             <Button
               type="button"
               onClick={submit}
               disabled={saving || lines.length === 0}
-              className="bg-[#4ba69d] hover:bg-[#4ba69d]/90 text-white"
+              className="bg-[#4ba69d] hover:bg-[#4ba69d]/90 text-white shadow-sm"
             >
               <Factory className="mr-1.5 h-4 w-4" />
               {saving ? "Memproses..." : "Mulai Produksi"}

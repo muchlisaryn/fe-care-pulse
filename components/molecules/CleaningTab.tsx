@@ -44,20 +44,6 @@ function toLocalInput(value: string | null): string {
   return d.toISOString().slice(0, 16)
 }
 
-// Ringkasan jumlah barang. Bila unit fisik sudah ada (mis. batch Produksi CSSD,
-// di mana paket sudah diuraikan jadi unit), pakai hitungan unit fisik & jumlah
-// jenis instrumen-nya — bukan `requested_qty`/`request_lines` yang hanya menghitung
-// baris permintaan (1 paket = 1 jenis, menyesatkan untuk paket).
-function unitSummary(order: CleaningOrder): { units: number; jenis: number } {
-  if (order.units?.length) {
-    const jenis = new Set(
-      order.units.map((u) => u.instrument?.id ?? u.instrument?.name ?? u.id)
-    ).size
-    return { units: order.units.length, jenis }
-  }
-  return { units: order.requested_qty, jenis: order.request_lines }
-}
-
 // Status pencucian sebuah order (turunan dari washing/order status).
 export function isWashed(order: CleaningOrder): boolean {
   return order.washing?.status === "selesai" || order.status === "pengemasan"
@@ -382,13 +368,6 @@ export function CleaningTab({
             <div className="grid grid-cols-1 gap-4 rounded-lg border border-gray-200 bg-gray-50 px-4 py-3 sm:grid-cols-2">
               <Detail label="Peminjam / Unit" value={active.borrowed_by} />
               <Detail label="Diproses" value={formatDateTime(active.processed_at)} />
-              <Detail
-                label="Jumlah"
-                value={(() => {
-                  const s = unitSummary(active)
-                  return `${s.units} unit · ${s.jenis} jenis`
-                })()}
-              />
             </div>
 
             <InstrumentList order={active} collapsible defaultOpen={false} />
@@ -674,11 +653,9 @@ function CleaningOrderCard({
         >
           <div className="flex min-w-0 items-start gap-2">
             <Droplets className="mt-0.5 h-4 w-4 shrink-0 text-[#4ba69d]" />
-            <div className="min-w-0">
+            <div className="min-w-0 flex-1">
+              {/* Baris atas: kode batch + status pencucian. */}
               <div className="flex flex-wrap items-center gap-2">
-                <span className="text-sm font-semibold text-gray-900">
-                  {order.borrowed_by ?? "—"}
-                </span>
                 <span className="font-mono text-xs font-semibold text-[#075489] bg-[#075489]/8 px-2 py-0.5 rounded">
                   {order.code_transaction ?? order.code}
                 </span>
@@ -690,10 +667,42 @@ function CleaningOrderCard({
                   <Badge variant="warning">Cek Parameter</Badge>
                 )}
               </div>
-              <div className="mt-1 flex flex-wrap gap-x-4 gap-y-0.5 text-xs text-gray-500">
-                <span>Diproses: {formatDateTime(order.processed_at)}</span>
-                {order.washing?.machine_no && <span>Mesin: {order.washing.machine_no}</span>}
-              </div>
+
+              {/* Nama paket / instrumen sebagai chip — tetap ringkas walau banyak. */}
+              {order.items?.length ? (
+                <div className="mt-1.5 flex flex-wrap items-center gap-1">
+                  {order.items.slice(0, 4).map((it, i) => (
+                    <span
+                      key={`${it.name}-${i}`}
+                      title={it.type === "paket" ? it.name : `${it.name} ×${it.quantity}`}
+                      className="inline-flex max-w-[180px] items-center gap-1 rounded-md bg-gray-50 px-1.5 py-0.5 text-xs text-gray-700 ring-1 ring-gray-200"
+                    >
+                      {it.type === "paket" && (
+                        <Package className="h-3 w-3 shrink-0 text-[#4ba69d]" />
+                      )}
+                      <span className="truncate font-medium">{it.name}</span>
+                      {it.type !== "paket" && (
+                        <span className="shrink-0 text-gray-400">×{it.quantity}</span>
+                      )}
+                    </span>
+                  ))}
+                  {order.items.length > 4 && (
+                    <span className="rounded-md bg-[#075489]/8 px-1.5 py-0.5 text-xs font-medium text-[#075489]">
+                      +{order.items.length - 4} lainnya
+                    </span>
+                  )}
+                </div>
+              ) : (
+                <p className="mt-1 truncate text-sm font-semibold text-gray-900">
+                  {order.borrowed_by ?? "—"}
+                </p>
+              )}
+
+              {order.washing?.machine_no && (
+                <div className="mt-1.5 text-xs text-gray-500">
+                  Mesin: {order.washing.machine_no}
+                </div>
+              )}
             </div>
           </div>
         </button>
@@ -750,7 +759,6 @@ function InstrumentList({
 }) {
   const [open, setOpen] = useState(defaultOpen)
   const hasUnits = (order.units?.length ?? 0) > 0
-  const summary = unitSummary(order)
 
   // Kelompokkan unit fisik per instrumen agar ringkas (nama + daftar kode).
   const grouped = hasUnits
@@ -775,9 +783,6 @@ function InstrumentList({
           <span className="flex items-center gap-1.5">
             <ListChecks className="h-4 w-4" />
             Daftar Instrumen
-            <span className="font-normal normal-case tracking-normal text-gray-400">
-              ({summary.units} unit · {summary.jenis} jenis)
-            </span>
           </span>
           <ChevronDown
             className={"h-4 w-4 transition-transform " + (open ? "rotate-180" : "")}

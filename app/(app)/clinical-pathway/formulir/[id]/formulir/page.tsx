@@ -14,22 +14,22 @@ import { ConfirmDialog } from "@/components/molecules/ConfirmDialog"
 import { PageHeader } from "@/components/molecules/PageHeader"
 import api from "@/lib/axios"
 
-type Category = { id: number; urutan: number; label: string }
+type Category = { id: number; sort_order: number; label: string }
 
 type Point = {
   id: number
   template_id: number
-  categori_id: number
+  category_id: number
   parent_id: number | null
   label: string
-  pengisi: string
-  hari_wajib: number[] | null
-  urutan: number
+  filled_by: string
+  required_days: number[] | null
+  sort_order: number
 }
 
 type TemplateDetail = {
   id: number
-  maksimal_hari: number
+  max_days: number
   icd10?: { code: string; display: string } | null
 }
 
@@ -110,7 +110,7 @@ export default function FormulirPage() {
         const ptRes = await api.get(`/clinical-pathway/templates/${templateId}/points`)
         if (!active) return
         setTemplate(tplRes.data.data)
-        setCategories(cats.sort((a, b) => a.urutan - b.urutan))
+        setCategories(cats.sort((a, b) => a.sort_order - b.sort_order))
         setPoints(ptRes.data.data)
       } finally {
         if (active) setLoading(false)
@@ -122,12 +122,12 @@ export default function FormulirPage() {
     }
   }, [templateId])
 
-  const maxHari = template?.maksimal_hari ?? 0
+  const maxHari = template?.max_days ?? 0
   const days = Array.from({ length: maxHari }, (_, i) => i + 1)
 
   // Pengisi sub-poin selalu mengikuti poin induknya.
   const pengisiOfParent = (parentId: number | null) =>
-    parentId != null ? (points.find((p) => p.id === parentId)?.pengisi ?? "dokter") : "dokter"
+    parentId != null ? (points.find((p) => p.id === parentId)?.filled_by ?? "dokter") : "dokter"
 
   function openAdd(categoriId: number, parentId: number | null) {
     setFormError(null)
@@ -147,13 +147,13 @@ export default function FormulirPage() {
     setFormError(null)
     setModal({
       mode: "edit",
-      categoriId: point.categori_id,
+      categoriId: point.category_id,
       parentId: point.parent_id,
       editId: point.id,
       label: point.label,
       // Sub-poin → tampilkan pengisi induk (mengikuti), bukan nilai sendiri.
-      pengisi: point.parent_id != null ? pengisiOfParent(point.parent_id) : point.pengisi,
-      hari: new Set(point.hari_wajib ?? []),
+      pengisi: point.parent_id != null ? pengisiOfParent(point.parent_id) : point.filled_by,
+      hari: new Set(point.required_days ?? []),
     })
   }
 
@@ -176,11 +176,11 @@ export default function FormulirPage() {
     setSaving(true)
     setFormError(null)
     const payload = {
-      categori_id: modal.categoriId,
+      category_id: modal.categoriId,
       parent_id: modal.parentId,
       label: modal.label.trim(),
-      pengisi: modal.pengisi,
-      hari_wajib: [...modal.hari].sort((a, b) => a - b),
+      filled_by: modal.pengisi,
+      required_days: [...modal.hari].sort((a, b) => a - b),
     }
     try {
       if (modal.mode === "add") {
@@ -264,13 +264,13 @@ export default function FormulirPage() {
   const childrenOf = (parentId: number) =>
     points
       .filter((p) => p.parent_id === parentId)
-      .sort((a, b) => a.urutan - b.urutan || a.id - b.id)
+      .sort((a, b) => a.sort_order - b.sort_order || a.id - b.id)
 
   // Poin level atas dalam satu kategori.
   const topPointsOf = (catId: number) =>
     points
-      .filter((p) => p.categori_id === catId && p.parent_id === null)
-      .sort((a, b) => a.urutan - b.urutan || a.id - b.id)
+      .filter((p) => p.category_id === catId && p.parent_id === null)
+      .sort((a, b) => a.sort_order - b.sort_order || a.id - b.id)
 
   function renderPoint(point: Point, number: string, depth: number) {
     const subs = childrenOf(point.id)
@@ -286,15 +286,15 @@ export default function FormulirPage() {
                 {number}
               </span>
               <span className="font-medium text-gray-900">{point.label}</span>
-              <Badge variant="info">{pengisiLabel(point.pengisi)}</Badge>
+              <Badge variant="info">{pengisiLabel(point.filled_by)}</Badge>
             </div>
             {/* Hari wajib ceklis — hanya untuk poin tanpa sub-poin.
                 Poin yang punya sub-poin jadi kelompok (tidak diceklis). */}
             {subs.length === 0 ? (
               <div className="mt-1.5 flex flex-wrap items-center gap-1">
                 <span className="text-xs text-gray-400">Wajib ceklis hari:</span>
-                {point.hari_wajib && point.hari_wajib.length > 0 ? (
-                  point.hari_wajib.map((d) => (
+                {point.required_days && point.required_days.length > 0 ? (
+                  point.required_days.map((d) => (
                     <span
                       key={d}
                       className="inline-flex h-5 min-w-[20px] items-center justify-center rounded bg-[#4ba69d]/15 px-1 text-[11px] font-semibold text-[#4ba69d]"
@@ -317,7 +317,7 @@ export default function FormulirPage() {
               size="xs"
               variant="outline"
               className="border-[#4ba69d] text-[#4ba69d] hover:bg-[#4ba69d]/10"
-              onClick={() => openAdd(point.categori_id, point.id)}
+              onClick={() => openAdd(point.category_id, point.id)}
             >
               <Plus className="h-3.5 w-3.5" />
               Sub Poin
@@ -386,7 +386,7 @@ export default function FormulirPage() {
                 <div className="flex items-center justify-between gap-3 border-b border-gray-100 pb-3">
                   <div className="flex items-center gap-2">
                     <span className="flex h-7 min-w-[28px] items-center justify-center rounded-md bg-[#075489] px-2 text-sm font-semibold text-white">
-                      {cat.urutan}
+                      {cat.sort_order}
                     </span>
                     <span className="text-base font-semibold text-gray-900">{cat.label}</span>
                   </div>
@@ -405,7 +405,7 @@ export default function FormulirPage() {
                       Belum ada poin pada kategori ini.
                     </p>
                   ) : (
-                    tops.map((p, i) => renderPoint(p, `${cat.urutan}.${i + 1}`, 0))
+                    tops.map((p, i) => renderPoint(p, `${cat.sort_order}.${i + 1}`, 0))
                   )}
                 </div>
               </Card>

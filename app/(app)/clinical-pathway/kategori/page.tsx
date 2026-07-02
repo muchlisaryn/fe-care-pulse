@@ -55,7 +55,7 @@ export default function CategoriClinicalPathwayPage() {
   }
 
   function openEdit(row: CategoriClinicalPathway) {
-    setForm({ urutan: String(row.urutan), label: row.label })
+    setForm({ urutan: String(row.sort_order), label: row.label })
     setEditId(row.id)
     setFormError(null)
     setModal("edit")
@@ -68,7 +68,7 @@ export default function CategoriClinicalPathwayPage() {
     }
     setSaving(true)
     setFormError(null)
-    const payload = { urutan: Number(form.urutan), label: form.label.trim() }
+    const payload = { sort_order: Number(form.urutan), label: form.label.trim() }
     try {
       if (modal === "tambah") {
         await api.post("/clinical-pathway/categories", payload)
@@ -80,7 +80,7 @@ export default function CategoriClinicalPathwayPage() {
     } catch (err) {
       const x = err as { response?: { data?: { message?: string; errors?: Record<string, string[]> } } }
       setFormError(
-        x.response?.data?.errors?.urutan?.[0] ??
+        x.response?.data?.errors?.sort_order?.[0] ??
           x.response?.data?.message ??
           "Gagal menyimpan. Pastikan urutan belum dipakai.",
       )
@@ -106,7 +106,7 @@ export default function CategoriClinicalPathwayPage() {
       header: "Urutan",
       cell: (row) => (
         <span className="font-mono text-xs font-semibold text-[#075489] bg-[#075489]/8 px-2 py-1 rounded">
-          {row.urutan}
+          {row.sort_order}
         </span>
       ),
       className: "w-24",

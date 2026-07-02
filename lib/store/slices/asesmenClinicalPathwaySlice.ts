@@ -4,31 +4,31 @@ import api from "@/lib/axios"
 export type AsesmenClinicalPathway = {
   id: number
   template_id: number
-  no_rm: string
-  nama_pasien: string
-  jenis_kelamin: "L" | "P"
-  tanggal_lahir: string
-  diagnosa_masuk: string
-  penyakit_utama: string | null
-  penyakit_penyerta: string | null
-  komplikasi: string | null
-  tindakan: string | null
-  bb: string | null
-  tb: string | null
-  tanggal_jam_masuk: string
-  tanggal_jam_keluar: string | null
-  lama_rawat: number | null
-  rencana_rawat: string | null
-  ruang_id: number | null
-  kelas: string | null
-  rujukan: boolean
+  medical_record_no: string
+  patient_name: string
+  gender: "L" | "P"
+  birth_date: string
+  admission_diagnosis: string
+  primary_disease: string | null
+  comorbidity: string | null
+  complication: string | null
+  procedure: string | null
+  weight: string | null
+  height: string | null
+  admitted_at: string
+  discharged_at: string | null
+  length_of_stay: number | null
+  care_plan: string | null
+  room_id: number | null
+  ward_class: string | null
+  is_referral: boolean
   template?: {
     id: number
-    maksimal_hari: number
+    max_days: number
     icd10?: { id: number; code: string; display: string } | null
   } | null
-  ruang?: { id: number; name: string } | null
-  verifikasi_pelaksana_at: string | null
+  room?: { id: number; name: string } | null
+  executor_verified_at: string | null
   created_at?: string
 }
 
@@ -67,7 +67,7 @@ export const fetchAsesmenCP = createAsyncThunk("asesmenCP/fetch", async (_, { ge
     params: {
       page,
       search: search || undefined,
-      ruang_id: ruangId || undefined,
+      room_id: ruangId || undefined,
       status: status || undefined,
     },
   })
