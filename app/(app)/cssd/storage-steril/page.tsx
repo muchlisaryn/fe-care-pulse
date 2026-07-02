@@ -31,6 +31,7 @@ import {
   invalidateStorage,
   type StorageIncomingOrder,
   type StorageIncomingUnit,
+  type StorageInventoryRow,
 } from "@/lib/store/slices/storageSlice"
 import api from "@/lib/axios"
 
@@ -84,6 +85,15 @@ export default function StorageSterilPage() {
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
   const toggleGroup = (key: string) =>
     setExpanded((prev) => {
+      const next = new Set(prev)
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
+      return next
+    })
+  // Paket yang detail isinya sedang dibuka di inventaris.
+  const [openPkt, setOpenPkt] = useState<Set<string>>(new Set())
+  const togglePkt = (key: string) =>
+    setOpenPkt((prev) => {
       const next = new Set(prev)
       if (next.has(key)) next.delete(key)
       else next.add(key)
@@ -238,6 +248,52 @@ export default function StorageSterilPage() {
 
   const alertCount = inventory.filter((r) => r.alert && !r.expired).length
   const expiredCount = inventory.filter((r) => r.expired).length
+
+  // Satu baris unit di detail inventaris (dipakai untuk satuan & isi paket).
+  function renderUnitRow(r: StorageInventoryRow) {
+    return (
+      <div
+        key={r.id}
+        className={
+          "flex flex-wrap items-center gap-x-4 gap-y-1 border-b border-gray-50 px-4 py-2 text-sm last:border-0 " +
+          (r.alert ? "bg-red-50/60" : "")
+        }
+      >
+        {r.unit.image_url && (
+          <button
+            type="button"
+            onClick={() => setZoom({ url: r.unit.image_url as string, name: r.unit.instrument ?? r.unit.code ?? "Instrumen" })}
+            title="Klik untuk perbesar"
+            className="h-6 w-6 shrink-0 cursor-zoom-in overflow-hidden rounded border border-gray-200"
+          >
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={r.unit.image_url} alt={r.unit.instrument ?? ""} className="h-full w-full object-cover" />
+          </button>
+        )}
+        <span className="font-mono text-xs font-semibold text-[#075489] bg-[#075489]/8 px-2 py-0.5 rounded">
+          {r.unit.code ?? `#${r.unit.id}`}
+        </span>
+        <span className="text-gray-700">{r.unit.instrument ?? "—"}</span>
+        {groupBy === "batch" && (
+          <span className="inline-flex items-center gap-1 text-xs text-gray-500">
+            <MapPin className="h-3 w-3" />
+            {r.rack_code}
+          </span>
+        )}
+        {groupBy === "rak" && r.batch && <span className="font-mono text-xs text-gray-500">{r.batch}</span>}
+        <span className={"ml-auto text-xs " + (r.alert ? "font-semibold text-red-600" : "text-gray-500")}>
+          {formatDate(r.expiry_date)}
+        </span>
+        {r.expired ? (
+          <Badge variant="danger">Kedaluwarsa</Badge>
+        ) : r.alert ? (
+          <Badge variant="danger">{r.days_to_expiry}h lagi</Badge>
+        ) : (
+          <Badge variant="success">Di Gudang</Badge>
+        )}
+      </div>
+    )
+  }
 
   return (
     <div className="space-y-6">
@@ -403,44 +459,53 @@ export default function StorageSterilPage() {
                       </button>
                       {open && (
                         <div className="border-t border-gray-100">
-                          {g.items.map((r) => (
-                            <div
-                              key={r.id}
-                              className={
-                                "flex flex-wrap items-center gap-x-4 gap-y-1 border-b border-gray-50 px-4 py-2 text-sm last:border-0 " +
-                                (r.alert ? "bg-red-50/60" : "")
-                              }
-                            >
-                              <span className="font-mono text-xs font-semibold text-[#075489] bg-[#075489]/8 px-2 py-0.5 rounded">
-                                {r.unit.code ?? `#${r.unit.id}`}
-                              </span>
-                              <span className="text-gray-700">{r.unit.instrument ?? "—"}</span>
-                              {groupBy === "batch" && (
-                                <span className="inline-flex items-center gap-1 text-xs text-gray-500">
-                                  <MapPin className="h-3 w-3" />
-                                  {r.rack_code}
-                                </span>
-                              )}
-                              {groupBy === "rak" && r.batch && (
-                                <span className="font-mono text-xs text-gray-500">{r.batch}</span>
-                              )}
-                              <span
-                                className={
-                                  "ml-auto text-xs " +
-                                  (r.alert ? "font-semibold text-red-600" : "text-gray-500")
-                                }
-                              >
-                                {formatDate(r.expiry_date)}
-                              </span>
-                              {r.expired ? (
-                                <Badge variant="danger">Kedaluwarsa</Badge>
-                              ) : r.alert ? (
-                                <Badge variant="danger">{r.days_to_expiry}h lagi</Badge>
-                              ) : (
-                                <Badge variant="success">Di Gudang</Badge>
-                              )}
-                            </div>
-                          ))}
+                          {(() => {
+                            // Pisah unit paket (dikelompokkan per nama paket) & satuan.
+                            const pakets = new Map<string, typeof g.items>()
+                            const satuan: typeof g.items = []
+                            for (const r of g.items) {
+                              if (r.source === "paket") {
+                                const k = r.package_name ?? "Paket"
+                                const arr = pakets.get(k) ?? []
+                                arr.push(r)
+                                pakets.set(k, arr)
+                              } else satuan.push(r)
+                            }
+                            return (
+                              <>
+                                {[...pakets.entries()].map(([pkg, units]) => {
+                                  const pkey = `${g.key}::${pkg}`
+                                  const popen = q ? true : openPkt.has(pkey)
+                                  const alerts = units.filter((u) => u.alert).length
+                                  return (
+                                    <div key={pkey} className="border-b border-gray-50 last:border-0">
+                                      <button
+                                        type="button"
+                                        onClick={() => togglePkt(pkey)}
+                                        className="flex w-full items-center gap-2 px-4 py-2 text-sm hover:bg-gray-50"
+                                      >
+                                        {popen ? (
+                                          <ChevronDown className="h-3.5 w-3.5 shrink-0 text-gray-400" />
+                                        ) : (
+                                          <ChevronRight className="h-3.5 w-3.5 shrink-0 text-gray-400" />
+                                        )}
+                                        <Badge variant="info">Paket</Badge>
+                                        <span className="font-medium text-gray-800">{pkg}</span>
+                                        <span className="text-xs text-gray-400">{units.length} unit</span>
+                                        {alerts > 0 && (
+                                          <Badge variant="danger" className="ml-1">
+                                            {alerts} perlu perhatian
+                                          </Badge>
+                                        )}
+                                      </button>
+                                      {popen && <div className="bg-gray-50/40">{units.map(renderUnitRow)}</div>}
+                                    </div>
+                                  )
+                                })}
+                                {satuan.map(renderUnitRow)}
+                              </>
+                            )
+                          })()}
                         </div>
                       )}
                     </div>

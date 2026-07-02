@@ -43,7 +43,9 @@ export type StorageInventoryRow = {
   days_to_expiry: number | null
   alert: boolean
   expired: boolean
-  unit: { id: number; code: string | null; instrument: string | null }
+  source: "satuan" | "paket"
+  package_name: string | null
+  unit: { id: number; code: string | null; instrument: string | null; image_url?: string | null }
   order: { id: number; code: string; code_transaction: string | null } | null
   batch: string | null
 }
