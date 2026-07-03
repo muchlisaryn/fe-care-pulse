@@ -2,7 +2,7 @@
 
 import { Suspense, useEffect, useMemo, useState } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
-import { Plus, Trash2, Package, Search, ZoomIn } from "lucide-react"
+import { Trash2, Package, Search, ZoomIn } from "lucide-react"
 import { Button } from "@/components/atoms/Button"
 import { Input } from "@/components/atoms/Input"
 import { Label } from "@/components/atoms/Label"
@@ -617,7 +617,6 @@ function ProduksiCssdPage() {
               disabled={!pickId || !(Number(pickQty) > 0)}
               className="bg-[#075489] hover:bg-[#075489]/90 text-white"
             >
-              <Plus className="mr-1 h-4 w-4" />
               Tambah
             </Button>
           </div>
