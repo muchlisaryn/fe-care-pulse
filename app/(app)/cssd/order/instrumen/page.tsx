@@ -629,7 +629,7 @@ export default function OrderInstrumenPage() {
       },
     },
     {
-      header: "Ruangan / Unit",
+      header: "Ruangan",
       cell: (row) => (row.room?.name ? <span className="text-gray-700">{row.room.name}</span> : dash),
     },
     {
@@ -675,7 +675,6 @@ export default function OrderInstrumenPage() {
             onClick={openInbox}
             className="relative border-[#075489] text-[#075489] hover:bg-[#075489]/10"
           >
-            <Inbox className="h-4 w-4" />
             Permintaan Pinjam
             {pendingTransferCount > 0 && (
               <span className="ml-1 inline-flex h-5 min-w-[20px] items-center justify-center rounded-full bg-red-500 px-1.5 text-xs font-semibold text-white">
@@ -688,12 +687,11 @@ export default function OrderInstrumenPage() {
             onClick={openBorrowed}
             className="border-[#075489] text-[#075489] hover:bg-[#075489]/10"
           >
-            <ArrowLeftRight className="h-4 w-4" />
             Pinjam Instrumen
           </Button>
           <Link href="/cssd/order/instrumen/tambah">
             <Button className="w-full bg-[#075489] hover:bg-[#075489]/90 text-white sm:w-auto">
-              + Buat Order
+              Buat Order
             </Button>
           </Link>
         </div>
@@ -1229,11 +1227,8 @@ export default function OrderInstrumenPage() {
                                 <span className="pl-6 text-gray-600">
                                   {ci.instrument?.name ?? `Instrumen #${ci.instrument_id}`}
                                 </span>
-                                <span className="text-xs text-gray-500">
-                                  {ci.quantity} / paket
-                                  <span className="ml-2 font-semibold text-gray-700">
-                                    = {ci.quantity * r.quantity}
-                                  </span>
+                                <span className="text-xs font-semibold text-gray-700">
+                                  {ci.quantity * r.quantity}
                                 </span>
                               </li>
                             ))}

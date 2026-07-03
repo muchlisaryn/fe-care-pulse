@@ -45,6 +45,7 @@ export type CleaningOrder = {
   code: string
   code_transaction: string | null
   status: "pencucian" | "pengemasan"
+  stage_status: "proses" | "selesai" // 'selesai' = riwayat cleaning (sudah lanjut)
   borrowed_by: string | null
   room: { id: number; name: string } | null
   order_date: string | null

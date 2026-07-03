@@ -1,7 +1,7 @@
 "use client"
 
 import { useState } from "react"
-import { Truck, ScanLine, MapPin, ShieldCheck, ClipboardList } from "lucide-react"
+import { Truck, MapPin, ClipboardList } from "lucide-react"
 import { Button } from "@/components/atoms/Button"
 import { Badge } from "@/components/atoms/Badge"
 import { Input } from "@/components/atoms/Input"
@@ -36,8 +36,6 @@ export function DistributeReady({
 }) {
   const [active, setActive] = useState<DistributeOrder | null>(null)
   const [recipient, setRecipient] = useState("")
-  const [rm, setRm] = useState("")
-  const [patient, setPatient] = useState("")
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -46,9 +44,7 @@ export function DistributeReady({
   function openDistribute(order: DistributeOrder) {
     setActive(order)
     setError(null)
-    setRecipient(order.room?.name ?? "")
-    setRm("")
-    setPatient("")
+    setRecipient("")
   }
 
   async function submit() {
@@ -62,8 +58,6 @@ export function DistributeReady({
     try {
       await api.post(`/master/orders/${active.id}/distribute`, {
         recipient: recipient.trim(),
-        medical_record_no: rm.trim() || null,
-        patient_name: patient.trim() || null,
       })
       setActive(null)
       onChanged()
@@ -77,24 +71,23 @@ export function DistributeReady({
   return (
     <div className="space-y-2">
       <div className="flex items-center gap-2 px-1 text-xs font-semibold uppercase tracking-wide text-gray-400">
-        <ShieldCheck className="h-3.5 w-3.5 text-teal-500" />
         Siap Distribusi ({items.length})
       </div>
 
       {items.map((order) => (
         <div
           key={order.id}
-          className="rounded-lg border border-gray-200 border-l-4 border-l-teal-400"
+          className="rounded-lg border border-gray-200"
         >
           <div className="flex items-start justify-between gap-2 px-3 py-2.5">
             <div className="flex min-w-0 items-start gap-2">
-              <Truck className="mt-0.5 h-4 w-4 shrink-0 text-teal-500" />
+              <Truck className="mt-0.5 h-4 w-4 shrink-0 text-[#075489]" />
               <div className="min-w-0">
                 <div className="flex flex-wrap items-center gap-2">
                   <span className="text-sm font-semibold text-gray-900">
                     {order.borrowed_by ?? "—"}
                   </span>
-                  <span className="font-mono text-xs font-semibold text-teal-700 bg-teal-100 px-2 py-0.5 rounded">
+                  <span className="font-mono text-xs font-semibold text-[#075489] bg-[#075489]/10 px-2 py-0.5 rounded">
                     {order.code_transaction ?? order.code}
                   </span>
                   <Badge variant="info">Di Gudang Steril</Badge>
@@ -109,7 +102,7 @@ export function DistributeReady({
             <button
               type="button"
               onClick={() => openDistribute(order)}
-              className="shrink-0 self-center rounded-md border border-teal-500 bg-teal-500 px-3 py-1.5 text-xs font-medium text-white hover:bg-teal-600"
+              className="shrink-0 self-center rounded-md border border-[#075489] bg-[#075489] px-3 py-1.5 text-xs font-medium text-white hover:bg-[#075489]/90"
             >
               Distribusikan
             </button>
@@ -124,13 +117,7 @@ export function DistributeReady({
         size="lg"
         footer={
           <div className="flex w-full items-center justify-between gap-3">
-            {error ? (
-              <p className="text-sm text-red-600">{error}</p>
-            ) : (
-              <span className="text-xs text-gray-400">
-                Status alat → Terdistribusi / Digunakan. Riwayat mengunci traceability loop.
-              </span>
-            )}
+            {error ? <p className="text-sm text-red-600">{error}</p> : <span />}
             <div className="flex shrink-0 gap-2">
               <Button variant="outline" onClick={() => setActive(null)} disabled={saving}>
                 Batal
@@ -176,48 +163,13 @@ export function DistributeReady({
 
             {/* Double verification: penerima */}
             <div className="space-y-1.5">
-              <Label htmlFor="dist-recipient">Scan / Penerima (Ruangan / Petugas) *</Label>
-              <div className="relative">
-                <ScanLine className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 pointer-events-none" />
-                <Input
-                  id="dist-recipient"
-                  value={recipient}
-                  onChange={(e) => setRecipient(e.target.value)}
-                  placeholder="mis. OK 1 / Ns. Andi"
-                  className="pl-9"
-                />
-              </div>
-              <p className="text-xs text-gray-400">
-                Double verification — pindai barcode ruangan / petugas penerima.
-              </p>
+              <Label htmlFor="dist-recipient">Nama Penerima (Ruangan/Petugas) *</Label>
+              <Input
+                id="dist-recipient"
+                value={recipient}
+                onChange={(e) => setRecipient(e.target.value)}
+              />
             </div>
-
-            {/* Tautan RM pasien */}
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-              <div className="space-y-1.5">
-                <Label htmlFor="dist-rm">No. Rekam Medis (RM) Pasien</Label>
-                <Input
-                  id="dist-rm"
-                  value={rm}
-                  onChange={(e) => setRm(e.target.value)}
-                  placeholder="mis. RM-00123"
-                  className="font-mono"
-                />
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="dist-patient">Nama Pasien</Label>
-                <Input
-                  id="dist-patient"
-                  value={patient}
-                  onChange={(e) => setPatient(e.target.value)}
-                  placeholder="Opsional"
-                />
-              </div>
-            </div>
-            <p className="text-xs text-gray-400">
-              Tautan RM mengunci full traceability loop: bila terjadi infeksi (IDO), alat ini bisa
-              dilacak ke batch sterilisasi (mesin, waktu, petugas).
-            </p>
           </div>
         )}
       </Modal>

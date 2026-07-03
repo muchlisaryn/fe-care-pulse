@@ -27,6 +27,7 @@ export type ProdPackagingBatch = {
   code_transaction: string | null // PRD-NNN
   washing_code: string | null
   status: "pengemasan"
+  stage_status: "diproses" | "selesai" // 'selesai' = batch sudah dikemas, label bisa dilihat ulang
   borrowed_by: string | null
   processed_at: string | null
   processed_by: string | null

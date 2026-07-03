@@ -20,7 +20,6 @@ import { Button } from "@/components/atoms/Button"
 import { Badge } from "@/components/atoms/Badge"
 import { Barcode } from "@/components/atoms/Barcode"
 import { Label } from "@/components/atoms/Label"
-import { SelectSearch } from "@/components/atoms/SelectSearch"
 import { Card } from "@/components/molecules/Card"
 import { StatCard } from "@/components/molecules/StatCard"
 import { RoomDistributionCard } from "@/components/molecules/RoomDistributionCard"
@@ -85,11 +84,11 @@ const incomingStatusVariant: Record<IncomingStatus, "warning" | "default"> = {
 
 // Warna garis kiri kartu per tahap order — konsisten dengan tracking status:
 // Order Masuk=kuning-amber, Cleaning=kuning, Packaging=ungu (di CleaningTab),
-// Distribusi=biru, Dikembalikan=hijau, Dibatalkan=merah.
+// Distribusi=biru, Dikembalikan=tanpa warna (netral), Dibatalkan=merah.
 const STATUS_BORDER: Record<string, string> = {
   diajukan: "border-l-amber-400",
   dipinjam: "border-l-blue-500",
-  dikembalikan: "border-l-green-500",
+  dikembalikan: "border-l-transparent",
   dibatalkan: "border-l-red-400",
 }
 
@@ -358,7 +357,13 @@ function MonitoringCssd() {
 
   // Pengembalian: modal dibuka per-order, lalu data order dimuat otomatis (lookup).
   const conditions = useAppSelector((s) => s.conditions.items)
-  const conditionOptions = conditions.map((c) => ({ value: String(c.id), label: c.name }))
+  // Tombol Kondisi Masuk pengembalian: B/KB/H/R → nama kondisi di master.
+  const RETURN_CONDITIONS = [
+    { code: "B", name: "Baik" },
+    { code: "KB", name: "Kurang Baik" },
+    { code: "H", name: "Hilang" },
+    { code: "R", name: "Rusak" },
+  ]
   const [returnOpen, setReturnOpen] = useState(false)
   const [lookupLoading, setLookupLoading] = useState(false)
   const [returnOrder, setReturnOrder] = useState<ReturnOrder | null>(null)
@@ -1017,7 +1022,7 @@ function MonitoringCssd() {
                     ? "Mencari ke database..."
                     : scanArmed
                       ? "Mode scan aktif — pindai barcode transaksi..."
-                      : "Cari kode unit, instrumen, ruangan, peminjam, atau order..."
+                      : ""
                 }
                 value={searchInput}
                 onChange={(e) => setSearchInput(e.target.value)}
@@ -1577,14 +1582,30 @@ function MonitoringCssd() {
                           {u.is_returned ? (
                             u.condition_in?.name ?? <span className="text-gray-400 text-xs">—</span>
                           ) : (
-                            <SelectSearch
-                              options={conditionOptions}
-                              value={returnCondById[u.id] ?? ""}
-                              onChange={(v) =>
-                                setReturnCondById((prev) => ({ ...prev, [u.id]: v }))
-                              }
-                              placeholder="-- Kondisi --"
-                            />
+                            <div className="grid w-max grid-cols-2 gap-1">
+                              {RETURN_CONDITIONS.map((rc) => {
+                                const cond = conditions.find((c) => c.name === rc.name)
+                                const id = cond ? String(cond.id) : ""
+                                const active = !!id && returnCondById[u.id] === id
+                                return (
+                                  <button
+                                    key={rc.code}
+                                    type="button"
+                                    disabled={!cond}
+                                    title={rc.name}
+                                    onClick={() => setReturnCondById((prev) => ({ ...prev, [u.id]: id }))}
+                                    className={
+                                      "h-7 min-w-[36px] rounded-md border px-2 text-xs font-semibold transition-colors disabled:opacity-40 " +
+                                      (active
+                                        ? "border-[#075489] bg-[#075489] text-white"
+                                        : "border-gray-300 text-gray-600 hover:bg-gray-100")
+                                    }
+                                  >
+                                    {rc.code}
+                                  </button>
+                                )
+                              })}
+                            </div>
                           )}
                         </td>
                         <td className="py-2.5 px-3 text-center">

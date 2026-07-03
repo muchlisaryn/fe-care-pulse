@@ -115,7 +115,7 @@ export function OrderStatusBadge({ status }: { status: OrderStatus }) {
           <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-current opacity-60" />
           <span className="relative inline-flex h-2 w-2 rounded-full bg-current" />
         </span>
-      ) : (
+      ) : status === "digudang" ? null : (
         <Icon className={"h-3.5 w-3.5 " + s.iconClassName} />
       )}
       {s.label}

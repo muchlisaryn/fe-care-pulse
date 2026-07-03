@@ -70,6 +70,13 @@ function ProduksiCssdPage() {
   )
   const [page, setPage] = useState(1)
   const [search, setSearch] = useState("")
+  // Sub-tampilan pada tab Packaging: batch yang masih perlu dikemas vs riwayat
+  // batch yang sudah dikemas (untuk lihat/cetak ulang label).
+  const [pkgView, setPkgView] = useState<"pending" | "history">("pending")
+  // Sub-tampilan pada tab Cleaning: proses cleaning vs riwayat cleaning.
+  const [cleanView, setCleanView] = useState<"proses" | "history">("proses")
+  // Sub-tampilan pada tab Sterilisasi: proses steril / validasi hasil / gagal steril.
+  const [sterView, setSterView] = useState<"proses" | "validasi" | "gagal">("proses")
 
   // Data pipeline (tahap Cleaning/Packaging/Sterilization) — sama seperti dulu di
   // Tracking Order, kini dipantau dari halaman Produksi.
@@ -105,6 +112,10 @@ function ProduksiCssdPage() {
     )
   }, [cleaning, q])
   const cleaningItems = useMemo(() => cleaningFiltered.filter((o) => o.status === "pencucian"), [cleaningFiltered])
+  // Pisahkan cleaning: yang masih diproses vs riwayat (sudah selesai cuci & lanjut).
+  const cleaningProses = useMemo(() => cleaningItems.filter((o) => o.stage_status !== "selesai"), [cleaningItems])
+  const cleaningHistory = useMemo(() => cleaningItems.filter((o) => o.stage_status === "selesai"), [cleaningItems])
+  const cleaningActive = cleanView === "history" ? cleaningHistory : cleaningProses
   const packagingItems = useMemo(() => {
     if (!q) return packaging
     return packaging.filter(
@@ -116,6 +127,16 @@ function ProduksiCssdPage() {
         o.units.some((u) => (u.code ?? "").toLowerCase().includes(q)),
     )
   }, [packaging, q])
+  // Pisahkan batch packaging: yang masih perlu dikemas vs riwayat (sudah dikemas).
+  const packagingPending = useMemo(
+    () => packagingItems.filter((b) => b.stage_status !== "selesai"),
+    [packagingItems],
+  )
+  const packagingHistory = useMemo(
+    () => packagingItems.filter((b) => b.stage_status === "selesai"),
+    [packagingItems],
+  )
+  const packagingActive = pkgView === "history" ? packagingHistory : packagingPending
   const sterilizationItems = useMemo(() => {
     if (!q) return sterilizePipeline
     return sterilizePipeline.filter(
@@ -126,17 +147,37 @@ function ProduksiCssdPage() {
         o.units.some((u) => (u.code ?? "").toLowerCase().includes(q)),
     )
   }, [sterilizePipeline, q])
+  // Pisahkan pipeline sterilisasi jadi 3: siap-steril (tray, akan dibatch),
+  // menunggu validasi (batch STR), dan unit gagal steril (antre re-proses).
+  const sterProses = useMemo(
+    () => sterilizationItems.filter((o) => o.kind === "ready" && o.reprocess !== true),
+    [sterilizationItems],
+  )
+  const sterValidasi = useMemo(() => sterilizationItems.filter((o) => o.kind === "batch"), [sterilizationItems])
+  const sterGagal = useMemo(() => sterilizationItems.filter((o) => o.reprocess === true), [sterilizationItems])
+  const sterActive = sterView === "gagal" ? sterGagal : sterView === "validasi" ? sterValidasi : sterProses
 
   const tabCount: Record<ProduksiTab, number> = {
     produksi: 0, // badge tidak ditampilkan untuk tab form
-    cleaning: cleaningItems.length,
-    packaging: packagingItems.length,
-    sterilization: sterilizationItems.length,
+    // Badge tab Cleaning hanya menghitung yang masih diproses (bukan riwayat).
+    cleaning: cleaningProses.length,
+    // Badge tab Packaging hanya menghitung yang masih perlu dikemas (bukan riwayat).
+    packaging: packagingPending.length,
+    // Badge tab Sterilisasi = alur normal (siap-steril + validasi, tanpa gagal steril).
+    sterilization: sterProses.length + sterValidasi.length,
   }
 
   // Pagination tahap pipeline (tab non-produksi). Slice ber-tipe spesifik dihitung
-  // di JSX agar props tiap Tab tidak ber-tipe union.
-  const activeCount = tabCount[tab]
+  // di JSX agar props tiap Tab tidak ber-tipe union. Untuk tab Packaging & Sterilisasi,
+  // jumlah & slice mengikuti sub-tampilan aktif.
+  const activeCount =
+    tab === "packaging"
+      ? packagingActive.length
+      : tab === "sterilization"
+        ? sterActive.length
+        : tab === "cleaning"
+          ? cleaningActive.length
+          : tabCount[tab]
   const pipelineLoading =
     tab === "sterilization" ? sterilizeLoading : tab === "packaging" ? packagingLoading : cleaningLoading
   const totalPages = Math.ceil(activeCount / ITEMS_PER_PAGE)
@@ -303,7 +344,7 @@ function ProduksiCssdPage() {
     <div className="space-y-6">
       <PageHeader
         title="Produksi CSSD"
-        subtitle="Mulai produksi & pantau tahap reprocessing: Cleaning → Inspection → Sterilization"
+        subtitle="Start production & monitor the reprocessing stages: Cleaning → Inspection → Sterilization"
       />
 
       {/* Tab: form produksi baru + tahapan pipeline */}
@@ -357,7 +398,7 @@ function ProduksiCssdPage() {
                   setSearch(e.target.value)
                   setPage(1)
                 }}
-                placeholder="Cari kode order / peminjam / ruangan / alat..."
+                placeholder="Cari nama/kode instrument..."
                 className="pl-9"
               />
             </div>
@@ -368,30 +409,125 @@ function ProduksiCssdPage() {
       {/* Konten tahap pipeline */}
       {tab !== "produksi" && (
         <Card className="p-4">
+          {/* Sub-tampilan tab Cleaning: Proses Cleaning vs History Cleaning. */}
+          {tab === "cleaning" && (
+            <div className="mb-3 inline-flex rounded-lg border border-gray-200 p-0.5 text-sm">
+              {([
+                { key: "proses" as const, label: "Proses Cleaning", count: cleaningProses.length },
+                { key: "history" as const, label: "History", count: cleaningHistory.length },
+              ]).map((v) => (
+                <button
+                  key={v.key}
+                  type="button"
+                  onClick={() => {
+                    setCleanView(v.key)
+                    setPage(1)
+                  }}
+                  className={
+                    "rounded-md px-3 py-1.5 font-medium transition-colors " +
+                    (cleanView === v.key ? "bg-[#075489] text-white" : "text-gray-600 hover:bg-gray-100")
+                  }
+                >
+                  {v.label} ({v.count})
+                </button>
+              ))}
+            </div>
+          )}
+          {/* Sub-tampilan tab Packaging: Perlu Dikemas vs Riwayat (sudah dikemas). */}
+          {tab === "packaging" && (
+            <div className="mb-3 inline-flex rounded-lg border border-gray-200 p-0.5 text-sm">
+              {([
+                { key: "pending" as const, label: "Proses Packaging", count: packagingPending.length },
+                { key: "history" as const, label: "History", count: packagingHistory.length },
+              ]).map((v) => (
+                <button
+                  key={v.key}
+                  type="button"
+                  onClick={() => {
+                    setPkgView(v.key)
+                    setPage(1)
+                  }}
+                  className={
+                    "rounded-md px-3 py-1.5 font-medium transition-colors " +
+                    (pkgView === v.key
+                      ? "bg-[#075489] text-white"
+                      : "text-gray-600 hover:bg-gray-100")
+                  }
+                >
+                  {v.label} ({v.count})
+                </button>
+              ))}
+            </div>
+          )}
+          {/* Sub-tampilan tab Sterilisasi: Proses Steril / Validasi Hasil / Gagal Steril. */}
+          {tab === "sterilization" && (
+            <div className="mb-3 inline-flex rounded-lg border border-gray-200 p-0.5 text-sm">
+              {([
+                { key: "proses" as const, label: "Proses Steril", count: sterProses.length },
+                { key: "validasi" as const, label: "Validasi Hasil", count: sterValidasi.length },
+                { key: "gagal" as const, label: "Gagal Steril", count: sterGagal.length },
+              ]).map((v) => (
+                <button
+                  key={v.key}
+                  type="button"
+                  onClick={() => {
+                    setSterView(v.key)
+                    setPage(1)
+                  }}
+                  className={
+                    "rounded-md px-3 py-1.5 font-medium transition-colors " +
+                    (sterView === v.key
+                      ? v.key === "gagal"
+                        ? "bg-red-600 text-white"
+                        : "bg-[#075489] text-white"
+                      : "text-gray-600 hover:bg-gray-100")
+                  }
+                >
+                  {v.label} ({v.count})
+                </button>
+              ))}
+            </div>
+          )}
           {pipelineLoading ? (
             <div className="py-16 text-center text-sm text-gray-400">Memuat data...</div>
           ) : activeCount === 0 ? (
             <div className="py-16 text-center text-sm text-gray-400">
-              {q ? "Tidak ada data yang cocok." : "Belum ada order pada tahap ini."}
+              {q
+                ? "Tidak ada data yang cocok."
+                : tab === "packaging"
+                  ? pkgView === "history"
+                    ? "Belum ada riwayat batch yang dikemas."
+                    : "Belum ada batch yang perlu dikemas."
+                  : tab === "sterilization"
+                    ? sterView === "gagal"
+                      ? "Tidak ada unit gagal steril."
+                      : sterView === "validasi"
+                        ? "Tidak ada batch menunggu validasi."
+                        : "Belum ada batch siap disterilkan."
+                    : tab === "cleaning"
+                      ? cleanView === "history"
+                        ? "Belum ada riwayat cleaning."
+                        : "Belum ada batch pada tahap cleaning."
+                      : "Belum ada order pada tahap ini."}
             </div>
           ) : (
             <>
               {tab === "cleaning" && (
                 <CleaningTab
-                  items={cleaningItems.slice(pageStart, pageStart + ITEMS_PER_PAGE)}
+                  items={cleaningActive.slice(pageStart, pageStart + ITEMS_PER_PAGE)}
                   onChanged={refreshPipeline}
                   stage="cleaning"
                 />
               )}
               {tab === "packaging" && (
                 <ProductionPackagingTab
-                  items={packagingItems.slice(pageStart, pageStart + ITEMS_PER_PAGE)}
+                  items={packagingActive.slice(pageStart, pageStart + ITEMS_PER_PAGE)}
                   onChanged={refreshPipeline}
                 />
               )}
               {tab === "sterilization" && (
                 <ProductionSterilizationTab
-                  items={sterilizationItems.slice(pageStart, pageStart + ITEMS_PER_PAGE)}
+                  items={sterActive.slice(pageStart, pageStart + ITEMS_PER_PAGE)}
                   onChanged={refreshPipeline}
                 />
               )}

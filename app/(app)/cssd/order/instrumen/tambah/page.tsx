@@ -66,6 +66,8 @@ export default function TambahOrderInstrumenPage() {
 
   const [roomId, setRoomId] = useState("")
   const [borrowedBy, setBorrowedBy] = useState("")
+  const [medicalRecordNo, setMedicalRecordNo] = useState("")
+  const [patientName, setPatientName] = useState("")
   const [orderDate, setOrderDate] = useState("")
   const [orderTime, setOrderTime] = useState("")
   const [returnPlanDate, setReturnPlanDate] = useState("")
@@ -286,6 +288,8 @@ export default function TambahOrderInstrumenPage() {
       await api.post("/master/orders", {
         room_id: Number(roomId),
         borrowed_by: borrowedBy.trim() || null,
+        medical_record_no: medicalRecordNo.trim() || null,
+        patient_name: patientName.trim() || null,
         order_date: orderDate,
         order_time: orderTime || null,
         return_plan_date: returnPlanDate || null,
@@ -381,6 +385,28 @@ export default function TambahOrderInstrumenPage() {
             </div>
           </div>
 
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <div className="space-y-1.5">
+              <Label htmlFor="no-rm">No. Rekam Medis (RM) Pasien</Label>
+              <Input
+                id="no-rm"
+                value={medicalRecordNo}
+                onChange={(e) => setMedicalRecordNo(e.target.value)}
+                placeholder="mis. RM-00123"
+                className="font-mono"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="nama-pasien">Nama Pasien</Label>
+              <Input
+                id="nama-pasien"
+                value={patientName}
+                onChange={(e) => setPatientName(e.target.value)}
+                placeholder="Opsional"
+              />
+            </div>
+          </div>
+
           <div className="space-y-1.5">
             <Label htmlFor="note">Catatan</Label>
             <Textarea
@@ -422,7 +448,7 @@ export default function TambahOrderInstrumenPage() {
                 onClick={() => setAddMode(m.key)}
                 className={
                   "rounded-md px-4 py-1.5 text-sm font-medium transition-colors " +
-                  (addMode === m.key ? "bg-[#4ba69d] text-white" : "text-gray-500 hover:text-gray-700")
+                  (addMode === m.key ? "bg-[#075489] text-white" : "text-gray-500 hover:text-gray-700")
                 }
               >
                 {m.label}
@@ -468,18 +494,18 @@ export default function TambahOrderInstrumenPage() {
                 type="button"
                 onClick={handleAddInstrument}
                 disabled={!newInstrumentId || Number(newInstrumentQty) <= 0}
-                className="bg-[#4ba69d] hover:bg-[#4ba69d]/90 text-white shrink-0"
+                className="bg-[#075489] hover:bg-[#075489]/90 text-white shrink-0"
               >
-                + Tambah
+                Tambah
               </Button>
             ) : (
               <Button
                 type="button"
                 onClick={handleAddPaket}
                 disabled={!newCatalogId || Number(newCatalogQty) <= 0}
-                className="bg-[#4ba69d] hover:bg-[#4ba69d]/90 text-white shrink-0"
+                className="bg-[#075489] hover:bg-[#075489]/90 text-white shrink-0"
               >
-                + Tambah Paket
+                Tambah Paket
               </Button>
             )}
           </div>

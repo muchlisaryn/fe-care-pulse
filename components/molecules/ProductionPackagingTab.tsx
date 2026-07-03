@@ -13,7 +13,50 @@ import type {
   ProdPackagingBatch,
   ProdPackagingUnit,
   ProdSterilLabel,
+  ProdSterilLabelItem,
 } from "@/lib/store/slices/productionPackagingSlice"
+
+// Satu label fisik: SATU per paket (berisi daftar instrumen di dalamnya) atau
+// SATU per unit untuk instrumen satuan.
+type LabelEntry = {
+  kind: "satuan" | "paket"
+  title: string // nama instrumen (satuan) / nama paket (paket)
+  barcodeValue: string // kode unit (satuan) / nama paket (paket)
+  unitCode: string | null // untuk satuan
+  instruments: { name: string; qty: number }[] // isi paket
+  unitCodes: string[] // kode unit di dalam paket
+}
+
+// Kelompokkan item label: instrumen paket digabung jadi satu label per paket
+// (berdasar package_name); instrumen satuan tetap satu label per unit.
+function groupLabelEntries(items: ProdSterilLabelItem[]): LabelEntry[] {
+  const entries: LabelEntry[] = []
+  const paketMap = new Map<string, LabelEntry>()
+  for (const it of items) {
+    if (it.source === "paket" && it.package_name) {
+      let e = paketMap.get(it.package_name)
+      if (!e) {
+        e = { kind: "paket", title: it.package_name, barcodeValue: it.package_name, unitCode: null, instruments: [], unitCodes: [] }
+        paketMap.set(it.package_name, e)
+        entries.push(e)
+      }
+      const found = e.instruments.find((x) => x.name === it.instrument_name)
+      if (found) found.qty += 1
+      else e.instruments.push({ name: it.instrument_name, qty: 1 })
+      if (it.unit_code) e.unitCodes.push(it.unit_code)
+    } else {
+      entries.push({
+        kind: "satuan",
+        title: it.instrument_name,
+        barcodeValue: it.unit_code ?? "-",
+        unitCode: it.unit_code ?? null,
+        instruments: [],
+        unitCodes: it.unit_code ? [it.unit_code] : [],
+      })
+    }
+  }
+  return entries
+}
 
 function formatDateTime(value: string | null) {
   if (!value) return "—"
@@ -99,6 +142,10 @@ export function ProductionPackagingTab({
   const [zoom, setZoom] = useState<{ url: string; name: string } | null>(null)
   // Paket yang isinya sedang ditampilkan di kartu (key `${batch.id}::${namaPaket}`).
   const [openPaket, setOpenPaket] = useState<string | null>(null)
+  // Batch yang labelnya sedang diambil ulang (untuk state loading tombol "Lihat Label").
+  const [labelLoadingId, setLabelLoadingId] = useState<number | null>(null)
+  // Pesan error saat mengambil ulang label (di luar modal inspeksi).
+  const [listError, setListError] = useState<string | null>(null)
 
   const groups = useMemo(() => groupUnits(active?.units ?? []), [active])
   const total = active?.units.length ?? 0
@@ -198,34 +245,49 @@ export function ProductionPackagingTab({
     onChanged()
   }
 
-  // Cetak Label Barcode Sterilisasi — satu label per unit alat.
+  // Ambil ulang label sterilisasi batch yang sudah dikemas → buka modal label yang
+  // sama. Data label tetap tersimpan di server, jadi bisa dilihat/dicetak kapan saja
+  // meski modal sebelumnya sudah ditutup.
+  async function viewLabel(batch: ProdPackagingBatch) {
+    setListError(null)
+    setLabelLoadingId(batch.id)
+    try {
+      const res = await api.get(`/master/packaging/${batch.id}/label`)
+      setLabel(res.data?.data?.label as ProdSterilLabel)
+    } catch (e) {
+      setListError(errMsg(e))
+    } finally {
+      setLabelLoadingId(null)
+    }
+  }
+
+  // Cetak Label Barcode Sterilisasi — SATU label per paket / per unit satuan.
   function printLabel() {
-    if (!label || label.items.length === 0) return
+    if (!label) return
+    const entries = groupLabelEntries(label.items)
+    if (entries.length === 0) return
     const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
     const sterilDate = formatDate(label.packaged_at)
     const expiry = formatDate(label.expiry_date)
 
-    const labels = label.items
-      .map((it, i) => {
+    const labels = entries
+      .map((e, i) => {
         const svg = document.getElementById(`prod-steril-label-${i}`)
         const barcodeSvg = svg ? new XMLSerializer().serializeToString(svg) : ""
-        const unit = it.unit_code ?? "—"
-        const pkg = it.source === "paket" && it.package_name ? ` · ${esc(it.package_name)}` : ""
+        const batchLine = e.kind === "paket" ? `${e.unitCodes.length} unit dalam paket` : (e.unitCode ?? "—")
+        // Nama Set: paket → nama set produksi; satuan → nama instrumen itu sendiri.
+        const namaSet = e.kind === "paket" ? label.set_name : e.title
         return `
           <div class="label">
             <div class="head">LABEL STERILISASI CSSD</div>
-            <div class="set">${esc(it.instrument_name)}</div>
-            <div class="sub">${it.source === "paket" ? "Paket" : "Satuan"}${pkg}</div>
             <div class="bc">${barcodeSvg}</div>
-            <div class="batch">${esc(unit)}</div>
+            <div class="batch">${esc(batchLine)}</div>
             <table>
-              <tr><td class="k">Kode Alat</td><td class="v">${esc(unit)}</td></tr>
-              <tr><td class="k">Nama Set</td><td class="v">${esc(label.set_name)}</td></tr>
-              <tr><td class="k">No. Batch</td><td class="v">${esc(label.batch)}</td></tr>
+              <tr><td class="k">Nama Set</td><td class="v">${esc(namaSet)}</td></tr>
+              <tr><td class="k">Petugas Pengemasan</td><td class="v">${esc(label.packer ?? "—")}</td></tr>
+              <tr><td class="k">Tanggal Sterilisasi</td><td class="v">${esc(sterilDate)}</td></tr>
               <tr><td class="k">Indikator Kimia</td><td class="v">${esc(label.chemical_indicator ?? "—")}</td></tr>
-              <tr><td class="k">ID Petugas Pengemas</td><td class="v">${esc(label.packer ?? "—")}</td></tr>
-              <tr><td class="k">Tgl Sterilisasi</td><td class="v">${esc(sterilDate)}</td></tr>
-              <tr><td class="k">Tgl Kedaluwarsa</td><td class="v">${esc(expiry)}</td></tr>
+              <tr><td class="k">Tanggal Kadaluwarsa</td><td class="v">${esc(expiry)}</td></tr>
             </table>
           </div>`
       })
@@ -260,13 +322,21 @@ export function ProductionPackagingTab({
     w.print()
   }
 
+  // Label yang ditampilkan: satu per paket / satu per unit satuan.
+  const labelEntries = label ? groupLabelEntries(label.items) : []
+
   return (
     <>
+      {listError && (
+        <div className="mb-2 rounded-md bg-red-50 px-3 py-2 text-sm text-red-600">{listError}</div>
+      )}
       <div className="space-y-2">
-        {items.map((batch) => (
+        {items.map((batch) => {
+          const done = batch.stage_status === "selesai"
+          return (
           <div
             key={batch.id}
-            className="rounded-lg border border-gray-200 border-l-4 border-l-[#075489]"
+            className="rounded-lg border border-gray-200"
           >
             <div className="flex items-start justify-between gap-2 px-3 py-2.5">
               <div className="flex min-w-0 items-start gap-2">
@@ -275,7 +345,11 @@ export function ProductionPackagingTab({
                     <span className="font-mono text-xs font-semibold text-[#075489] bg-[#075489]/8 px-2 py-0.5 rounded">
                       {batch.code_transaction ?? batch.code}
                     </span>
-                    <Badge variant="warning">Perlu Inspeksi</Badge>
+                    {done ? (
+                      <Badge variant="success">Sudah Dikemas</Badge>
+                    ) : (
+                      <Badge variant="warning">Perlu Inspeksi</Badge>
+                    )}
                   </div>
                   {batch.items?.length ? (
                     <div className="mt-1.5 flex flex-wrap items-center gap-1">
@@ -339,21 +413,38 @@ export function ProductionPackagingTab({
                     </div>
                   )}
                   <div className="mt-1 flex flex-wrap gap-x-4 gap-y-0.5 text-xs text-gray-500">
-                    <span>Selesai cleaning: {formatDateTime(batch.processed_at)}</span>
+                    {done ? (
+                      <span>Dikemas: {formatDateTime(batch.packaged_at)}</span>
+                    ) : (
+                      <span>Selesai cleaning: {formatDateTime(batch.processed_at)}</span>
+                    )}
                     <span>{batch.units_count} unit</span>
                   </div>
                 </div>
               </div>
-              <button
-                type="button"
-                onClick={() => open(batch)}
-                className="shrink-0 self-center rounded-md border border-[#075489] bg-[#075489] px-3 py-1.5 text-xs font-medium text-white hover:bg-[#075489]/90"
-              >
-                Inspeksi &amp; Kemas
-              </button>
+              {done ? (
+                <button
+                  type="button"
+                  onClick={() => viewLabel(batch)}
+                  disabled={labelLoadingId === batch.id}
+                  className="shrink-0 self-center inline-flex items-center gap-1.5 rounded-md border border-[#075489] px-3 py-1.5 text-xs font-medium text-[#075489] hover:bg-[#075489]/8 disabled:opacity-60"
+                >
+                  <Printer className="h-3.5 w-3.5" />
+                  {labelLoadingId === batch.id ? "Memuat..." : "Lihat Label"}
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => open(batch)}
+                  className="shrink-0 self-center rounded-md border border-[#075489] bg-[#075489] px-3 py-1.5 text-xs font-medium text-white hover:bg-[#075489]/90"
+                >
+                  Inspeksi &amp; Kemas
+                </button>
+              )}
             </div>
           </div>
-        ))}
+          )
+        })}
       </div>
 
       {/* Modal checklist inspeksi & packaging */}
@@ -538,26 +629,51 @@ export function ProductionPackagingTab({
             </div>
 
             <div className="grid grid-cols-2 gap-x-4 gap-y-2 rounded-lg border border-gray-200 bg-gray-50 px-4 py-3 text-sm sm:grid-cols-3">
+              <Info label="Nomor Produksi" value={label.batch} />
               <Info label="Nama Set" value={label.set_name} />
-              <Info label="No. Batch" value={label.batch} />
+              <Info label="Petugas Pengemasan" value={label.packer} />
+              <Info label="Tanggal Sterilisasi" value={formatDate(label.packaged_at)} />
               <Info label="Indikator Kimia" value={label.chemical_indicator} />
-              <Info label="Petugas Pengemas" value={label.packer} />
-              <Info label="Tgl Sterilisasi" value={formatDate(label.packaged_at)} />
-              <Info label="Tgl Kedaluwarsa" value={formatDate(label.expiry_date)} />
+              <Info label="Tanggal Kadaluwarsa" value={formatDate(label.expiry_date)} />
             </div>
 
             <div>
               <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-400">
-                {label.items.length} label (satu per unit)
+                Cetak Label
               </p>
               <div className="flex flex-wrap gap-3">
-                {label.items.map((it, i) => (
-                  <div key={i} className="rounded-lg border border-gray-200 p-2 text-center">
-                    <Barcode id={`prod-steril-label-${i}`} value={it.unit_code ?? "-"} height={44} moduleWidth={1.6} />
-                    <div className="mt-1 font-mono text-[11px] font-semibold text-gray-700">
-                      {it.unit_code ?? "—"}
+                {labelEntries.map((e, i) => (
+                  <div key={i} className="w-[220px] rounded-lg border border-gray-200 p-3">
+                    <div className="my-2 flex justify-center">
+                      <Barcode id={`prod-steril-label-${i}`} value={e.barcodeValue} height={44} moduleWidth={1.6} />
                     </div>
-                    <div className="max-w-[140px] truncate text-[11px] text-gray-500">{it.instrument_name}</div>
+                    <div className="text-center font-mono text-[11px] font-semibold text-gray-700">
+                      {e.kind === "paket" ? `${e.unitCodes.length} unit` : (e.unitCode ?? "—")}
+                    </div>
+                    <table className="mt-2 w-full text-left text-[10px]">
+                      <tbody>
+                        <tr>
+                          <td className="py-0.5 pr-2 text-gray-500">Nama Set</td>
+                          <td className="py-0.5 font-medium text-gray-800">{e.kind === "paket" ? label.set_name : e.title}</td>
+                        </tr>
+                        <tr>
+                          <td className="py-0.5 pr-2 text-gray-500">Petugas Pengemasan</td>
+                          <td className="py-0.5 font-medium text-gray-800">{label.packer ?? "—"}</td>
+                        </tr>
+                        <tr>
+                          <td className="py-0.5 pr-2 text-gray-500">Tanggal Sterilisasi</td>
+                          <td className="py-0.5 font-medium text-gray-800">{formatDate(label.packaged_at)}</td>
+                        </tr>
+                        <tr>
+                          <td className="py-0.5 pr-2 text-gray-500">Indikator Kimia</td>
+                          <td className="py-0.5 font-medium text-gray-800">{label.chemical_indicator ?? "—"}</td>
+                        </tr>
+                        <tr>
+                          <td className="py-0.5 pr-2 text-gray-500">Tanggal Kadaluwarsa</td>
+                          <td className="py-0.5 font-medium text-gray-800">{formatDate(label.expiry_date)}</td>
+                        </tr>
+                      </tbody>
+                    </table>
                   </div>
                 ))}
               </div>

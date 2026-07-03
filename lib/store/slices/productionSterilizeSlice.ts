@@ -4,6 +4,7 @@ import api from "@/lib/axios"
 // Unit fisik yang akan / sedang disterilkan.
 export type ProdSterilizeUnit = {
   id: number
+  instrument_stock_id: number | null // dipakai untuk validasi hasil per-unit
   code: string | null
   instrument: string | null
   image_url?: string | null
@@ -32,9 +33,12 @@ export type ProdSterilizeBatch = {
 // - "sterilisasi" = batch dibuat, menunggu validasi (Steril / Gagal)
 export type ProdSterilizeOrder = {
   // ready → id PKG (untuk dipilih ke batch); batch → id STR (untuk validasi).
+  // Untuk entri re-proses (unit lepas gagal steril): id sintetis, pakai stock_id.
   id: number
-  // "ready" = PKG siap-steril; "batch" = batch STR menunggu validasi.
+  // "ready" = PKG siap-steril / unit re-proses; "batch" = batch STR menunggu validasi.
   kind: "ready" | "batch"
+  reprocess?: boolean // true = unit lepas hasil gagal steril yang antre re-proses
+  stock_id?: number | null // instrument_stock_id (hanya untuk entri reprocess)
   code: string // PKG-NNN (ready) / STR-NNN (batch)
   code_transaction: string | null // PRD-NNN (bisa gabungan)
   status: "selesai" | "sterilisasi"

@@ -1,7 +1,7 @@
 "use client"
 
 import { useMemo, useState } from "react"
-import { FlaskConical, CheckCircle2, AlertTriangle, Layers, X, ChevronDown } from "lucide-react"
+import { FlaskConical, CheckCircle2, Layers, X, ChevronDown, Check } from "lucide-react"
 import { Button } from "@/components/atoms/Button"
 import { Badge } from "@/components/atoms/Badge"
 import { Input } from "@/components/atoms/Input"
@@ -25,14 +25,6 @@ function nowLocalInput(): string {
   return d.toISOString().slice(0, 16)
 }
 
-const STERILE_SHELF_LIFE_DAYS = 7
-function defaultExpiry(sterilizedAt: string | null | undefined): string {
-  const base = sterilizedAt ? new Date(sterilizedAt) : new Date()
-  if (Number.isNaN(base.getTime())) return ""
-  base.setDate(base.getDate() + STERILE_SHELF_LIFE_DAYS)
-  base.setMinutes(base.getMinutes() - base.getTimezoneOffset())
-  return base.toISOString().slice(0, 10)
-}
 
 function errMsg(e: unknown): string {
   const x = e as { response?: { data?: { message?: string } } }
@@ -71,7 +63,7 @@ const METHOD_DEFAULTS: Record<string, { temperature: string; duration_minutes: s
   plasma: { temperature: "50", duration_minutes: "47" },
   panas_kering: { temperature: "170", duration_minutes: "60" },
 }
-const emptyForm = { machine: "", method: "uap", cycle_number: "", temperature: "", duration_minutes: "", sterilized_at: "", expiry_date: "", note: "" }
+const emptyForm = { machine: "", method: "uap", cycle_number: "", temperature: "", duration_minutes: "", sterilized_at: "", note: "" }
 
 /**
  * Tab Sterilisasi pipeline PRODUKSI. Beberapa item "Siap Disterilkan" (satuan/paket)
@@ -97,9 +89,11 @@ export function ProductionSterilizationTab({
 
   // Validasi hasil batch.
   const [validating, setValidating] = useState<ProdSterilizeOrder | null>(null)
-  const [vForm, setVForm] = useState({ chemical_indicator: "", biological_indicator: "", expiry_date: "", note: "" })
-  const [vSaving, setVSaving] = useState<"selesai" | "gagal" | null>(null)
+  const [vForm, setVForm] = useState({ chemical_indicator: "", biological_indicator: "", note: "" })
+  const [vSaving, setVSaving] = useState(false)
   const [vError, setVError] = useState<string | null>(null)
+  // instrument_stock_id unit yang dicentang BERHASIL steril (sisanya = gagal → re-proses).
+  const [passed, setPassed] = useState<Set<number>>(new Set())
 
   const [zoom, setZoom] = useState<{ url: string; name: string } | null>(null)
   // Kartu yang daftar unitnya sedang ditampilkan.
@@ -148,14 +142,15 @@ export function ProductionSterilizationTab({
     try {
       const num = (v: string) => (v.trim() === "" ? null : Number(v))
       const res = await api.post("/master/sterilization-pipeline/batch", {
-        packaging_ids: selectedReady.map((o) => o.id),
+        // Tray PKG vs unit re-proses lepas dipisah ke dua field.
+        packaging_ids: selectedReady.filter((o) => !o.reprocess).map((o) => o.id),
+        reproc_stock_ids: selectedReady.filter((o) => o.reprocess).map((o) => o.stock_id),
         machine: form.machine.trim(),
         method: form.method,
         cycle_number: form.cycle_number.trim() || null,
         temperature: num(form.temperature),
         duration_minutes: num(form.duration_minutes),
         sterilized_at: new Date(form.sterilized_at).toISOString(),
-        expiry_date: form.expiry_date || null,
         note: form.note.trim() || null,
       })
       setDone({ batch: res.data?.data?.code ?? "—", count: selectedReady.length })
@@ -169,6 +164,11 @@ export function ProductionSterilizationTab({
     }
   }
 
+  // stock id valid (non-null) dari unit sebuah batch.
+  function unitStockIds(order: ProdSterilizeOrder): number[] {
+    return order.units.map((u) => u.instrument_stock_id).filter((x): x is number => x != null)
+  }
+
   function openValidate(order: ProdSterilizeOrder) {
     setValidating(order)
     setVError(null)
@@ -176,21 +176,31 @@ export function ProductionSterilizationTab({
     setVForm({
       chemical_indicator: b?.chemical_indicator ?? "",
       biological_indicator: b?.biological_indicator ?? "",
-      expiry_date: b?.expiry_date ?? defaultExpiry(b?.sterilized_at),
       note: "",
+    })
+    // Default: tidak ada yang tercentang; operator mencentang unit yang berhasil steril.
+    setPassed(new Set())
+  }
+
+  function togglePassed(stockId: number) {
+    setPassed((prev) => {
+      const next = new Set(prev)
+      if (next.has(stockId)) next.delete(stockId)
+      else next.add(stockId)
+      return next
     })
   }
 
-  async function submitValidate(result: "selesai" | "gagal") {
+  async function submitValidate() {
     if (!validating || vSaving) return
-    setVSaving(result)
+    setVSaving(true)
     setVError(null)
     try {
+      const failed_stock_ids = unitStockIds(validating).filter((id) => !passed.has(id))
       await api.post(`/master/sterilization-pipeline/${validating.id}/validate`, {
-        result,
+        failed_stock_ids,
         chemical_indicator: vForm.chemical_indicator.trim() || null,
         biological_indicator: vForm.biological_indicator.trim() || null,
-        expiry_date: vForm.expiry_date || null,
         note: vForm.note.trim() || null,
       })
       setValidating(null)
@@ -198,19 +208,22 @@ export function ProductionSterilizationTab({
     } catch (e) {
       setVError(errMsg(e))
     } finally {
-      setVSaving(null)
+      setVSaving(false)
     }
   }
+
+  // Ringkasan centang validasi (berhasil vs gagal) untuk modal validasi.
+  const vUnitIds = validating ? unitStockIds(validating) : []
+  const vPassedCount = vUnitIds.filter((id) => passed.has(id)).length
+  const vFailedCount = vUnitIds.length - vPassedCount
 
   return (
     <>
       {/* Toolbar aksi gabung batch */}
       {ready.length > 0 && (
-        <div className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-[#075489]/20 bg-[#075489]/5 px-3 py-2">
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
           <span className="text-xs text-gray-600">
-            {selected.size > 0
-              ? `${selected.size} item dipilih · ${selectedUnitCount} unit`
-              : "Centang beberapa item untuk digabung ke satu batch sterilisasi."}
+            {selected.size > 0 ? `${selected.size} item dipilih · ${selectedUnitCount} unit` : ""}
           </span>
           <Button
             type="button"
@@ -228,12 +241,11 @@ export function ProductionSterilizationTab({
           const inBatch = order.kind === "batch"
           const key = `${order.kind}-${order.id}`
           const checked = selected.has(order.id)
-          // Batch: default terbuka (detail instrumen langsung tampil), toggle utk menutup.
-          // Ready: default tertutup.
-          const unitsOpen = inBatch ? !openUnits.has(key) : openUnits.has(key)
+          // Daftar unit default tertutup (baik batch maupun ready); klik untuk membuka.
+          const unitsOpen = openUnits.has(key)
           const groups = groupUnits(order.units)
           return (
-            <div key={key} className="rounded-lg border border-gray-200 border-l-4 border-l-[#075489]">
+            <div key={key} className="rounded-lg border border-gray-200">
               <div className="flex items-start justify-between gap-2 px-3 py-2.5">
                 <div className="flex min-w-0 items-start gap-2">
                   {!inBatch && (
@@ -255,7 +267,7 @@ export function ProductionSterilizationTab({
                           {order.code}
                         </span>
                       )}
-                      {inBatch ? <Badge variant="warning">Menunggu Validasi</Badge> : <Badge variant="info">Siap Disterilkan</Badge>}
+                      {inBatch ? <Badge variant="warning">Menunggu Validasi</Badge> : null}
                     </div>
                     <div className="mt-1 flex flex-wrap gap-x-4 gap-y-0.5 text-xs text-gray-500">
                       <span>{order.unit_count} unit</span>
@@ -267,7 +279,6 @@ export function ProductionSterilizationTab({
                       onClick={() => toggleUnits(key)}
                       className="mt-1.5 flex items-center gap-1 text-xs font-medium text-gray-400 hover:text-gray-600"
                     >
-                      <Layers className="h-3.5 w-3.5" />
                       Unit Disterilkan ({order.unit_count})
                       <ChevronDown className={"h-3.5 w-3.5 transition-transform " + (unitsOpen ? "rotate-180" : "")} />
                     </button>
@@ -325,7 +336,7 @@ export function ProductionSterilizationTab({
       <Modal
         open={batchOpen}
         onClose={saving ? () => {} : () => setBatchOpen(false)}
-        title={`Buat Batch Sterilisasi — ${selectedReady.length} item`}
+        title="Buat Batch Sterilisasi"
         size="lg"
         footer={
           <div className="flex w-full items-center justify-between gap-3">
@@ -349,10 +360,20 @@ export function ProductionSterilizationTab({
       >
         <div className="space-y-5">
           <div className="rounded-lg border border-gray-200 bg-gray-50 px-4 py-3">
-            <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-gray-400">Item dalam batch</p>
+            <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-gray-400">
+              Item dalam batch ({selectedReady.length} item · {selectedUnitCount} unit)
+            </p>
             <div className="flex flex-wrap gap-1.5">
               {selectedReady.map((o) => (
-                <span key={o.id} className="inline-flex items-center gap-1 rounded-md bg-white px-1.5 py-0.5 text-xs text-gray-700 ring-1 ring-gray-200">
+                <span key={o.id} className="inline-flex items-center gap-1.5 rounded-md bg-white py-0.5 pl-0.5 pr-1.5 text-xs text-gray-700 ring-1 ring-gray-200">
+                  {o.image_url ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={o.image_url} alt={o.borrowed_by ?? o.code} className="h-6 w-6 shrink-0 rounded object-cover" />
+                  ) : (
+                    <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded bg-gray-100 text-gray-400">
+                      <FlaskConical className="h-3.5 w-3.5" />
+                    </span>
+                  )}
                   <span className="font-medium">{o.borrowed_by ?? o.code}</span>
                   <span className="text-gray-400">· {o.unit_count} unit</span>
                 </span>
@@ -393,10 +414,6 @@ export function ProductionSterilizationTab({
               <Label htmlFor="pstr-at">Waktu Sterilisasi *</Label>
               <Input id="pstr-at" type="datetime-local" value={form.sterilized_at} onChange={(e) => setForm((f) => ({ ...f, sterilized_at: e.target.value }))} />
             </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="pstr-exp">Tanggal Kedaluwarsa Steril</Label>
-              <Input id="pstr-exp" type="date" value={form.expiry_date} onChange={(e) => setForm((f) => ({ ...f, expiry_date: e.target.value }))} />
-            </div>
           </div>
 
           <div className="space-y-1.5">
@@ -417,17 +434,17 @@ export function ProductionSterilizationTab({
             {vError ? (
               <p className="text-sm text-red-600">{vError}</p>
             ) : (
-              <span className="text-xs text-gray-400">Steril → alat siap rilis. Gagal → batch kembali ke antrean siap-steril.</span>
+              <span className="text-xs text-gray-400">
+                {vPassedCount} berhasil · {vFailedCount} gagal
+                {vFailedCount > 0 ? " → antre re-proses" : ""}
+              </span>
             )}
             <div className="flex shrink-0 gap-2">
-              <Button variant="outline" onClick={() => setValidating(null)} disabled={vSaving !== null}>
+              <Button variant="outline" onClick={() => setValidating(null)} disabled={vSaving}>
                 Batal
               </Button>
-              <Button onClick={() => submitValidate("gagal")} disabled={vSaving !== null} className="bg-red-600 hover:bg-red-700 text-white">
-                {vSaving === "gagal" ? "Memproses..." : "Tandai Gagal"}
-              </Button>
-              <Button onClick={() => submitValidate("selesai")} disabled={vSaving !== null} className="bg-green-600 hover:bg-green-700 text-white">
-                {vSaving === "selesai" ? "Memproses..." : "Tandai Steril"}
+              <Button onClick={() => submitValidate()} disabled={vSaving} className="bg-[#075489] hover:bg-[#075489]/90 text-white">
+                {vSaving ? "Memproses..." : "Simpan"}
               </Button>
             </div>
           </div>
@@ -444,9 +461,60 @@ export function ProductionSterilizationTab({
               <Info label="Waktu" value={formatDateTime(validating.sterilization?.sterilized_at ?? null)} />
             </div>
 
-            <div className="flex items-start gap-2 rounded-lg border border-[#075489]/20 bg-[#075489]/5 px-4 py-2.5">
-              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-[#075489]" />
-              <p className="text-xs text-[#075489]">Kontrol kualitas (karantina): isi hasil indikator sebelum memvalidasi.</p>
+
+            {/* Checklist hasil per unit */}
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between">
+                <Label>Hasil per Unit ({vUnitIds.length})</Label>
+                <div className="flex gap-2 text-xs">
+                  <button
+                    type="button"
+                    onClick={() => setPassed(new Set(unitStockIds(validating)))}
+                    className="font-medium text-green-600 hover:underline"
+                  >
+                    Semua berhasil
+                  </button>
+                  <span className="text-gray-300">|</span>
+                  <button
+                    type="button"
+                    onClick={() => setPassed(new Set())}
+                    className="font-medium text-red-600 hover:underline"
+                  >
+                    Semua gagal
+                  </button>
+                </div>
+              </div>
+              <div className="max-h-64 divide-y divide-gray-100 overflow-y-auto rounded-lg border border-gray-200">
+                {validating.units.map((u) => {
+                  const sid = u.instrument_stock_id
+                  const ok = sid != null && passed.has(sid)
+                  return (
+                    <button
+                      key={u.id}
+                      type="button"
+                      disabled={sid == null}
+                      onClick={() => sid != null && togglePassed(sid)}
+                      className="flex w-full items-center gap-3 px-3 py-2 text-left hover:bg-gray-50 disabled:opacity-50"
+                    >
+                      <span
+                        className={
+                          "flex h-5 w-5 shrink-0 items-center justify-center rounded border " +
+                          (ok ? "border-green-600 bg-green-600 text-white" : "border-gray-300 bg-white")
+                        }
+                      >
+                        {ok && <Check className="h-3.5 w-3.5" />}
+                      </span>
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-sm font-medium text-gray-800">{u.instrument ?? "Instrumen"}</span>
+                        <span className="block font-mono text-[11px] text-gray-500">{u.code ?? `#${u.id}`}</span>
+                      </span>
+                      {ok && (
+                        <span className="shrink-0 text-xs font-semibold text-green-600">Berhasil</span>
+                      )}
+                    </button>
+                  )
+                })}
+              </div>
             </div>
 
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
@@ -465,10 +533,6 @@ export function ProductionSterilizationTab({
                   <option value="Negatif">Negatif</option>
                   <option value="Positif">Positif</option>
                 </Select>
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="pv-exp">Tanggal Kedaluwarsa Steril</Label>
-                <Input id="pv-exp" type="date" value={vForm.expiry_date} onChange={(e) => setVForm((f) => ({ ...f, expiry_date: e.target.value }))} />
               </div>
               <div className="space-y-1.5">
                 <Label htmlFor="pv-note">Catatan</Label>

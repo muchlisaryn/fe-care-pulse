@@ -613,16 +613,6 @@ export function CleaningTab({
   )
 }
 
-// Warna garis kiri kartu per tahap (konsisten dengan tracking status order):
-// - Cleaning  = kuning; muda saat belum terproses, tua saat sudah terproses.
-// - Packaging = ungu.
-function stageBorder(stage: "cleaning" | "packaging", processed: boolean): string {
-  if (stage === "packaging") {
-    return processed ? "border-l-[#075489]" : "border-l-[#075489]/40"
-  }
-  return processed ? "border-l-[#075489]" : "border-l-[#075489]/40"
-}
-
 // Rincian isi sebuah paket dalam order: instrumen penyusun + jumlah unitnya.
 function paketBreakdown(order: CleaningOrder, packageName: string) {
   const map = new Map<string, { name: string; qty: number }>()
@@ -653,16 +643,18 @@ function CleaningOrderCard({
   const washed = isWashed(order)
   // Sudah diproses = parameter pencucian sudah diisi tapi belum ditandai selesai.
   const inProcess = !washed && isWashingFilled(order)
-  // "Terproses" untuk warna garis: cleaning → catatan terisi; packaging → sudah selesai cuci.
-  const processed = stage === "packaging" ? washed : inProcess
   // Paket yang isinya sedang ditampilkan (klik chip paket).
   const [openPaket, setOpenPaket] = useState<string | null>(null)
+  // Gambar per instrumen/paket (dari unit) untuk thumbnail di chip.
+  const imageByName: Record<string, string> = {}
+  for (const u of order.units ?? []) {
+    const img = u.instrument?.image_url
+    if (!img) continue
+    if (u.instrument?.name && !imageByName[u.instrument.name]) imageByName[u.instrument.name] = img
+    if (u.package_name && !imageByName[u.package_name]) imageByName[u.package_name] = img
+  }
   return (
-    <div
-      className={
-        "rounded-lg border border-gray-200 border-l-4 " + stageBorder(stage, processed)
-      }
-    >
+    <div className="rounded-lg border border-gray-200">
       <div className="flex items-start gap-1 px-1">
         <button
           type="button"
@@ -713,6 +705,10 @@ function CleaningOrderCard({
                             : "bg-gray-50 text-gray-700 ring-gray-200")
                         }
                       >
+                        {imageByName[it.name] && (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img src={imageByName[it.name]} alt={it.name} className="h-5 w-5 shrink-0 rounded object-cover" />
+                        )}
                         <span className="truncate font-medium">{it.name}</span>
                         {isPaket ? (
                           <ChevronDown className={"h-3 w-3 shrink-0 transition-transform " + (open ? "rotate-180" : "")} />
@@ -745,8 +741,12 @@ function CleaningOrderCard({
                     {paketBreakdown(order, openPaket).map((p) => (
                       <span
                         key={p.name}
-                        className="rounded bg-white px-1.5 py-0.5 text-[11px] text-gray-600 ring-1 ring-gray-200"
+                        className="inline-flex items-center gap-1 rounded bg-white py-0.5 pl-0.5 pr-1.5 text-[11px] text-gray-600 ring-1 ring-gray-200"
                       >
+                        {imageByName[p.name] ? (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img src={imageByName[p.name]} alt={p.name} className="h-4 w-4 shrink-0 rounded object-cover" />
+                        ) : null}
                         {p.name} ×{p.qty}
                       </span>
                     ))}
