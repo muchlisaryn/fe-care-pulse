@@ -48,6 +48,19 @@ export default function MasterWasherMachinePage() {
   const [deleteTarget, setDeleteTarget] = useState<WasherMachine | null>(null)
   const [deletingId, setDeletingId] = useState<number | null>(null)
 
+  // Validasi ambang: min tidak boleh lebih besar dari max (suhu & durasi).
+  const parseNum = (v: string) => (v.trim() === "" ? null : Number(v))
+  const minT = parseNum(form.min_temperature)
+  const maxT = parseNum(form.max_temperature)
+  const minD = parseNum(form.min_duration_minutes)
+  const maxD = parseNum(form.max_duration_minutes)
+  const rangeError =
+    minT !== null && maxT !== null && minT > maxT
+      ? "Suhu minimum tidak boleh lebih besar dari suhu maksimum."
+      : minD !== null && maxD !== null && minD > maxD
+        ? "Durasi minimum tidak boleh lebih besar dari durasi maksimum."
+        : null
+
   useEffect(() => {
     if (loaded && !dirty) return
     dispatch(fetchWasherMachines())
@@ -80,7 +93,7 @@ export default function MasterWasherMachinePage() {
   }
 
   async function handleSave() {
-    if (!form.name.trim()) return
+    if (!form.name.trim() || rangeError) return
     setSaving(true)
     try {
       const num = (v: string) => (v.trim() === "" ? null : Number(v))
@@ -250,7 +263,7 @@ export default function MasterWasherMachinePage() {
             </Button>
             <Button
               onClick={handleSave}
-              disabled={saving || !form.name.trim()}
+              disabled={saving || !form.name.trim() || rangeError !== null}
               className="bg-[#075489] hover:bg-[#075489]/90 text-white"
             >
               {saving ? "Menyimpan..." : "Simpan"}
@@ -325,6 +338,11 @@ export default function MasterWasherMachinePage() {
               />
             </div>
           </div>
+          {rangeError && (
+            <p className="rounded-lg bg-red-50 px-3 py-2 text-sm font-medium text-red-600">
+              {rangeError}
+            </p>
+          )}
           <div className="space-y-1.5">
             <Label htmlFor="wm-status">Status</Label>
             <Select

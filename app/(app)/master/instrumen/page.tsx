@@ -1,8 +1,7 @@
 "use client"
 
 import { useEffect, useMemo, useRef, useState } from "react"
-import { Search, QrCode, Download, Printer, Box, Layers, PackageCheck, Stethoscope, Image as ImageIcon, Upload, X, ZoomIn } from "lucide-react"
-import { QRCodeSVG } from "qrcode.react"
+import { Search, Box, Layers, PackageCheck, Stethoscope, Image as ImageIcon, Upload, X, ZoomIn, Waypoints, CheckCircle2, Clock } from "lucide-react"
 import { Button } from "@/components/atoms/Button"
 import { Badge } from "@/components/atoms/Badge"
 import { Input } from "@/components/atoms/Input"
@@ -27,8 +26,8 @@ import {
 
 const sortOptions = [
   { value: "", label: "Urutkan" },
-  { value: "stock_asc", label: "Stok Terkecil" },
-  { value: "stock_desc", label: "Stok Terbanyak" },
+  { value: "stock_asc", label: "Sisa Stok Tersedikit" },
+  { value: "stock_desc", label: "Sisa Stok Terbanyak" },
 ]
 import { fetchConditions } from "@/lib/store/slices/conditionSlice"
 import api from "@/lib/axios"
@@ -39,6 +38,10 @@ type Stock = {
   code: string
   condition_id: number | null
   status: string
+  // Tahap pipeline aktual (pencucian/pengemasan/sterilisasi/disimpan/dipinjam) —
+  // lebih rinci dari `status` yang hanya enum kasar.
+  stage?: string | null
+  stage_label?: string | null
   condition: { id: number; name: string } | null
 }
 
@@ -56,12 +59,81 @@ const statusVariant: Record<string, "success" | "info" | "warning" | "danger" | 
   dikembalikan: "default",
 }
 
+// Warna badge per tahap pipeline aktual pada daftar stok.
+const stageVariant: Record<string, "success" | "info" | "warning" | "danger" | "default"> = {
+  pencucian: "info",
+  pengemasan: "info",
+  sterilisasi: "info",
+  disimpan: "success",
+  dipinjam: "warning",
+  dikembalikan: "default",
+  proses: "info",
+}
+
 const kondisiBadgeVariant: Record<string, "success" | "info" | "warning" | "danger" | "default"> = {
   "Baik": "success",
   "Cukup Baik": "info",
   "Rusak Ringan": "warning",
   "Rusak Berat": "danger",
   "Dalam Perbaikan": "default",
+}
+
+// Tracking pipeline CSSD (posisi unit saat status ≠ tersedia).
+type TrackStage = { key: string; label: string; code: string | null; status: string | null; at: string | null }
+type TrackHistory = {
+  from_status: string | null
+  to_status: string
+  context: string | null
+  reference_code: string | null
+  note: string | null
+  by: string | null
+  at: string | null
+}
+type TrackingData = {
+  unit: {
+    id: number
+    code: string
+    status: string
+    status_label: string
+    instrument: { code: string; name: string } | null
+    condition: string | null
+  }
+  production_code: string | null
+  current_stage: TrackStage | null
+  stages: TrackStage[]
+  order: { code: string; code_transaction: string | null; status: string; borrowed_by: string | null; room: string | null } | null
+  history: TrackHistory[]
+}
+
+// Label status tiap tahap pipeline (mentah → terbaca), mis. "dalam_proses" → "Dalam Proses".
+function pipelineStatusLabel(s: string | null): string {
+  if (!s) return "—"
+  return s.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())
+}
+
+const pipelineStatusVariant: Record<string, "success" | "info" | "warning" | "danger" | "default"> = {
+  selesai: "success",
+  steril: "success",
+  tersimpan: "success",
+  diproses: "info",
+  dalam_proses: "info",
+  dipinjam: "warning",
+  keluar: "warning",
+  gagal: "danger",
+  batal: "default",
+}
+
+function formatDateTime(value: string | null): string {
+  if (!value) return "—"
+  const d = new Date(value)
+  if (Number.isNaN(d.getTime())) return value
+  return d.toLocaleString("id-ID", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  })
 }
 
 const emptyForm = { code: "", name: "" }
@@ -128,7 +200,10 @@ export default function MasterInstrumenPage() {
   const [editingStockId, setEditingStockId] = useState<number | null>(null)
   const [editConditionId, setEditConditionId] = useState("")
   const [deleteStockTarget, setDeleteStockTarget] = useState<Stock | null>(null)
-  const [qrTarget, setQrTarget] = useState<Stock | null>(null)
+  // Tracking pipeline: unit yang sedang dilacak + datanya.
+  const [trackTarget, setTrackTarget] = useState<Stock | null>(null)
+  const [tracking, setTracking] = useState<TrackingData | null>(null)
+  const [trackingLoading, setTrackingLoading] = useState(false)
   // Pratinjau (zoom) gambar instrumen di modal.
   const [previewImage, setPreviewImage] = useState<{ src: string; name: string } | null>(null)
 
@@ -287,38 +362,16 @@ export default function MasterInstrumenPage() {
     }
   }
 
-  function handleDownloadQr() {
-    if (!qrTarget) return
-    const svg = document.getElementById("qr-svg")
-    if (!svg) return
-    const data = new XMLSerializer().serializeToString(svg)
-    const blob = new Blob([data], { type: "image/svg+xml;charset=utf-8" })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement("a")
-    a.href = url
-    a.download = `qr-${qrTarget.code}.svg`
-    a.click()
-    URL.revokeObjectURL(url)
-  }
-
-  function handlePrintQr() {
-    if (!qrTarget) return
-    const svg = document.getElementById("qr-svg")
-    if (!svg) return
-    const data = new XMLSerializer().serializeToString(svg)
-    const w = window.open("", "_blank", "width=420,height=520")
-    if (!w) return
-    w.document.write(
-      `<html><head><title>QR ${qrTarget.code}</title></head>` +
-        `<body style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;margin:0;font-family:sans-serif">` +
-        `${data}` +
-        `<p style="font-family:monospace;font-weight:700;margin:16px 0 4px;font-size:16px">${qrTarget.code}</p>` +
-        `<p style="font-size:12px;color:#666;margin:0">${stockModal?.name ?? ""}</p>` +
-        `</body></html>`
-    )
-    w.document.close()
-    w.focus()
-    w.print()
+  async function openTracking(stock: Stock) {
+    setTrackTarget(stock)
+    setTracking(null)
+    setTrackingLoading(true)
+    try {
+      const res = await api.get(`/master/instrument-stocks/${stock.id}/tracking`)
+      setTracking(res.data.data as TrackingData)
+    } finally {
+      setTrackingLoading(false)
+    }
   }
 
   const columns: Column<Instrument>[] = [
@@ -358,13 +411,29 @@ export default function MasterInstrumenPage() {
       ),
     },
     {
-      header: "Qty",
+      header: "Total Unit",
       cell: (row) => (
-        <span className={`font-semibold ${row.stocks_count <= 5 ? "text-red-500" : "text-gray-900"}`}>
-          {row.stocks_count}
-        </span>
+        <span className="font-semibold text-gray-900">{row.stocks_count}</span>
       ),
       className: "w-24",
+    },
+    {
+      header: "Sisa Stok",
+      cell: (row) => (
+        <span
+          className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold ${
+            row.available_stocks_count <= 0
+              ? "bg-red-100 text-red-600"
+              : row.available_stocks_count <= 5
+                ? "bg-amber-100 text-amber-700"
+                : "bg-green-100 text-green-700"
+          }`}
+          title="Jumlah unit berstatus tersedia"
+        >
+          {row.available_stocks_count} tersedia
+        </span>
+      ),
+      className: "w-32",
     },
   ]
 
@@ -617,9 +686,29 @@ export default function MasterInstrumenPage() {
                             )}
                           </td>
                           <td className="py-3 px-3">
-                            <Badge variant={statusVariant[item.status] ?? "default"}>
-                              {statusLabel[item.status] ?? item.status}
-                            </Badge>
+                            {item.status === "tersedia" ? (
+                              <Badge variant={statusVariant[item.status] ?? "default"}>
+                                {statusLabel[item.status] ?? item.status}
+                              </Badge>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => openTracking(item)}
+                                title="Lihat tracking unit di pipeline CSSD"
+                                className="group inline-flex items-center gap-1.5 rounded-full transition hover:opacity-90"
+                              >
+                                <Badge
+                                  variant={
+                                    item.stage
+                                      ? stageVariant[item.stage] ?? "info"
+                                      : statusVariant[item.status] ?? "default"
+                                  }
+                                >
+                                  {item.stage_label ?? statusLabel[item.status] ?? item.status}
+                                </Badge>
+                                <Waypoints className="h-3.5 w-3.5 text-gray-400 group-hover:text-[#075489]" />
+                              </button>
+                            )}
                           </td>
                           <td className="py-3 pl-3 pr-4">
                             <div className="flex justify-end gap-2">
@@ -630,15 +719,6 @@ export default function MasterInstrumenPage() {
                                 </>
                               ) : (
                                 <>
-                                  <Button
-                                    size="xs"
-                                    variant="outline"
-                                    onClick={() => setQrTarget(item)}
-                                    className="border-[#075489] text-[#075489] hover:bg-[#075489]/10"
-                                  >
-                                    <QrCode className="h-3.5 w-3.5" />
-                                    QR
-                                  </Button>
                                   <Button size="xs" variant="outline" onClick={() => { setEditingStockId(item.id); setEditConditionId(item.condition_id ? String(item.condition_id) : "") }}>Edit</Button>
                                   <Button size="xs" variant="destructive" onClick={() => setDeleteStockTarget(item)}>Hapus</Button>
                                 </>
@@ -669,42 +749,136 @@ export default function MasterInstrumenPage() {
         </div>
       )}
 
-      {/* QR Code Modal */}
+      {/* Tracking pipeline unit — dibuka dari badge status (saat ≠ tersedia) */}
       <Modal
-        open={qrTarget !== null}
-        onClose={() => setQrTarget(null)}
-        title="QR Code Instrumen"
-        size="sm"
+        open={trackTarget !== null}
+        onClose={() => setTrackTarget(null)}
+        title="Tracking Unit Instrumen"
+        size="lg"
         footer={
-          <>
-            <Button variant="outline" onClick={() => setQrTarget(null)}>Tutup</Button>
-            <Button variant="outline" onClick={handlePrintQr} className="border-[#075489] text-[#075489] hover:bg-[#075489]/10">
-              <Printer className="h-4 w-4" />
-              Cetak
-            </Button>
-            <Button onClick={handleDownloadQr} className="bg-[#075489] hover:bg-[#075489]/90 text-white">
-              <Download className="h-4 w-4" />
-              Unduh
-            </Button>
-          </>
+          <Button variant="outline" onClick={() => setTrackTarget(null)}>
+            Tutup
+          </Button>
         }
       >
-        {qrTarget && (
-          <div className="flex flex-col items-center gap-4 py-2">
-            <div className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
-              <QRCodeSVG
-                id="qr-svg"
-                value={`${process.env.NEXT_PUBLIC_APP_URL ?? (typeof window !== "undefined" ? window.location.origin : "")}/cssd/scan?code=${encodeURIComponent(qrTarget.code)}`}
-                size={200}
-                level="M"
-                marginSize={1}
-              />
+        {trackingLoading ? (
+          <div className="py-10 text-center text-sm text-gray-400">Memuat tracking...</div>
+        ) : !tracking ? (
+          <div className="py-10 text-center text-sm text-gray-400">Data tracking tidak tersedia.</div>
+        ) : (
+          <div className="space-y-5">
+            {/* Identitas unit */}
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="font-mono text-xs font-semibold text-[#4ba69d] bg-[#4ba69d]/10 px-2 py-1 rounded">
+                {tracking.unit.code}
+              </span>
+              <span className="text-sm text-gray-700">{tracking.unit.instrument?.name ?? "—"}</span>
+              {tracking.unit.condition && <Badge variant="default">{tracking.unit.condition}</Badge>}
+              <Badge variant={statusVariant[tracking.unit.status] ?? "default"} className="ml-auto">
+                {tracking.unit.status_label}
+              </Badge>
             </div>
-            <div className="text-center">
-              <p className="font-mono text-base font-bold text-[#4ba69d]">{qrTarget.code}</p>
-              {stockModal && <p className="mt-0.5 text-sm text-gray-600">{stockModal.name}</p>}
-              <p className="mt-1.5 text-xs text-gray-400">Scan QR untuk identifikasi unit instrumen</p>
+
+            {/* Tahap saat ini + kode produksi */}
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <div className="rounded-lg border border-[#075489]/20 bg-[#075489]/5 px-4 py-3">
+                <p className="text-xs font-semibold uppercase tracking-wide text-[#075489]/70">Tahap Saat Ini</p>
+                <p className="mt-0.5 text-lg font-bold text-[#075489]">
+                  {tracking.current_stage?.label ?? "—"}
+                </p>
+                <div className="mt-1.5 flex flex-wrap items-center gap-2">
+                  {tracking.current_stage?.code && (
+                    <span className="font-mono text-xs font-semibold text-gray-700 bg-white border border-gray-200 px-2 py-0.5 rounded">
+                      {tracking.current_stage.code}
+                    </span>
+                  )}
+                  {tracking.current_stage?.status && (
+                    <Badge variant={pipelineStatusVariant[tracking.current_stage.status] ?? "info"}>
+                      {pipelineStatusLabel(tracking.current_stage.status)}
+                    </Badge>
+                  )}
+                </div>
+              </div>
+              <div className="rounded-lg border border-gray-200 bg-gray-50 px-4 py-3">
+                <p className="text-xs font-semibold uppercase tracking-wide text-gray-400">Kode Produksi</p>
+                <p className="mt-0.5 font-mono text-lg font-bold text-gray-800">
+                  {tracking.production_code ?? "—"}
+                </p>
+                {tracking.order && (
+                  <p className="mt-1 text-xs text-gray-500">
+                    Order <span className="font-semibold text-gray-700">{tracking.order.code}</span>
+                    {tracking.order.room ? ` · ${tracking.order.room}` : ""}
+                    {tracking.order.borrowed_by ? ` · ${tracking.order.borrowed_by}` : ""}
+                  </p>
+                )}
+              </div>
             </div>
+
+            {/* Perjalanan unit antar tahap */}
+            {tracking.stages.length > 0 && (
+              <div className="space-y-1.5">
+                <Label>Perjalanan Unit</Label>
+                <div className="divide-y divide-gray-100 rounded-lg border border-gray-200">
+                  {tracking.stages.map((stage) => {
+                    const isCurrent = stage.key === tracking.current_stage?.key
+                    return (
+                      <div
+                        key={stage.key}
+                        className={`flex items-center gap-3 px-3 py-2.5 ${isCurrent ? "bg-[#075489]/5" : ""}`}
+                      >
+                        {isCurrent ? (
+                          <Clock className="h-4 w-4 shrink-0 text-[#075489]" />
+                        ) : (
+                          <CheckCircle2 className="h-4 w-4 shrink-0 text-[#4ba69d]" />
+                        )}
+                        <span className={`text-sm ${isCurrent ? "font-semibold text-[#075489]" : "text-gray-700"}`}>
+                          {stage.label}
+                        </span>
+                        {stage.code && (
+                          <span className="font-mono text-[11px] font-semibold text-gray-600 bg-gray-100 px-1.5 py-0.5 rounded">
+                            {stage.code}
+                          </span>
+                        )}
+                        <div className="ml-auto flex items-center gap-2">
+                          {stage.status && (
+                            <Badge variant={pipelineStatusVariant[stage.status] ?? "default"}>
+                              {pipelineStatusLabel(stage.status)}
+                            </Badge>
+                          )}
+                          <span className="hidden text-xs text-gray-400 sm:inline">{formatDateTime(stage.at)}</span>
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+            )}
+
+            {/* Riwayat status (log) */}
+            {tracking.history.length > 0 && (
+              <details className="rounded-lg border border-gray-200">
+                <summary className="cursor-pointer px-3 py-2 text-sm font-medium text-gray-600 hover:text-gray-900">
+                  Riwayat Status ({tracking.history.length})
+                </summary>
+                <div className="divide-y divide-gray-50 border-t border-gray-100">
+                  {tracking.history.map((h, i) => (
+                    <div key={i} className="flex flex-wrap items-center gap-2 px-3 py-2 text-xs">
+                      <span className="text-gray-500">
+                        {h.from_status ? `${h.from_status} → ` : ""}
+                        <span className="font-semibold text-gray-800">{h.to_status}</span>
+                      </span>
+                      {h.reference_code && (
+                        <span className="font-mono text-[11px] font-semibold text-[#075489] bg-[#075489]/8 px-1.5 py-0.5 rounded">
+                          {h.reference_code}
+                        </span>
+                      )}
+                      {h.context && <span className="text-gray-400">({h.context})</span>}
+                      <span className="ml-auto text-gray-400">{formatDateTime(h.at)}</span>
+                    </div>
+                  ))}
+                </div>
+              </details>
+            )}
           </div>
         )}
       </Modal>

@@ -1,5 +1,6 @@
 "use client"
 
+import type { ReactNode } from "react"
 import { TriangleAlert } from "lucide-react"
 import { Button } from "@/components/atoms/Button"
 import { Modal } from "@/components/molecules/Modal"
@@ -9,8 +10,11 @@ type ConfirmDialogProps = {
   onClose: () => void
   onConfirm: () => void
   title?: string
-  description?: string
+  description?: ReactNode
   loading?: boolean
+  // Teks tombol konfirmasi — default "Hapus" (untuk aksi hapus).
+  confirmLabel?: string
+  loadingLabel?: string
 }
 
 export function ConfirmDialog({
@@ -20,6 +24,8 @@ export function ConfirmDialog({
   title = "Hapus Data",
   description = "Apakah Anda yakin ingin menghapus data ini? Tindakan ini tidak dapat dibatalkan.",
   loading = false,
+  confirmLabel = "Hapus",
+  loadingLabel = "Menghapus...",
 }: ConfirmDialogProps) {
   return (
     <Modal
@@ -37,7 +43,7 @@ export function ConfirmDialog({
             disabled={loading}
             className="bg-red-600 hover:bg-red-700 text-white"
           >
-            {loading ? "Menghapus..." : "Hapus"}
+            {loading ? loadingLabel : confirmLabel}
           </Button>
         </>
       }

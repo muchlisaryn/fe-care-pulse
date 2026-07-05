@@ -9,7 +9,17 @@ export type SelectSearchOption = {
   label: string
 }
 
-type DropdownPos = { top: number; left: number; width: number }
+type DropdownPos = {
+  left: number
+  width: number
+  // Salah satu dari top/bottom yang dipakai (koordinat viewport, position: fixed).
+  top?: number
+  bottom?: number
+  // Tinggi maksimum dropdown agar tetap muat di viewport (list scroll di dalamnya).
+  maxHeight: number
+  // true = dropdown dibuka ke atas trigger (ruang bawah kurang).
+  openUp: boolean
+}
 
 type SelectSearchProps = {
   options: SelectSearchOption[]
@@ -53,14 +63,34 @@ export function SelectSearch({
     ? options.filter((o) => o.label.toLowerCase().includes(query.toLowerCase()))
     : options
 
-  function openDropdown() {
-    if (!triggerRef.current) return
+  // Hitung posisi + arah buka (atas/bawah) berdasarkan ruang yang tersedia di
+  // viewport, plus tinggi maksimum agar daftar opsi selalu muat & bisa di-scroll.
+  function computePos(): DropdownPos | null {
+    if (!triggerRef.current) return null
     const rect = triggerRef.current.getBoundingClientRect()
-    setPos({
-      top: rect.bottom + window.scrollY + 4,
-      left: rect.left + window.scrollX,
+    const gap = 4
+    const margin = 8 // jarak aman ke tepi layar
+    const spaceBelow = window.innerHeight - rect.bottom - gap - margin
+    const spaceAbove = rect.top - gap - margin
+    // Buka ke atas hanya bila ruang bawah sempit DAN ruang atas lebih lega.
+    const openUp = spaceBelow < 240 && spaceAbove > spaceBelow
+    const maxHeight = Math.max(160, Math.min(360, openUp ? spaceAbove : spaceBelow))
+
+    return {
+      left: rect.left,
       width: rect.width,
-    })
+      maxHeight,
+      openUp,
+      ...(openUp
+        ? { bottom: window.innerHeight - rect.top + gap }
+        : { top: rect.bottom + gap }),
+    }
+  }
+
+  function openDropdown() {
+    const next = computePos()
+    if (!next) return
+    setPos(next)
     setQuery("")
     setOpen(true)
   }
@@ -75,21 +105,19 @@ export function SelectSearch({
       if (triggerRef.current?.contains(e.target as Node)) return
       setOpen(false)
     }
-    function handleScroll() {
-      if (!triggerRef.current) return
-      const rect = triggerRef.current.getBoundingClientRect()
-      setPos((prev) => prev && ({
-        ...prev,
-        top: rect.bottom + window.scrollY + 4,
-        left: rect.left + window.scrollX,
-      }))
+    // Reposisi mengikuti trigger saat halaman/kontainer di-scroll atau viewport berubah.
+    function reposition() {
+      setPos(computePos())
     }
     document.addEventListener("mousedown", handleClose)
-    window.addEventListener("scroll", handleScroll, true)
+    window.addEventListener("scroll", reposition, true)
+    window.addEventListener("resize", reposition)
     return () => {
       document.removeEventListener("mousedown", handleClose)
-      window.removeEventListener("scroll", handleScroll, true)
+      window.removeEventListener("scroll", reposition, true)
+      window.removeEventListener("resize", reposition)
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open])
 
   function handleSelect(optionValue: string) {
@@ -99,10 +127,20 @@ export function SelectSearch({
 
   const dropdown = open && pos ? (
     <div
-      style={{ position: "absolute", top: pos.top, left: pos.left, width: pos.width, zIndex: 9999 }}
+      style={{
+        position: "fixed",
+        top: pos.top,
+        bottom: pos.bottom,
+        left: pos.left,
+        width: pos.width,
+        zIndex: 9999,
+      }}
     >
-      <div className="rounded-lg border border-gray-200 bg-white shadow-lg">
-        <div className="border-b border-gray-100 p-2">
+      <div
+        className="flex flex-col overflow-hidden rounded-lg border border-gray-200 bg-white shadow-lg"
+        style={{ maxHeight: pos.maxHeight }}
+      >
+        <div className="shrink-0 border-b border-gray-100 p-2">
           <input
             ref={searchRef}
             type="text"
@@ -112,7 +150,7 @@ export function SelectSearch({
             className="w-full rounded-md border border-gray-200 px-3 py-1.5 text-sm outline-none focus:border-[#075489] focus:ring-1 focus:ring-[#075489]/20 placeholder:text-gray-400"
           />
         </div>
-        <ul className="max-h-52 overflow-y-auto py-1">
+        <ul className="min-h-0 flex-1 overflow-y-auto py-1">
           {filtered.length === 0 ? (
             <li className="px-3 py-2 text-sm text-gray-400 text-center">Tidak ditemukan.</li>
           ) : (

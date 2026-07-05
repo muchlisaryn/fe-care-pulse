@@ -31,8 +31,10 @@ export type ProdPackagingBatch = {
   borrowed_by: string | null
   processed_at: string | null
   processed_by: string | null
+  completed_by: string | null // petugas yang menyelesaikan pengemasan
+  completed_at: string | null
   operator: string | null
-  chemical_indicator: string | null
+  chemical_indicator: string | null // = No. Lot indikator kimia
   packaged_at: string | null
   units_count: number
   items: ProdPackagingItem[]

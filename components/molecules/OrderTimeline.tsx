@@ -7,7 +7,12 @@ import { Badge } from "@/components/atoms/Badge"
 // Satu peristiwa di timeline tracking order (dari endpoint scan / detail order).
 export type TimelineEvent = {
   id: number
-  type: "dibuat" | "diterima" | "dipinjam" | "dikembalikan" | "dipindah" | "dibatalkan"
+  type:
+    // Siklus peminjaman
+    | "dibuat" | "diterima" | "dipinjam" | "dikembalikan" | "dipindah" | "dibatalkan"
+    // Pipeline CSSD (ditelusuri dari kode produksi): produksi → cleaning → steril → simpan rak
+    | "produksi" | "diproses" | "selesai_cuci" | "gagal_cuci"
+    | "disterilkan" | "steril" | "gagal_steril" | "disimpan" | "terdistribusi"
   room: string | null
   actor: string | null
   borrowed_by: string | null
@@ -29,6 +34,7 @@ function formatDateTime(value: string | null) {
 }
 
 const TIMELINE_LABEL: Record<string, string> = {
+  produksi: "Produksi",
   dibuat: "Order Dibuat",
   diterima: "Diterima CSSD",
   diproses: "Diproses",
@@ -45,6 +51,7 @@ const TIMELINE_LABEL: Record<string, string> = {
   dibatalkan: "Dibatalkan",
 }
 const TIMELINE_VARIANT: Record<string, "info" | "success" | "danger" | "warning" | "default"> = {
+  produksi: "info",
   dibuat: "warning",
   diterima: "info",
   diproses: "info",
@@ -64,14 +71,22 @@ const TIMELINE_VARIANT: Record<string, "info" | "success" | "danger" | "warning"
 // dibedakan per tipe agar tidak rancu dengan nama orang di dalam `note`
 // (mis. peminjam / yang mengembalikan).
 const TIMELINE_ACTOR_LABEL: Record<string, string> = {
+  produksi: "Diproduksi",
   dibuat: "Diajukan",
   diterima: "Diterima",
+  selesai_cuci: "Dicuci",
+  gagal_cuci: "Dicuci",
+  steril: "Divalidasi",
+  gagal_steril: "Divalidasi",
+  disterilkan: "Disterilkan",
+  disimpan: "Disimpan",
   dipinjam: "Diserahkan",
   dipindah: "Disetujui",
   dikembalikan: "Diterima",
   dibatalkan: "Dibatalkan",
 }
 const TIMELINE_DOT: Record<string, string> = {
+  produksi: "bg-[#075489]",
   dibuat: "bg-amber-400",
   diterima: "bg-[#075489]",
   diproses: "bg-yellow-500",

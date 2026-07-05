@@ -1,7 +1,7 @@
 import { createAsyncThunk, createSlice } from "@reduxjs/toolkit"
 import api from "@/lib/axios"
 
-export type WashingStatus = "dalam_proses" | "selesai" | "gagal"
+export type WashingStatus = "dalam_proses" | "selesai" | "gagal" | "batal"
 
 export type WashingRecord = {
   id: number
@@ -17,7 +17,13 @@ export type WashingRecord = {
   alert: boolean
   alert_message: string | null
   failure_reason: string | null
+  // Jejak pelaku tiap aksi + waktunya.
+  started_by: string | null
+  started_at: string | null
+  completed_by: string | null
   completed_at: string | null
+  canceled_by: string | null
+  canceled_at: string | null
 }
 
 export type CleaningItem = {
@@ -45,7 +51,7 @@ export type CleaningOrder = {
   code: string
   code_transaction: string | null
   status: "pencucian" | "pengemasan"
-  stage_status: "proses" | "selesai" // 'selesai' = riwayat cleaning (sudah lanjut)
+  stage_status: "proses" | "selesai" | "batal" // 'selesai'/'batal' = riwayat cleaning
   borrowed_by: string | null
   room: { id: number; name: string } | null
   order_date: string | null

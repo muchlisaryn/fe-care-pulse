@@ -1,13 +1,14 @@
 "use client"
 
 import { useMemo, useState } from "react"
-import { Package, Check, Circle, CheckCircle2, Printer, Search, ZoomIn, X, ChevronDown } from "lucide-react"
+import { Package, Check, Circle, CheckCircle2, Printer, Search, ZoomIn, X, ChevronDown, ChevronRight } from "lucide-react"
 import { Button } from "@/components/atoms/Button"
 import { Badge } from "@/components/atoms/Badge"
 import { Input } from "@/components/atoms/Input"
 import { Label } from "@/components/atoms/Label"
 import { Barcode } from "@/components/atoms/Barcode"
 import { Modal } from "@/components/molecules/Modal"
+import { useToast } from "@/components/molecules/ToastProvider"
 import api from "@/lib/axios"
 import type {
   ProdPackagingBatch,
@@ -83,7 +84,7 @@ function errMsg(e: unknown): string {
   return x.response?.data?.message ?? "Terjadi kesalahan."
 }
 
-type UnitGroup = { name: string; image: string | null; units: ProdPackagingUnit[] }
+type UnitGroup = { key: string; name: string; image: string | null; units: ProdPackagingUnit[] }
 
 function groupUnits(units: ProdPackagingUnit[]): UnitGroup[] {
   const groups: UnitGroup[] = []
@@ -93,7 +94,7 @@ function groupUnits(units: ProdPackagingUnit[]): UnitGroup[] {
     const key = String(u.instrument?.id ?? name)
     let g = index.get(key)
     if (!g) {
-      g = { name, image: u.instrument?.image_url ?? null, units: [] }
+      g = { key, name, image: u.instrument?.image_url ?? null, units: [] }
       index.set(key, g)
       groups.push(g)
     }
@@ -128,6 +129,7 @@ export function ProductionPackagingTab({
   items: ProdPackagingBatch[]
   onChanged: () => void
 }) {
+  const toast = useToast()
   const [active, setActive] = useState<ProdPackagingBatch | null>(null)
   // instrument_stock_id unit yang sudah diperiksa (checklist digital, lokal).
   const [inspected, setInspected] = useState<Set<number>>(new Set())
@@ -138,6 +140,9 @@ export function ProductionPackagingTab({
   const [error, setError] = useState<string | null>(null)
   // Label hasil (muncul setelah selesai) untuk dicetak.
   const [label, setLabel] = useState<ProdSterilLabel | null>(null)
+  // true = label dibuka hanya untuk dilihat (via "Lihat Label"); tutup TANPA refetch.
+  // false = label muncul setelah pengemasan selesai; tutup memicu refetch.
+  const [labelViewOnly, setLabelViewOnly] = useState(false)
   // Foto instrumen yang sedang di-zoom (klik thumbnail) — null = tidak ada.
   const [zoom, setZoom] = useState<{ url: string; name: string } | null>(null)
   // Paket yang isinya sedang ditampilkan di kartu (key `${batch.id}::${namaPaket}`).
@@ -146,6 +151,8 @@ export function ProductionPackagingTab({
   const [labelLoadingId, setLabelLoadingId] = useState<number | null>(null)
   // Pesan error saat mengambil ulang label (di luar modal inspeksi).
   const [listError, setListError] = useState<string | null>(null)
+  // Batch riwayat yang detail/history-nya sedang ditampilkan di modal.
+  const [historyBatch, setHistoryBatch] = useState<ProdPackagingBatch | null>(null)
 
   const groups = useMemo(() => groupUnits(active?.units ?? []), [active])
   const total = active?.units.length ?? 0
@@ -230,11 +237,15 @@ export function ProductionPackagingTab({
       const res = await api.post(`/master/packaging/${active.id}/complete`, {
         chemical_indicator: chemIndicator.trim(),
       })
+      setLabelViewOnly(false)
       setLabel(res.data?.data?.label as ProdSterilLabel)
       setActive(null)
       // Refetch DITUNDA sampai modal label ditutup agar komponen tidak unmount.
+      toast.success(res.data?.message ?? "Pengemasan selesai.")
     } catch (e) {
-      setError(errMsg(e))
+      const msg = errMsg(e)
+      setError(msg)
+      toast.error(msg)
     } finally {
       setFinishing(false)
     }
@@ -242,7 +253,10 @@ export function ProductionPackagingTab({
 
   function closeLabel() {
     setLabel(null)
-    onChanged()
+    // Hanya refetch bila label muncul akibat pengemasan selesai (data berubah).
+    // "Lihat Label" bersifat read-only → tidak perlu refetch.
+    if (!labelViewOnly) onChanged()
+    setLabelViewOnly(false)
   }
 
   // Ambil ulang label sterilisasi batch yang sudah dikemas → buka modal label yang
@@ -253,6 +267,9 @@ export function ProductionPackagingTab({
     setLabelLoadingId(batch.id)
     try {
       const res = await api.get(`/master/packaging/${batch.id}/label`)
+      setLabelViewOnly(true)
+      // Tutup dulu modal riwayat (bila terbuka) agar label tidak menumpuk di atasnya.
+      setHistoryBatch(null)
       setLabel(res.data?.data?.label as ProdSterilLabel)
     } catch (e) {
       setListError(errMsg(e))
@@ -336,7 +353,11 @@ export function ProductionPackagingTab({
           return (
           <div
             key={batch.id}
-            className="rounded-lg border border-gray-200"
+            onClick={done ? () => setHistoryBatch(batch) : undefined}
+            className={
+              "rounded-lg border border-gray-200" +
+              (done ? " cursor-pointer hover:border-[#075489]/40 hover:bg-gray-50" : "")
+            }
           >
             <div className="flex items-start justify-between gap-2 px-3 py-2.5">
               <div className="flex min-w-0 items-start gap-2">
@@ -414,7 +435,12 @@ export function ProductionPackagingTab({
                   )}
                   <div className="mt-1 flex flex-wrap gap-x-4 gap-y-0.5 text-xs text-gray-500">
                     {done ? (
-                      <span>Dikemas: {formatDateTime(batch.packaged_at)}</span>
+                      <>
+                        <span>Dikemas: {formatDateTime(batch.packaged_at)}</span>
+                        {(batch.completed_by ?? batch.operator) && (
+                          <span>oleh {batch.completed_by ?? batch.operator}</span>
+                        )}
+                      </>
                     ) : (
                       <span>Selesai cleaning: {formatDateTime(batch.processed_at)}</span>
                     )}
@@ -423,15 +449,21 @@ export function ProductionPackagingTab({
                 </div>
               </div>
               {done ? (
-                <button
-                  type="button"
-                  onClick={() => viewLabel(batch)}
-                  disabled={labelLoadingId === batch.id}
-                  className="shrink-0 self-center inline-flex items-center gap-1.5 rounded-md border border-[#075489] px-3 py-1.5 text-xs font-medium text-[#075489] hover:bg-[#075489]/8 disabled:opacity-60"
-                >
-                  <Printer className="h-3.5 w-3.5" />
-                  {labelLoadingId === batch.id ? "Memuat..." : "Lihat Label"}
-                </button>
+                <div className="flex shrink-0 items-center gap-2 self-center">
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      viewLabel(batch)
+                    }}
+                    disabled={labelLoadingId === batch.id}
+                    className="inline-flex items-center gap-1.5 rounded-md border border-[#075489] px-3 py-1.5 text-xs font-medium text-[#075489] hover:bg-[#075489]/8 disabled:opacity-60"
+                  >
+                    <Printer className="h-3.5 w-3.5" />
+                    {labelLoadingId === batch.id ? "Memuat..." : "Lihat Label"}
+                  </button>
+                  <ChevronRight className="h-4 w-4 text-gray-300" />
+                </div>
               ) : (
                 <button
                   type="button"
@@ -674,6 +706,78 @@ export function ProductionPackagingTab({
                         </tr>
                       </tbody>
                     </table>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+      </Modal>
+
+      {/* Modal riwayat packaging: No. Lot + siapa yang memproses & menyelesaikan */}
+      <Modal
+        open={historyBatch !== null}
+        onClose={() => setHistoryBatch(null)}
+        title={historyBatch ? `Riwayat Packaging — ${historyBatch.code}` : "Riwayat Packaging"}
+        size="lg"
+        footer={
+          <div className="flex w-full justify-end gap-2">
+            {historyBatch && (
+              <button
+                type="button"
+                onClick={() => viewLabel(historyBatch)}
+                disabled={labelLoadingId === historyBatch.id}
+                className="inline-flex items-center gap-1.5 rounded-md border border-[#075489] px-3 py-1.5 text-xs font-medium text-[#075489] hover:bg-[#075489]/8 disabled:opacity-60"
+              >
+                <Printer className="h-3.5 w-3.5" />
+                {labelLoadingId === historyBatch.id ? "Memuat..." : "Lihat Label"}
+              </button>
+            )}
+            <Button variant="outline" onClick={() => setHistoryBatch(null)}>
+              Tutup
+            </Button>
+          </div>
+        }
+      >
+        {historyBatch && (
+          <div className="space-y-5">
+            <div className="flex flex-wrap items-center gap-2">
+              <Badge variant="success">Sudah Dikemas</Badge>
+              {historyBatch.code_transaction && (
+                <span className="text-xs text-gray-500">{historyBatch.code_transaction}</span>
+              )}
+              {historyBatch.washing_code && (
+                <span className="text-xs text-gray-500">{historyBatch.washing_code}</span>
+              )}
+            </div>
+
+            <div className="grid grid-cols-2 gap-x-4 gap-y-3 rounded-lg border border-gray-200 bg-gray-50 px-4 py-3 sm:grid-cols-3">
+              <Info label="No. Batch (PKG)" value={historyBatch.code} />
+              <Info label="No. Lot (Indikator Kimia)" value={historyBatch.chemical_indicator} />
+              <Info label="Jumlah Unit" value={`${historyBatch.units_count} unit`} />
+              <Info label="Diproses oleh" value={historyBatch.processed_by} />
+              <Info label="Dikemas oleh" value={historyBatch.completed_by ?? historyBatch.operator} />
+              <Info label="Waktu Dikemas" value={formatDateTime(historyBatch.packaged_at)} />
+            </div>
+
+            <div className="space-y-1.5">
+              <Label>Unit Dikemas ({historyBatch.units_count})</Label>
+              <div className="divide-y divide-gray-100 rounded-lg border border-gray-200">
+                {groupUnits(historyBatch.units).map((g) => (
+                  <div key={g.key} className="px-3 py-2">
+                    <div className="flex items-center gap-2">
+                      <span className="min-w-0 truncate text-sm font-medium text-gray-800">{g.name}</span>
+                      <span className="ml-auto inline-flex shrink-0 items-center rounded-full bg-[#075489]/10 px-2 py-0.5 text-xs font-semibold text-[#075489]">
+                        {g.units.length} unit
+                      </span>
+                    </div>
+                    <div className="mt-1 flex flex-wrap gap-1.5">
+                      {g.units.map((u) => (
+                        <span key={u.id} className="rounded bg-[#075489]/10 px-1.5 py-0.5 font-mono text-[11px] font-semibold text-[#075489]">
+                          {u.code ?? `#${u.id}`}
+                        </span>
+                      ))}
+                    </div>
                   </div>
                 ))}
               </div>

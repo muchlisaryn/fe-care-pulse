@@ -19,6 +19,8 @@ import { Label } from "@/components/atoms/Label"
 import { Textarea } from "@/components/atoms/Textarea"
 import { SelectSearch } from "@/components/atoms/SelectSearch"
 import { Modal } from "@/components/molecules/Modal"
+import { ConfirmDialog } from "@/components/molecules/ConfirmDialog"
+import { useToast } from "@/components/molecules/ToastProvider"
 import api from "@/lib/axios"
 import { useAppSelector } from "@/lib/store/hooks"
 import type { CleaningOrder, CleaningUnit } from "@/lib/store/slices/cleaningSlice"
@@ -48,6 +50,17 @@ function toLocalInput(value: string | null): string {
 // Status pencucian sebuah order (turunan dari washing/order status).
 export function isWashed(order: CleaningOrder): boolean {
   return order.washing?.status === "selesai" || order.status === "pengemasan"
+}
+
+// Batch dibatalkan (riwayat) — read-only, tidak bisa diproses lagi.
+export function isCanceled(order: CleaningOrder): boolean {
+  return order.washing?.status === "batal"
+}
+
+// "Nama • waktu" untuk baris jejak pelaku; null bila belum ada.
+function actorLine(by: string | null | undefined, at: string | null | undefined): string | null {
+  if (!by && !at) return null
+  return [by ?? "—", at ? formatDateTime(at) : null].filter(Boolean).join(" • ")
 }
 
 // "Sudah diproses" = parameter pencucian sudah diisi & disimpan operator.
@@ -117,6 +130,7 @@ export function CleaningTab({
 }) {
   // Operator default = user yang sedang login (untuk auto-isi ID Operator).
   const currentUser = useAppSelector((s) => s.auth.name ?? s.auth.username ?? "")
+  const toast = useToast()
 
   const [active, setActive] = useState<CleaningOrder | null>(null)
   const [machineNo, setMachineNo] = useState("")
@@ -143,6 +157,9 @@ export function CleaningTab({
   const [confirmTarget, setConfirmTarget] = useState<CleaningOrder | null>(null)
   const [completedAt, setCompletedAt] = useState("")
   const [confirmError, setConfirmError] = useState<string | null>(null)
+  // Batalkan batch yang belum diproses → stok kembali ke semula.
+  const [cancelTarget, setCancelTarget] = useState<CleaningOrder | null>(null)
+  const [cancelling, setCancelling] = useState(false)
 
   // Muat daftar mesin washer aktif (master CSSD) untuk dropdown pilihan.
   useEffect(() => {
@@ -237,6 +254,10 @@ export function CleaningTab({
   // mesin, backend menandai alert → modal tetap terbuka & notifikasi ditampilkan.
   async function saveWashing() {
     if (!active || saving) return
+    if (!washReady) {
+      setError("Lengkapi Nomor Mesin, Suhu, Waktu Mulai Cuci, Durasi, dan Jenis Deterjen.")
+      return
+    }
     setSaving(true)
     setError(null)
     try {
@@ -245,12 +266,16 @@ export function CleaningTab({
       onChanged()
       if (w?.alert) {
         setAlertMsg(w.alert_message ?? "Parameter pencucian di luar ambang mesin.")
+        toast.error(w.alert_message ?? "Parameter pencucian di luar ambang mesin.")
       } else {
+        toast.success(res.data?.message ?? "Catatan pencucian berhasil disimpan.")
         setActive(null)
       }
     } catch (err) {
       const e = err as { response?: { data?: { message?: string } } }
-      setError(e.response?.data?.message ?? "Gagal menyimpan catatan pencucian.")
+      const msg = e.response?.data?.message ?? "Gagal menyimpan catatan pencucian."
+      setError(msg)
+      toast.error(msg)
     } finally {
       setSaving(false)
     }
@@ -266,8 +291,9 @@ export function CleaningTab({
     setFailing(true)
     setError(null)
     try {
-      await api.put(`/master/cleaning/${active.id}/washing`, {
-        ...washingPayload(),
+      // Tandai Gagal hanya sebagai penanda — tidak mengirim/memproses parameter
+      // pencucian, cukup status + alasan.
+      const res = await api.put(`/master/cleaning/${active.id}/washing`, {
         fail: true,
         failure_reason: failReason.trim(),
       })
@@ -275,9 +301,12 @@ export function CleaningTab({
       setFailMode(false)
       setFailReason("")
       onChanged()
+      toast.success(res.data?.message ?? "Pencucian ditandai gagal.")
     } catch (err) {
       const e = err as { response?: { data?: { message?: string } } }
-      setError(e.response?.data?.message ?? "Gagal menandai pencucian gagal.")
+      const msg = e.response?.data?.message ?? "Gagal menandai pencucian gagal."
+      setError(msg)
+      toast.error(msg)
     } finally {
       setFailing(false)
     }
@@ -301,21 +330,52 @@ export function CleaningTab({
     setCompletingId(confirmTarget.id)
     setConfirmError(null)
     try {
-      await api.put(`/master/cleaning/${confirmTarget.id}/washing`, {
+      const res = await api.put(`/master/cleaning/${confirmTarget.id}/washing`, {
         complete: true,
         completed_at: new Date(completedAt).toISOString(),
       })
       setConfirmTarget(null)
       onChanged()
+      toast.success(res.data?.message ?? "Cleaning & disinfection selesai.")
     } catch (err) {
       const e = err as { response?: { data?: { message?: string } } }
-      setConfirmError(e.response?.data?.message ?? "Gagal menyelesaikan cleaning.")
+      const msg = e.response?.data?.message ?? "Gagal menyelesaikan cleaning."
+      setConfirmError(msg)
+      toast.error(msg)
     } finally {
       setCompletingId(null)
     }
   }
 
+  // Batalkan batch cleaning yang belum diproses → stok dikembalikan ke semula.
+  async function cancelWashing() {
+    if (!cancelTarget || cancelling) return
+    setCancelling(true)
+    try {
+      const res = await api.delete(`/master/cleaning/${cancelTarget.id}/cancel`)
+      setCancelTarget(null)
+      onChanged()
+      toast.success(res.data?.message ?? "Pencucian dibatalkan & stok dikembalikan.")
+    } catch (err) {
+      const e = err as { response?: { data?: { message?: string } } }
+      toast.error(e.response?.data?.message ?? "Gagal membatalkan pencucian.")
+    } finally {
+      setCancelling(false)
+    }
+  }
+
   const washedActive = active ? isWashed(active) : false
+
+  // Batch dibatalkan → modal read-only (form disembunyikan, hanya riwayat).
+  const canceledActive = active ? isCanceled(active) : false
+
+  // Field parameter pencucian yang wajib diisi sebelum Simpan.
+  const washReady =
+    machineNo.trim() !== "" &&
+    temperature.trim() !== "" &&
+    washedAt !== "" &&
+    duration.trim() !== "" &&
+    detergent.trim() !== ""
 
   return (
     <>
@@ -327,6 +387,7 @@ export function CleaningTab({
             stage={stage}
             onOpen={() => openWashing(order)}
             onComplete={() => openComplete(order)}
+            onCancel={() => setCancelTarget(order)}
             completing={completingId === order.id}
           />
         ))}
@@ -342,6 +403,8 @@ export function CleaningTab({
           <div className="flex w-full items-center justify-between gap-3">
             {error ? (
               <p className="text-sm text-red-600">{error}</p>
+            ) : canceledActive ? (
+              <span className="text-xs text-gray-400">Batch dibatalkan.</span>
             ) : washedActive ? (
               <span className="text-xs text-gray-400">Pencucian selesai.</span>
             ) : (
@@ -353,10 +416,10 @@ export function CleaningTab({
               <Button variant="outline" onClick={() => setActive(null)}>
                 Tutup
               </Button>
-              {!washedActive && (
+              {!washedActive && !canceledActive && (
                 <Button
                   onClick={saveWashing}
-                  disabled={saving}
+                  disabled={saving || !washReady}
                   className="bg-[#075489] hover:bg-[#075489]/90 text-white"
                 >
                   {saving ? "Menyimpan..." : "Simpan"}
@@ -372,6 +435,36 @@ export function CleaningTab({
               <Detail label="Peminjam / Unit" value={active.borrowed_by} />
               <Detail label="Diproses" value={formatDateTime(active.processed_at)} />
             </div>
+
+            {canceledActive && (
+              <div className="flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 px-4 py-3">
+                <XCircle className="mt-0.5 h-5 w-5 shrink-0 text-red-500" />
+                <div>
+                  <p className="text-sm font-semibold text-red-700">Batch dibatalkan</p>
+                  <p className="text-xs text-red-600/90">
+                    Seluruh unit sudah dikembalikan ke stok semula. Batch ini tersimpan sebagai riwayat.
+                  </p>
+                </div>
+              </div>
+            )}
+
+            {/* Jejak pelaku: siapa yang memproses, menyelesaikan, membatalkan + jamnya. */}
+            {(actorLine(active.washing?.started_by, active.washing?.started_at) ||
+              actorLine(active.washing?.completed_by, active.washing?.completed_at) ||
+              actorLine(active.washing?.canceled_by, active.washing?.canceled_at)) && (
+              <div className="space-y-2 rounded-lg border border-gray-200 px-4 py-3">
+                <p className="text-xs font-semibold uppercase tracking-wide text-gray-400">Riwayat Proses</p>
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                  <Detail label="Diproses oleh" value={actorLine(active.washing?.started_by, active.washing?.started_at)} />
+                  {active.washing?.completed_by && (
+                    <Detail label="Selesai oleh" value={actorLine(active.washing?.completed_by, active.washing?.completed_at)} />
+                  )}
+                  {active.washing?.canceled_by && (
+                    <Detail label="Dibatalkan oleh" value={actorLine(active.washing?.canceled_by, active.washing?.canceled_at)} />
+                  )}
+                </div>
+              </div>
+            )}
 
             <InstrumentList order={active} collapsible defaultOpen={false} />
 
@@ -391,7 +484,7 @@ export function CleaningTab({
               </div>
             )}
 
-            {!washedActive && (
+            {!washedActive && !canceledActive && (
               <div className="space-y-1.5">
                 <Label>Mesin Washer</Label>
                 <SelectSearch
@@ -430,9 +523,12 @@ export function CleaningTab({
               </div>
             )}
 
+            {!canceledActive && (
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <div className="space-y-1.5">
-                <Label htmlFor="wash-machine">Nomor Mesin</Label>
+                <Label htmlFor="wash-machine">
+                  Nomor Mesin <span className="text-red-500">*</span>
+                </Label>
                 <Input
                   id="wash-machine"
                   value={machineNo}
@@ -443,7 +539,9 @@ export function CleaningTab({
               </div>
               {/* ID Operator disembunyikan — terisi otomatis dari user yang login. */}
               <div className="space-y-1.5">
-                <Label htmlFor="wash-temp">Suhu (°C)</Label>
+                <Label htmlFor="wash-temp">
+                  Suhu (°C) <span className="text-red-500">*</span>
+                </Label>
                 <Input
                   id="wash-temp"
                   type="number"
@@ -454,7 +552,9 @@ export function CleaningTab({
                 />
               </div>
               <div className="space-y-1.5">
-                <Label htmlFor="wash-time">Waktu Mulai Cuci</Label>
+                <Label htmlFor="wash-time">
+                  Waktu Mulai Cuci <span className="text-red-500">*</span>
+                </Label>
                 <Input
                   id="wash-time"
                   type="datetime-local"
@@ -465,7 +565,9 @@ export function CleaningTab({
                 <p className="text-xs text-gray-400">Terisi otomatis jam saat ini — bisa diubah.</p>
               </div>
               <div className="space-y-1.5">
-                <Label htmlFor="wash-duration">Durasi (menit)</Label>
+                <Label htmlFor="wash-duration">
+                  Durasi (menit) <span className="text-red-500">*</span>
+                </Label>
                 <Input
                   id="wash-duration"
                   type="number"
@@ -476,8 +578,10 @@ export function CleaningTab({
                   disabled={washedActive}
                 />
               </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="wash-detergent">Jenis Deterjen / Enzimatis</Label>
+              <div className="space-y-1.5 sm:col-span-2">
+                <Label htmlFor="wash-detergent">
+                  Jenis Deterjen / Enzimatis <span className="text-red-500">*</span>
+                </Label>
                 <Input
                   id="wash-detergent"
                   value={detergent}
@@ -487,8 +591,9 @@ export function CleaningTab({
                 />
               </div>
             </div>
+            )}
 
-            {!washedActive &&
+            {!washedActive && !canceledActive &&
               (failMode ? (
                 <div className="space-y-2 rounded-lg border border-red-200 bg-red-50 px-4 py-3">
                   <Label htmlFor="fail-reason" className="text-red-700">
@@ -609,6 +714,22 @@ export function CleaningTab({
           </div>
         )}
       </Modal>
+
+      {/* Konfirmasi batal batch cleaning yang belum diproses (stok dikembalikan) */}
+      <ConfirmDialog
+        open={cancelTarget !== null}
+        onClose={() => setCancelTarget(null)}
+        onConfirm={cancelWashing}
+        loading={cancelling}
+        title="Batalkan Pencucian"
+        confirmLabel="Batalkan"
+        loadingLabel="Membatalkan..."
+        description={
+          cancelTarget
+            ? `Batalkan batch ${cancelTarget.code_transaction ?? cancelTarget.code}? Seluruh unit akan dikembalikan ke stok semula (tersedia).`
+            : undefined
+        }
+      />
     </>
   )
 }
@@ -632,17 +753,20 @@ function CleaningOrderCard({
   stage,
   onOpen,
   onComplete,
+  onCancel,
   completing,
 }: {
   order: CleaningOrder
   stage: "cleaning" | "packaging"
   onOpen: () => void
   onComplete: () => void
+  onCancel: () => void
   completing: boolean
 }) {
   const washed = isWashed(order)
+  const canceled = isCanceled(order)
   // Sudah diproses = parameter pencucian sudah diisi tapi belum ditandai selesai.
-  const inProcess = !washed && isWashingFilled(order)
+  const inProcess = !washed && !canceled && isWashingFilled(order)
   // Paket yang isinya sedang ditampilkan (klik chip paket).
   const [openPaket, setOpenPaket] = useState<string | null>(null)
   // Gambar per instrumen/paket (dari unit) untuk thumbnail di chip.
@@ -669,10 +793,11 @@ function CleaningOrderCard({
                   {order.code_transaction ?? order.code}
                 </span>
                 {washed && <Badge variant="success">Selesai Cuci</Badge>}
+                {order.washing?.status === "batal" && <Badge variant="default">Dibatalkan</Badge>}
                 {!washed && order.washing?.status === "gagal" && (
                   <Badge variant="danger">Gagal Cuci</Badge>
                 )}
-                {!washed && order.washing?.alert && (
+                {!washed && order.washing?.status !== "batal" && order.washing?.alert && (
                   <Badge variant="warning">Cek Parameter</Badge>
                 )}
               </div>
@@ -763,7 +888,7 @@ function CleaningOrderCard({
           </div>
         </button>
         <div className="mt-1.5 mr-1 flex shrink-0 items-center gap-1.5 self-center">
-          {washed ? (
+          {washed || canceled ? (
             <button
               type="button"
               onClick={onOpen}
@@ -783,13 +908,25 @@ function CleaningOrderCard({
                 {completing ? "Memproses..." : "Selesai"}
               </button>
             ) : (
-              <button
-                type="button"
-                onClick={onOpen}
-                className="rounded-md border border-[#075489] px-2 py-1 text-xs font-medium text-[#075489] hover:bg-[#075489]/10"
-              >
-                Proses
-              </button>
+              <>
+                {/* Belum diproses → boleh dibatalkan (stok kembali ke semula). */}
+                {stage === "cleaning" && (
+                  <button
+                    type="button"
+                    onClick={onCancel}
+                    className="rounded-md border border-red-300 px-2 py-1 text-xs font-medium text-red-600 hover:bg-red-50"
+                  >
+                    Batal
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={onOpen}
+                  className="rounded-md border border-[#075489] px-2 py-1 text-xs font-medium text-[#075489] hover:bg-[#075489]/10"
+                >
+                  Proses
+                </button>
+              </>
             )
           )}
         </div>

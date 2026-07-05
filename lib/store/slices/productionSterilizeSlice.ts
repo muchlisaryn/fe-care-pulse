@@ -25,7 +25,13 @@ export type ProdSterilizeBatch = {
   expiry_date: string | null
   chemical_indicator: string | null
   biological_indicator: string | null
+  bio_indicator_control: string | null // indikator biologi pembanding (Negatif/Positif)
+  bio_indicator_test: string | null // indikator biologi uji (Negatif/Positif)
+  note: string | null
   status: "diproses" | "selesai" | "gagal"
+  processed_by: string | null // petugas yang membuat/menjalankan batch
+  validated_by: string | null // petugas yang memvalidasi hasil
+  validated_at: string | null
 }
 
 // Batch produksi (PKG) pada pipeline sterilisasi:

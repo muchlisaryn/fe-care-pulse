@@ -7,6 +7,8 @@ export type Instrument = {
   name: string
   image_url: string | null
   stocks_count: number
+  // Sisa stok = jumlah unit berstatus `tersedia`.
+  available_stocks_count: number
   created_by: string | null
   updated_by: string | null
   deleted_at: string | null

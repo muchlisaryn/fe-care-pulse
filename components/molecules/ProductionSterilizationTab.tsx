@@ -1,7 +1,7 @@
 "use client"
 
 import { useMemo, useState } from "react"
-import { FlaskConical, CheckCircle2, Layers, X, ChevronDown, Check } from "lucide-react"
+import { FlaskConical, CheckCircle2, Layers, X, ChevronDown, ChevronRight, Check } from "lucide-react"
 import { Button } from "@/components/atoms/Button"
 import { Badge } from "@/components/atoms/Badge"
 import { Input } from "@/components/atoms/Input"
@@ -9,6 +9,8 @@ import { Label } from "@/components/atoms/Label"
 import { Select } from "@/components/atoms/Select"
 import { Textarea } from "@/components/atoms/Textarea"
 import { Modal } from "@/components/molecules/Modal"
+import { ConfirmDialog } from "@/components/molecules/ConfirmDialog"
+import { useToast } from "@/components/molecules/ToastProvider"
 import api from "@/lib/axios"
 import type { ProdSterilizeOrder, ProdSterilizeUnit } from "@/lib/store/slices/productionSterilizeSlice"
 
@@ -77,6 +79,7 @@ export function ProductionSterilizationTab({
   items: ProdSterilizeOrder[]
   onChanged: () => void
 }) {
+  const toast = useToast()
   const ready = useMemo(() => items.filter((o) => o.kind === "ready"), [items])
 
   // PKG id yang dicentang untuk digabung ke batch.
@@ -89,15 +92,24 @@ export function ProductionSterilizationTab({
 
   // Validasi hasil batch.
   const [validating, setValidating] = useState<ProdSterilizeOrder | null>(null)
-  const [vForm, setVForm] = useState({ chemical_indicator: "", biological_indicator: "", note: "" })
+  const [vForm, setVForm] = useState({
+    chemical_indicator: "",
+    bio_indicator_control: "",
+    bio_indicator_test: "",
+    note: "",
+  })
   const [vSaving, setVSaving] = useState(false)
   const [vError, setVError] = useState<string | null>(null)
+  // Konfirmasi "Selesaikan Validasi" sebelum benar-benar menyimpan.
+  const [confirmValidate, setConfirmValidate] = useState(false)
   // instrument_stock_id unit yang dicentang BERHASIL steril (sisanya = gagal → re-proses).
   const [passed, setPassed] = useState<Set<number>>(new Set())
 
   const [zoom, setZoom] = useState<{ url: string; name: string } | null>(null)
   // Kartu yang daftar unitnya sedang ditampilkan.
   const [openUnits, setOpenUnits] = useState<Set<string>>(new Set())
+  // Batch riwayat yang detail sterilisasinya sedang ditampilkan di modal.
+  const [detailOrder, setDetailOrder] = useState<ProdSterilizeOrder | null>(null)
 
   const selectedReady = useMemo(() => ready.filter((o) => selected.has(o.id)), [ready, selected])
   const selectedUnitCount = selectedReady.reduce((s, o) => s + o.unit_count, 0)
@@ -157,8 +169,11 @@ export function ProductionSterilizationTab({
       setBatchOpen(false)
       setSelected(new Set())
       onChanged()
+      toast.success(res.data?.message ?? "Batch sterilisasi berhasil dibuat.")
     } catch (e) {
-      setError(errMsg(e))
+      const msg = errMsg(e)
+      setError(msg)
+      toast.error(msg)
     } finally {
       setSaving(false)
     }
@@ -175,7 +190,8 @@ export function ProductionSterilizationTab({
     const b = order.sterilization
     setVForm({
       chemical_indicator: b?.chemical_indicator ?? "",
-      biological_indicator: b?.biological_indicator ?? "",
+      bio_indicator_control: b?.bio_indicator_control ?? "",
+      bio_indicator_test: b?.bio_indicator_test ?? "",
       note: "",
     })
     // Default: tidak ada yang tercentang; operator mencentang unit yang berhasil steril.
@@ -191,22 +207,39 @@ export function ProductionSterilizationTab({
     })
   }
 
+  // Klik "Simpan": validasi field wajib lalu minta konfirmasi selesai.
+  function requestValidate() {
+    if (!validating || vSaving) return
+    if (!vForm.chemical_indicator.trim()) {
+      setVError("Indikator Kimia wajib diisi.")
+      return
+    }
+    setVError(null)
+    setConfirmValidate(true)
+  }
+
   async function submitValidate() {
     if (!validating || vSaving) return
     setVSaving(true)
     setVError(null)
     try {
       const failed_stock_ids = unitStockIds(validating).filter((id) => !passed.has(id))
-      await api.post(`/master/sterilization-pipeline/${validating.id}/validate`, {
+      const res = await api.post(`/master/sterilization-pipeline/${validating.id}/validate`, {
         failed_stock_ids,
         chemical_indicator: vForm.chemical_indicator.trim() || null,
-        biological_indicator: vForm.biological_indicator.trim() || null,
+        bio_indicator_control: vForm.bio_indicator_control || null,
+        bio_indicator_test: vForm.bio_indicator_test || null,
         note: vForm.note.trim() || null,
       })
+      setConfirmValidate(false)
       setValidating(null)
       onChanged()
+      toast.success(res.data?.message ?? "Validasi sterilisasi berhasil disimpan.")
     } catch (e) {
-      setVError(errMsg(e))
+      const msg = errMsg(e)
+      setConfirmValidate(false)
+      setVError(msg)
+      toast.error(msg)
     } finally {
       setVSaving(false)
     }
@@ -216,6 +249,13 @@ export function ProductionSterilizationTab({
   const vUnitIds = validating ? unitStockIds(validating) : []
   const vPassedCount = vUnitIds.filter((id) => passed.has(id)).length
   const vFailedCount = vUnitIds.length - vPassedCount
+  // Unit berhasil vs gagal steril — untuk ditampilkan di konfirmasi.
+  const vPassedUnits = validating
+    ? validating.units.filter((u) => u.instrument_stock_id != null && passed.has(u.instrument_stock_id))
+    : []
+  const vFailedUnits = validating
+    ? validating.units.filter((u) => u.instrument_stock_id != null && !passed.has(u.instrument_stock_id))
+    : []
 
   return (
     <>
@@ -244,8 +284,18 @@ export function ProductionSterilizationTab({
           // Daftar unit default tertutup (baik batch maupun ready); klik untuk membuka.
           const unitsOpen = openUnits.has(key)
           const groups = groupUnits(order.units)
+          // Batch riwayat (sudah divalidasi) → tampilkan detail proses sterilisasinya.
+          const ster = order.sterilization
+          const isHistory = inBatch && ster != null && ster.status !== "diproses"
           return (
-            <div key={key} className="rounded-lg border border-gray-200">
+            <div
+              key={key}
+              onClick={isHistory ? () => setDetailOrder(order) : undefined}
+              className={
+                "rounded-lg border border-gray-200" +
+                (isHistory ? " cursor-pointer hover:border-[#075489]/40 hover:bg-gray-50" : "")
+              }
+            >
               <div className="flex items-start justify-between gap-2 px-3 py-2.5">
                 <div className="flex min-w-0 items-start gap-2">
                   {!inBatch && (
@@ -267,57 +317,69 @@ export function ProductionSterilizationTab({
                           {order.code}
                         </span>
                       )}
-                      {inBatch ? <Badge variant="warning">Menunggu Validasi</Badge> : null}
+                      {inBatch &&
+                        (order.sterilization?.status === "selesai" ? (
+                          <Badge variant="success">Steril</Badge>
+                        ) : order.sterilization?.status === "gagal" ? (
+                          <Badge variant="danger">Gagal Steril</Badge>
+                        ) : (
+                          <Badge variant="warning">Menunggu Validasi</Badge>
+                        ))}
                     </div>
                     <div className="mt-1 flex flex-wrap gap-x-4 gap-y-0.5 text-xs text-gray-500">
                       <span>{order.unit_count} unit</span>
                       {order.code_transaction && <span>{order.code_transaction}</span>}
                       {inBatch && order.sterilization && <span>Mesin: {order.sterilization.machine ?? "—"}</span>}
                     </div>
-                    <button
-                      type="button"
-                      onClick={() => toggleUnits(key)}
-                      className="mt-1.5 flex items-center gap-1 text-xs font-medium text-gray-400 hover:text-gray-600"
-                    >
-                      Unit Disterilkan ({order.unit_count})
-                      <ChevronDown className={"h-3.5 w-3.5 transition-transform " + (unitsOpen ? "rotate-180" : "")} />
-                    </button>
-                    {unitsOpen && (
-                      <div className="mt-1.5 divide-y divide-gray-100 rounded-lg border border-gray-200 bg-white">
-                        {groups.map((g) => (
-                          <div key={g.instrument} className="px-3 py-2">
-                            <div className="flex items-center gap-2">
-                              {g.image ? (
-                                <button
-                                  type="button"
-                                  onClick={() => setZoom({ url: g.image as string, name: g.instrument })}
-                                  className="group relative h-7 w-7 shrink-0 cursor-zoom-in overflow-hidden rounded border border-gray-200"
-                                >
-                                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                                  <img src={g.image} alt={g.instrument} className="h-full w-full object-cover" />
-                                </button>
-                              ) : (
-                                <Layers className="h-4 w-4 shrink-0 text-[#075489]" />
-                              )}
-                              <span className="min-w-0 truncate text-sm font-medium text-gray-800">{g.instrument}</span>
-                              <span className="ml-auto inline-flex shrink-0 items-center rounded-full bg-[#075489]/10 px-2 py-0.5 text-xs font-semibold text-[#075489]">
-                                {g.units.length} unit
-                              </span>
-                            </div>
-                            <div className="mt-1 flex flex-wrap gap-1.5">
-                              {g.units.map((u) => (
-                                <span key={u.id} className="rounded bg-[#075489]/10 px-1.5 py-0.5 font-mono text-[11px] font-semibold text-[#075489]">
-                                  {u.code ?? `#${u.id}`}
-                                </span>
-                              ))}
-                            </div>
+                    {/* Riwayat → detail dibuka lewat modal saat kartu diklik. */}
+                    {!isHistory && (
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => toggleUnits(key)}
+                          className="mt-1.5 flex items-center gap-1 text-xs font-medium text-gray-400 hover:text-gray-600"
+                        >
+                          Unit Disterilkan ({order.unit_count})
+                          <ChevronDown className={"h-3.5 w-3.5 transition-transform " + (unitsOpen ? "rotate-180" : "")} />
+                        </button>
+                        {unitsOpen && (
+                          <div className="mt-1.5 divide-y divide-gray-100 rounded-lg border border-gray-200 bg-white">
+                            {groups.map((g) => (
+                              <div key={g.instrument} className="px-3 py-2">
+                                <div className="flex items-center gap-2">
+                                  {g.image ? (
+                                    <button
+                                      type="button"
+                                      onClick={() => setZoom({ url: g.image as string, name: g.instrument })}
+                                      className="group relative h-7 w-7 shrink-0 cursor-zoom-in overflow-hidden rounded border border-gray-200"
+                                    >
+                                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                                      <img src={g.image} alt={g.instrument} className="h-full w-full object-cover" />
+                                    </button>
+                                  ) : (
+                                    <Layers className="h-4 w-4 shrink-0 text-[#075489]" />
+                                  )}
+                                  <span className="min-w-0 truncate text-sm font-medium text-gray-800">{g.instrument}</span>
+                                  <span className="ml-auto inline-flex shrink-0 items-center rounded-full bg-[#075489]/10 px-2 py-0.5 text-xs font-semibold text-[#075489]">
+                                    {g.units.length} unit
+                                  </span>
+                                </div>
+                                <div className="mt-1 flex flex-wrap gap-1.5">
+                                  {g.units.map((u) => (
+                                    <span key={u.id} className="rounded bg-[#075489]/10 px-1.5 py-0.5 font-mono text-[11px] font-semibold text-[#075489]">
+                                      {u.code ?? `#${u.id}`}
+                                    </span>
+                                  ))}
+                                </div>
+                              </div>
+                            ))}
                           </div>
-                        ))}
-                      </div>
+                        )}
+                      </>
                     )}
                   </div>
                 </div>
-                {inBatch && (
+                {inBatch && order.sterilization?.status === "diproses" && (
                   <button
                     type="button"
                     onClick={() => openValidate(order)}
@@ -325,6 +387,12 @@ export function ProductionSterilizationTab({
                   >
                     Validasi Hasil
                   </button>
+                )}
+                {isHistory && (
+                  <span className="flex shrink-0 items-center gap-1 self-center text-xs font-medium text-[#075489]">
+                    Detail
+                    <ChevronRight className="h-4 w-4" />
+                  </span>
                 )}
               </div>
             </div>
@@ -382,7 +450,7 @@ export function ProductionSterilizationTab({
           </div>
 
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <div className="space-y-1.5">
+            <div className="space-y-1.5 sm:col-span-2">
               <Label htmlFor="pstr-machine">Mesin Sterilisator *</Label>
               <Input id="pstr-machine" value={form.machine} onChange={(e) => setForm((f) => ({ ...f, machine: e.target.value }))} placeholder="mis. Autoclave-01" />
             </div>
@@ -443,7 +511,7 @@ export function ProductionSterilizationTab({
               <Button variant="outline" onClick={() => setValidating(null)} disabled={vSaving}>
                 Batal
               </Button>
-              <Button onClick={() => submitValidate()} disabled={vSaving} className="bg-[#075489] hover:bg-[#075489]/90 text-white">
+              <Button onClick={() => requestValidate()} disabled={vSaving || !vForm.chemical_indicator.trim()} className="bg-[#075489] hover:bg-[#075489]/90 text-white">
                 {vSaving ? "Memproses..." : "Simpan"}
               </Button>
             </div>
@@ -459,6 +527,7 @@ export function ProductionSterilizationTab({
               <Info label="Suhu" value={validating.sterilization?.temperature ? `${Number(validating.sterilization.temperature)}°C` : null} />
               <Info label="Durasi" value={validating.sterilization?.duration_minutes != null ? `${validating.sterilization.duration_minutes} mnt` : null} />
               <Info label="Waktu" value={formatDateTime(validating.sterilization?.sterilized_at ?? null)} />
+              <Info label="Diproses oleh" value={validating.sterilization?.processed_by} />
             </div>
 
 
@@ -519,7 +588,9 @@ export function ProductionSterilizationTab({
 
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <div className="space-y-1.5">
-                <Label htmlFor="pv-chem">Indikator Kimia</Label>
+                <Label htmlFor="pv-chem">
+                  Indikator Kimia <span className="text-red-500">*</span>
+                </Label>
                 <Select id="pv-chem" value={vForm.chemical_indicator} onChange={(e) => setVForm((f) => ({ ...f, chemical_indicator: e.target.value }))}>
                   <option value="">— Pilih —</option>
                   <option value="Berhasil">Berhasil</option>
@@ -527,8 +598,16 @@ export function ProductionSterilizationTab({
                 </Select>
               </div>
               <div className="space-y-1.5">
-                <Label htmlFor="pv-bio">Indikator Biologis</Label>
-                <Select id="pv-bio" value={vForm.biological_indicator} onChange={(e) => setVForm((f) => ({ ...f, biological_indicator: e.target.value }))}>
+                <Label htmlFor="pv-bio-control">Indikator Biologi Pembanding</Label>
+                <Select id="pv-bio-control" value={vForm.bio_indicator_control} onChange={(e) => setVForm((f) => ({ ...f, bio_indicator_control: e.target.value }))}>
+                  <option value="">— Pilih —</option>
+                  <option value="Negatif">Negatif</option>
+                  <option value="Positif">Positif</option>
+                </Select>
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="pv-bio-test">Indikator Biologi Uji</Label>
+                <Select id="pv-bio-test" value={vForm.bio_indicator_test} onChange={(e) => setVForm((f) => ({ ...f, bio_indicator_test: e.target.value }))}>
                   <option value="">— Pilih —</option>
                   <option value="Negatif">Negatif</option>
                   <option value="Positif">Positif</option>
@@ -542,6 +621,57 @@ export function ProductionSterilizationTab({
           </div>
         )}
       </Modal>
+
+      {/* Konfirmasi selesai validasi sterilisasi */}
+      <ConfirmDialog
+        open={confirmValidate}
+        onClose={() => setConfirmValidate(false)}
+        onConfirm={submitValidate}
+        loading={vSaving}
+        title="Selesaikan Validasi"
+        confirmLabel="Selesaikan"
+        loadingLabel="Memproses..."
+        description={
+          validating ? (
+            <span className="block space-y-3">
+              <span className="block">
+                Selesaikan validasi batch{" "}
+                <span className="font-semibold text-gray-900">
+                  {validating.sterilization?.code ?? validating.code}
+                </span>
+                ?
+              </span>
+              {vPassedUnits.length > 0 && (
+                <span className="block space-y-1 rounded-lg border border-green-100 bg-green-50 px-3 py-2">
+                  <span className="block text-xs font-semibold uppercase tracking-wide text-green-600">
+                    Instrumen berhasil ({vPassedUnits.length}) — steril &amp; siap rilis
+                  </span>
+                  {vPassedUnits.map((u) => (
+                    <span key={u.id} className="flex items-center justify-between gap-2">
+                      <span className="truncate text-sm text-gray-700">{u.instrument ?? "Instrumen"}</span>
+                      <span className="shrink-0 font-mono text-xs text-gray-500">{u.code ?? `#${u.id}`}</span>
+                    </span>
+                  ))}
+                </span>
+              )}
+              {vFailedUnits.length > 0 && (
+                <span className="block space-y-1 rounded-lg border border-red-100 bg-red-50 px-3 py-2">
+                  <span className="block text-xs font-semibold uppercase tracking-wide text-red-500">
+                    Instrumen gagal ({vFailedUnits.length}) — masuk antrean re-proses
+                  </span>
+                  {vFailedUnits.map((u) => (
+                    <span key={u.id} className="flex items-center justify-between gap-2">
+                      <span className="truncate text-sm text-gray-700">{u.instrument ?? "Instrumen"}</span>
+                      <span className="shrink-0 font-mono text-xs text-gray-500">{u.code ?? `#${u.id}`}</span>
+                    </span>
+                  ))}
+                </span>
+              )}
+              <span className="block text-xs text-gray-400">Tindakan ini tidak dapat diubah.</span>
+            </span>
+          ) : undefined
+        }
+      />
 
       {/* Modal hasil batch dibuat */}
       <Modal
@@ -568,6 +698,89 @@ export function ProductionSterilizationTab({
             <div className="mt-1 inline-flex items-center gap-2 rounded-lg bg-[#075489]/10 px-3 py-1.5">
               <FlaskConical className="h-4 w-4 text-[#075489]" />
               <span className="font-mono text-sm font-semibold text-[#075489]">{done.batch}</span>
+            </div>
+          </div>
+        )}
+      </Modal>
+
+      {/* Modal riwayat sterilisasi: detail proses + unit disterilkan */}
+      <Modal
+        open={detailOrder !== null}
+        onClose={() => setDetailOrder(null)}
+        title={detailOrder ? `Riwayat Sterilisasi — ${detailOrder.sterilization?.code ?? detailOrder.code}` : "Riwayat Sterilisasi"}
+        size="lg"
+        footer={
+          <div className="flex w-full justify-end">
+            <Button variant="outline" onClick={() => setDetailOrder(null)}>
+              Tutup
+            </Button>
+          </div>
+        }
+      >
+        {detailOrder && detailOrder.sterilization && (
+          <div className="space-y-5">
+            <div className="flex flex-wrap items-center gap-2">
+              {detailOrder.sterilization.status === "selesai" ? (
+                <Badge variant="success">Steril</Badge>
+              ) : (
+                <Badge variant="danger">Gagal Steril</Badge>
+              )}
+              {detailOrder.code_transaction && (
+                <span className="text-xs text-gray-500">{detailOrder.code_transaction}</span>
+              )}
+            </div>
+
+            <div className="grid grid-cols-2 gap-x-4 gap-y-3 rounded-lg border border-gray-200 bg-gray-50 px-4 py-3 sm:grid-cols-3">
+              <Info label="Mesin" value={detailOrder.sterilization.machine} />
+              <Info label="Metode" value={detailOrder.sterilization.method} />
+              <Info label="No. Siklus" value={detailOrder.sterilization.cycle_number} />
+              <Info label="Suhu" value={detailOrder.sterilization.temperature ? `${Number(detailOrder.sterilization.temperature)}°C` : null} />
+              <Info label="Durasi" value={detailOrder.sterilization.duration_minutes != null ? `${detailOrder.sterilization.duration_minutes} mnt` : null} />
+              <Info label="Waktu Steril" value={formatDateTime(detailOrder.sterilization.sterilized_at)} />
+              <Info label="Indikator Kimia" value={detailOrder.sterilization.chemical_indicator} />
+              <Info label="Indikator Biologi Pembanding" value={detailOrder.sterilization.bio_indicator_control} />
+              <Info label="Indikator Biologi Uji" value={detailOrder.sterilization.bio_indicator_test} />
+              <Info label="Diproses oleh" value={detailOrder.sterilization.processed_by} />
+              <Info label="Divalidasi oleh" value={detailOrder.sterilization.validated_by} />
+              <Info label="Waktu Validasi" value={detailOrder.sterilization.validated_at ? formatDateTime(detailOrder.sterilization.validated_at) : null} />
+              <div className="col-span-2 sm:col-span-3">
+                <Info label="Catatan" value={detailOrder.sterilization.note} />
+              </div>
+            </div>
+
+            <div className="space-y-1.5">
+              <Label>Unit Disterilkan ({detailOrder.unit_count})</Label>
+              <div className="divide-y divide-gray-100 rounded-lg border border-gray-200">
+                {groupUnits(detailOrder.units).map((g) => (
+                  <div key={g.instrument} className="px-3 py-2">
+                    <div className="flex items-center gap-2">
+                      {g.image ? (
+                        <button
+                          type="button"
+                          onClick={() => setZoom({ url: g.image as string, name: g.instrument })}
+                          className="group relative h-7 w-7 shrink-0 cursor-zoom-in overflow-hidden rounded border border-gray-200"
+                        >
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img src={g.image} alt={g.instrument} className="h-full w-full object-cover" />
+                        </button>
+                      ) : (
+                        <Layers className="h-4 w-4 shrink-0 text-[#075489]" />
+                      )}
+                      <span className="min-w-0 truncate text-sm font-medium text-gray-800">{g.instrument}</span>
+                      <span className="ml-auto inline-flex shrink-0 items-center rounded-full bg-[#075489]/10 px-2 py-0.5 text-xs font-semibold text-[#075489]">
+                        {g.units.length} unit
+                      </span>
+                    </div>
+                    <div className="mt-1 flex flex-wrap gap-1.5">
+                      {g.units.map((u) => (
+                        <span key={u.id} className="rounded bg-[#075489]/10 px-1.5 py-0.5 font-mono text-[11px] font-semibold text-[#075489]">
+                          {u.code ?? `#${u.id}`}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
             </div>
           </div>
         )}

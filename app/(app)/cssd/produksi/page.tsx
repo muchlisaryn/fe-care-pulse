@@ -20,6 +20,7 @@ import { fetchProductionSterilize } from "@/lib/store/slices/productionSterilize
 import { CleaningTab } from "@/components/molecules/CleaningTab"
 import { ProductionPackagingTab } from "@/components/molecules/ProductionPackagingTab"
 import { ProductionSterilizationTab } from "@/components/molecules/ProductionSterilizationTab"
+import { useToast } from "@/components/molecules/ToastProvider"
 import api from "@/lib/axios"
 
 // Tab halaman Produksi CSSD: form produksi + tahapan pipeline reprocessing.
@@ -61,6 +62,7 @@ function ProduksiCssdPage() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const dispatch = useAppDispatch()
+  const toast = useToast()
 
   // Tab aktif: form produksi atau salah satu tahap pipeline. Disinkronkan ke URL
   // (?tab=cleaning) agar tiap tahap punya URL sendiri & bisa di-deep-link.
@@ -75,8 +77,8 @@ function ProduksiCssdPage() {
   const [pkgView, setPkgView] = useState<"pending" | "history">("pending")
   // Sub-tampilan pada tab Cleaning: proses cleaning vs riwayat cleaning.
   const [cleanView, setCleanView] = useState<"proses" | "history">("proses")
-  // Sub-tampilan pada tab Sterilisasi: proses steril / validasi hasil / gagal steril.
-  const [sterView, setSterView] = useState<"proses" | "validasi" | "gagal">("proses")
+  // Sub-tampilan pada tab Sterilisasi: proses steril / validasi hasil / gagal steril / riwayat.
+  const [sterView, setSterView] = useState<"proses" | "validasi" | "gagal" | "history">("proses")
 
   // Data pipeline (tahap Cleaning/Packaging/Sterilization) — sama seperti dulu di
   // Tracking Order, kini dipantau dari halaman Produksi.
@@ -112,9 +114,13 @@ function ProduksiCssdPage() {
     )
   }, [cleaning, q])
   const cleaningItems = useMemo(() => cleaningFiltered.filter((o) => o.status === "pencucian"), [cleaningFiltered])
-  // Pisahkan cleaning: yang masih diproses vs riwayat (sudah selesai cuci & lanjut).
-  const cleaningProses = useMemo(() => cleaningItems.filter((o) => o.stage_status !== "selesai"), [cleaningItems])
-  const cleaningHistory = useMemo(() => cleaningItems.filter((o) => o.stage_status === "selesai"), [cleaningItems])
+  // Pisahkan cleaning: yang masih diproses vs riwayat (sudah selesai cuci & lanjut,
+  // atau dibatalkan).
+  const cleaningProses = useMemo(() => cleaningItems.filter((o) => o.stage_status === "proses"), [cleaningItems])
+  const cleaningHistory = useMemo(
+    () => cleaningItems.filter((o) => o.stage_status === "selesai" || o.stage_status === "batal"),
+    [cleaningItems],
+  )
   const cleaningActive = cleanView === "history" ? cleaningHistory : cleaningProses
   const packagingItems = useMemo(() => {
     if (!q) return packaging
@@ -153,9 +159,24 @@ function ProduksiCssdPage() {
     () => sterilizationItems.filter((o) => o.kind === "ready" && o.reprocess !== true),
     [sterilizationItems],
   )
-  const sterValidasi = useMemo(() => sterilizationItems.filter((o) => o.kind === "batch"), [sterilizationItems])
+  // Batch menunggu validasi vs riwayat batch yang sudah divalidasi (selesai/gagal).
+  const sterValidasi = useMemo(
+    () => sterilizationItems.filter((o) => o.kind === "batch" && o.sterilization?.status === "diproses"),
+    [sterilizationItems],
+  )
+  const sterHistory = useMemo(
+    () => sterilizationItems.filter((o) => o.kind === "batch" && o.sterilization?.status !== "diproses"),
+    [sterilizationItems],
+  )
   const sterGagal = useMemo(() => sterilizationItems.filter((o) => o.reprocess === true), [sterilizationItems])
-  const sterActive = sterView === "gagal" ? sterGagal : sterView === "validasi" ? sterValidasi : sterProses
+  const sterActive =
+    sterView === "gagal"
+      ? sterGagal
+      : sterView === "validasi"
+        ? sterValidasi
+        : sterView === "history"
+          ? sterHistory
+          : sterProses
 
   const tabCount: Record<ProduksiTab, number> = {
     produksi: 0, // badge tidak ditampilkan untuk tab form
@@ -327,14 +348,17 @@ function ProduksiCssdPage() {
     setSaving(true)
     setFormError(null)
     try {
-      await api.post("/master/production", { items, note: note.trim() || null })
+      const res = await api.post("/master/production", { items, note: note.trim() || null })
       setLines([])
       setNote("")
       // Batch baru langsung berstatus pencucian → muat ulang & alihkan ke tab Cleaning.
       refreshPipeline()
       changeTab("cleaning")
+      toast.success(res.data?.message ?? "Batch produksi berhasil dibuat & masuk tahap Cleaning.")
     } catch (e) {
-      setFormError(errMsg(e))
+      const msg = errMsg(e)
+      setFormError(msg)
+      toast.error(msg)
     } finally {
       setSaving(false)
     }
@@ -466,6 +490,7 @@ function ProduksiCssdPage() {
                 { key: "proses" as const, label: "Proses Steril", count: sterProses.length },
                 { key: "validasi" as const, label: "Validasi Hasil", count: sterValidasi.length },
                 { key: "gagal" as const, label: "Gagal Steril", count: sterGagal.length },
+                { key: "history" as const, label: "History", count: sterHistory.length },
               ]).map((v) => (
                 <button
                   key={v.key}
@@ -503,7 +528,9 @@ function ProduksiCssdPage() {
                       ? "Tidak ada unit gagal steril."
                       : sterView === "validasi"
                         ? "Tidak ada batch menunggu validasi."
-                        : "Belum ada batch siap disterilkan."
+                        : sterView === "history"
+                          ? "Belum ada riwayat batch sterilisasi."
+                          : "Belum ada batch siap disterilkan."
                     : tab === "cleaning"
                       ? cleanView === "history"
                         ? "Belum ada riwayat cleaning."
