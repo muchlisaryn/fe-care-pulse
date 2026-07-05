@@ -255,42 +255,49 @@ export default function StorageSterilPage() {
       <div
         key={r.id}
         className={
-          "flex flex-wrap items-center gap-x-4 gap-y-1 border-b border-gray-50 px-4 py-2 text-sm last:border-0 " +
+          "flex flex-wrap items-center justify-between gap-x-3 gap-y-1.5 border-b border-gray-50 px-4 py-2 text-sm last:border-0 " +
           (r.alert ? "bg-red-50/60" : "")
         }
       >
-        {r.unit.image_url && (
-          <button
-            type="button"
-            onClick={() => setZoom({ url: r.unit.image_url as string, name: r.unit.instrument ?? r.unit.code ?? "Instrumen" })}
-            title="Klik untuk perbesar"
-            className="h-6 w-6 shrink-0 cursor-zoom-in overflow-hidden rounded border border-gray-200"
-          >
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={r.unit.image_url} alt={r.unit.instrument ?? ""} className="h-full w-full object-cover" />
-          </button>
-        )}
-        <span className="font-mono text-xs font-semibold text-[#075489] bg-[#075489]/8 px-2 py-0.5 rounded">
-          {r.unit.code ?? `#${r.unit.id}`}
-        </span>
-        <span className="text-gray-700">{r.unit.instrument ?? "—"}</span>
-        {groupBy === "batch" && (
-          <span className="inline-flex items-center gap-1 text-xs text-gray-500">
-            <MapPin className="h-3 w-3" />
-            {r.rack_code}
+        {/* Kiri: identitas unit (foto + kode + nama instrumen) */}
+        <div className="flex min-w-0 items-center gap-2">
+          {r.unit.image_url && (
+            <button
+              type="button"
+              onClick={() => setZoom({ url: r.unit.image_url as string, name: r.unit.instrument ?? r.unit.code ?? "Instrumen" })}
+              title="Klik untuk perbesar"
+              className="h-6 w-6 shrink-0 cursor-zoom-in overflow-hidden rounded border border-gray-200"
+            >
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={r.unit.image_url} alt={r.unit.instrument ?? ""} className="h-full w-full object-cover" />
+            </button>
+          )}
+          <span className="shrink-0 font-mono text-xs font-semibold text-[#075489] bg-[#075489]/8 px-2 py-0.5 rounded">
+            {r.unit.code ?? `#${r.unit.id}`}
           </span>
-        )}
-        {groupBy === "rak" && r.batch && <span className="font-mono text-xs text-gray-500">{r.batch}</span>}
-        <span className={"ml-auto text-xs " + (r.alert ? "font-semibold text-red-600" : "text-gray-500")}>
-          {formatDate(r.expiry_date)}
-        </span>
-        {r.expired ? (
-          <Badge variant="danger">Kedaluwarsa</Badge>
-        ) : r.alert ? (
-          <Badge variant="danger">{r.days_to_expiry}h lagi</Badge>
-        ) : (
-          <Badge variant="success">Di Gudang</Badge>
-        )}
+          <span className="truncate text-gray-700">{r.unit.instrument ?? "—"}</span>
+        </div>
+        {/* Kanan: meta (rak/batch) + tanggal kedaluwarsa + status — mengelompok agar
+            saat wrap di mobile pindah ke baris bawah sebagai satu kesatuan. */}
+        <div className="flex flex-wrap items-center gap-2">
+          {groupBy === "batch" && (
+            <span className="inline-flex items-center gap-1 text-xs text-gray-500">
+              <MapPin className="h-3 w-3" />
+              {r.rack_code}
+            </span>
+          )}
+          {groupBy === "rak" && r.batch && <span className="font-mono text-xs text-gray-500">{r.batch}</span>}
+          <span className={"text-xs " + (r.alert ? "font-semibold text-red-600" : "text-gray-500")}>
+            {formatDate(r.expiry_date)}
+          </span>
+          {r.expired ? (
+            <Badge variant="danger">Kedaluwarsa</Badge>
+          ) : r.alert ? (
+            <Badge variant="danger">{r.days_to_expiry}h lagi</Badge>
+          ) : (
+            <Badge variant="success">Di Gudang</Badge>
+          )}
+        </div>
       </div>
     )
   }
@@ -310,7 +317,7 @@ export default function StorageSterilPage() {
 
       <Card className="p-0">
         <div className="space-y-3 border-b border-gray-100 px-5 py-4">
-          <div className="flex flex-wrap gap-6 border-b border-gray-200">
+          <div className="flex gap-5 overflow-x-auto border-b border-gray-200 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
             {(
               [
                 { key: "simpan", label: "Perlu Disimpan", count: incomingAll.length },
@@ -324,7 +331,7 @@ export default function StorageSterilPage() {
                   type="button"
                   onClick={() => setTab(t.key)}
                   className={
-                    "relative -mb-px flex items-center gap-2 border-b-2 px-1 pb-2.5 pt-1 text-sm transition-colors " +
+                    "relative -mb-px flex shrink-0 items-center gap-2 whitespace-nowrap border-b-2 px-1 pb-2.5 pt-1 text-sm transition-colors " +
                     (activeT
                       ? "border-[#075489] font-semibold text-[#075489]"
                       : "border-transparent font-medium text-gray-500 hover:text-gray-800")
@@ -437,7 +444,7 @@ export default function StorageSterilPage() {
                       <button
                         type="button"
                         onClick={() => toggleGroup(g.key)}
-                        className="flex w-full items-center gap-2 px-4 py-2.5 text-left hover:bg-gray-50"
+                        className="flex w-full flex-wrap items-center gap-x-2 gap-y-1 px-4 py-2.5 text-left hover:bg-gray-50"
                       >
                         {open ? (
                           <ChevronDown className="h-4 w-4 shrink-0 text-gray-400" />
@@ -452,7 +459,7 @@ export default function StorageSterilPage() {
                         <span className="font-semibold text-gray-800">{g.key}</span>
                         <span className="text-xs text-gray-400">{g.items.length} unit</span>
                         {g.alertCount > 0 && (
-                          <Badge variant="danger" className="ml-1">
+                          <Badge variant="danger" className="ml-auto">
                             {g.alertCount} perlu perhatian
                           </Badge>
                         )}
@@ -482,7 +489,7 @@ export default function StorageSterilPage() {
                                       <button
                                         type="button"
                                         onClick={() => togglePkt(pkey)}
-                                        className="flex w-full items-center gap-2 px-4 py-2 text-sm hover:bg-gray-50"
+                                        className="flex w-full flex-wrap items-center gap-x-2 gap-y-1 px-4 py-2 text-sm hover:bg-gray-50"
                                       >
                                         {popen ? (
                                           <ChevronDown className="h-3.5 w-3.5 shrink-0 text-gray-400" />
@@ -493,7 +500,7 @@ export default function StorageSterilPage() {
                                         <span className="font-medium text-gray-800">{pkg}</span>
                                         <span className="text-xs text-gray-400">{units.length} unit</span>
                                         {alerts > 0 && (
-                                          <Badge variant="danger" className="ml-1">
+                                          <Badge variant="danger" className="ml-auto">
                                             {alerts} perlu perhatian
                                           </Badge>
                                         )}
@@ -523,7 +530,7 @@ export default function StorageSterilPage() {
         title={active ? `Simpan ke Gudang — ${active.code_transaction ?? active.code}` : "Simpan ke Gudang"}
         size="lg"
         footer={
-          <div className="flex w-full items-center justify-between gap-3">
+          <div className="flex w-full flex-col items-stretch gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
             {error ? (
               <p className="text-sm text-red-600">{error}</p>
             ) : (
@@ -531,7 +538,7 @@ export default function StorageSterilPage() {
                 Scan / isi lokasi rak tiap unit. Bila semua tersimpan, order masuk gudang steril.
               </span>
             )}
-            <div className="flex shrink-0 gap-2">
+            <div className="flex shrink-0 justify-end gap-2">
               <Button variant="outline" onClick={() => setActive(null)} disabled={saving}>
                 Batal
               </Button>
@@ -615,8 +622,8 @@ export default function StorageSterilPage() {
                       <Badge variant={isPaket ? "info" : "default"}>{isPaket ? "Paket" : "Satuan"}</Badge>
                       <span className="text-sm font-medium text-gray-800">{title}</span>
                       <span className="text-xs text-gray-400">{g.units.length} unit</span>
-                      {/* Lokasi rak — sejajar dengan judul (di kanan), bukan di bawah. */}
-                      <div className="ml-auto">
+                      {/* Lokasi rak — sejajar judul di desktop; full-width di bawah pada mobile. */}
+                      <div className="ml-auto w-full sm:w-auto">
                         {allStored ? (
                           <Badge variant="success">
                             <span className="inline-flex items-center gap-1">
@@ -625,7 +632,7 @@ export default function StorageSterilPage() {
                             </span>
                           </Badge>
                         ) : (
-                          <div className="relative w-44 sm:w-56">
+                          <div className="relative w-full sm:w-56">
                             <ScanLine className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-gray-400 pointer-events-none" />
                             <Input
                               value={groupRack}

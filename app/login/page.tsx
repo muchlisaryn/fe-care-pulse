@@ -24,14 +24,27 @@ function LoginForm() {
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
-    if (!username.trim() || !password) return
+    // Fallback baca langsung dari input: sebagian password manager / autofill di
+    // HP mengisi kolom tanpa memicu onChange React, jadi state bisa kosong walau
+    // kolom terlihat terisi. Ambil nilai form sebelum ada await.
+    const form = e.currentTarget as HTMLFormElement
+    const uname =
+      username.trim() ||
+      (form.elements.namedItem("username") as HTMLInputElement | null)?.value.trim() ||
+      ""
+    const pass =
+      password || (form.elements.namedItem("password") as HTMLInputElement | null)?.value || ""
+    if (!uname || !pass) {
+      setError("Username dan kata sandi wajib diisi.")
+      return
+    }
     setError("")
     setLoading(true)
     try {
-      const res = await api.post("/auth/login", { username, password })
-      const { username: uname, token, menus } = res.data.data
-      saveAuth(uname, token, menus ?? [])
-      dispatch(setCredentials({ username: uname, token, menus: menus ?? [] }))
+      const res = await api.post("/auth/login", { username: uname, password: pass })
+      const { username: loggedUsername, token, menus } = res.data.data
+      saveAuth(loggedUsername, token, menus ?? [])
+      dispatch(setCredentials({ username: loggedUsername, token, menus: menus ?? [] }))
       const from = searchParams.get("from") || "/dashboard"
       router.replace(from)
     } catch (err: unknown) {
@@ -64,6 +77,7 @@ function LoginForm() {
         <form className="space-y-5" onSubmit={handleSubmit}>
           <FormField
             id="username"
+            name="username"
             label="Username"
             type="text"
             placeholder="johndoe"
@@ -75,6 +89,7 @@ function LoginForm() {
 
           <FormField
             id="password"
+            name="password"
             label="Kata Sandi"
             type={showPassword ? "text" : "password"}
             placeholder="••••••••"
@@ -97,7 +112,7 @@ function LoginForm() {
 
           <Button
             type="submit"
-            disabled={loading || !username.trim() || !password}
+            disabled={loading}
             className="w-full h-11 bg-[#075489] hover:bg-[#075489]/90 text-white rounded-lg font-medium text-sm transition-colors disabled:opacity-60"
           >
             {loading ? "Masuk..." : "Masuk"}

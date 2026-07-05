@@ -1318,21 +1318,21 @@ function DetailUnitRow({
   const pad = indent ? "pl-6" : ""
   return (
     <div className="px-3 py-2">
-      <div className="flex items-center justify-between gap-3">
-        <div className={"flex min-w-0 items-center gap-2 " + pad}>
-          {satuan && <Badge variant="default">Satuan</Badge>}
-          <span className="shrink-0 font-mono text-xs font-semibold text-[#4ba69d] bg-[#4ba69d]/10 px-2 py-0.5 rounded">
-            {unit.instrument_stock?.code ?? "—"}
-          </span>
-          <span className="truncate text-sm text-gray-700">{name}</span>
-        </div>
+      {/* Baris 1: identitas unit — nama muat penuh (badge status pindah ke bawah). */}
+      <div className={"flex min-w-0 items-center gap-2 " + pad}>
+        {satuan && <Badge variant="default">Satuan</Badge>}
+        <span className="shrink-0 font-mono text-xs font-semibold text-[#4ba69d] bg-[#4ba69d]/10 px-2 py-0.5 rounded">
+          {unit.instrument_stock?.code ?? "—"}
+        </span>
+        <span className="truncate text-sm text-gray-700">{name}</span>
+      </div>
+      {/* Baris 2: status + kondisi keluar → masuk. */}
+      <div className={"mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-gray-500 " + pad}>
         {unit.is_returned ? (
           <Badge variant="success">Kembali</Badge>
         ) : (
           <Badge variant="warning">Dipinjam</Badge>
         )}
-      </div>
-      <div className={"mt-1 flex flex-wrap gap-x-4 gap-y-0.5 text-xs text-gray-500 " + pad}>
         <span>Kondisi Keluar: {unit.condition_out?.name ?? "—"}</span>
         <span>Kondisi Masuk: {unit.condition_in?.name ?? "—"}</span>
       </div>
