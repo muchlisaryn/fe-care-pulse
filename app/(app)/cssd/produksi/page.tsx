@@ -373,7 +373,7 @@ function ProduksiCssdPage() {
 
       {/* Tab: form produksi baru + tahapan pipeline */}
       <Card className="p-0">
-        <div className="flex flex-wrap gap-6 border-b border-gray-200 px-5 pt-4">
+        <div className="flex gap-5 overflow-x-auto border-b border-gray-200 px-5 pt-4 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
           {(
             [
               { key: "produksi", label: "Produksi Baru" },
@@ -389,7 +389,7 @@ function ProduksiCssdPage() {
                 type="button"
                 onClick={() => changeTab(t.key)}
                 className={
-                  "relative -mb-px flex items-center gap-2 border-b-2 px-1 pb-2.5 pt-1 text-sm transition-colors " +
+                  "relative -mb-px flex shrink-0 items-center gap-2 whitespace-nowrap border-b-2 px-1 pb-2.5 pt-1 text-sm transition-colors " +
                   (active
                     ? "border-[#075489] font-semibold text-[#075489]"
                     : "border-transparent font-medium text-gray-500 hover:text-gray-800")
@@ -435,7 +435,7 @@ function ProduksiCssdPage() {
         <Card className="p-4">
           {/* Sub-tampilan tab Cleaning: Proses Cleaning vs History Cleaning. */}
           {tab === "cleaning" && (
-            <div className="mb-3 inline-flex rounded-lg border border-gray-200 p-0.5 text-sm">
+            <div className="mb-3 inline-flex max-w-full overflow-x-auto rounded-lg border border-gray-200 p-0.5 text-sm [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
               {([
                 { key: "proses" as const, label: "Proses Cleaning", count: cleaningProses.length },
                 { key: "history" as const, label: "History", count: cleaningHistory.length },
@@ -448,7 +448,7 @@ function ProduksiCssdPage() {
                     setPage(1)
                   }}
                   className={
-                    "rounded-md px-3 py-1.5 font-medium transition-colors " +
+                    "shrink-0 whitespace-nowrap rounded-md px-3 py-1.5 font-medium transition-colors " +
                     (cleanView === v.key ? "bg-[#075489] text-white" : "text-gray-600 hover:bg-gray-100")
                   }
                 >
@@ -459,7 +459,7 @@ function ProduksiCssdPage() {
           )}
           {/* Sub-tampilan tab Packaging: Perlu Dikemas vs Riwayat (sudah dikemas). */}
           {tab === "packaging" && (
-            <div className="mb-3 inline-flex rounded-lg border border-gray-200 p-0.5 text-sm">
+            <div className="mb-3 inline-flex max-w-full overflow-x-auto rounded-lg border border-gray-200 p-0.5 text-sm [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
               {([
                 { key: "pending" as const, label: "Proses Packaging", count: packagingPending.length },
                 { key: "history" as const, label: "History", count: packagingHistory.length },
@@ -472,7 +472,7 @@ function ProduksiCssdPage() {
                     setPage(1)
                   }}
                   className={
-                    "rounded-md px-3 py-1.5 font-medium transition-colors " +
+                    "shrink-0 whitespace-nowrap rounded-md px-3 py-1.5 font-medium transition-colors " +
                     (pkgView === v.key
                       ? "bg-[#075489] text-white"
                       : "text-gray-600 hover:bg-gray-100")
@@ -485,7 +485,7 @@ function ProduksiCssdPage() {
           )}
           {/* Sub-tampilan tab Sterilisasi: Proses Steril / Validasi Hasil / Gagal Steril. */}
           {tab === "sterilization" && (
-            <div className="mb-3 inline-flex rounded-lg border border-gray-200 p-0.5 text-sm">
+            <div className="mb-3 inline-flex max-w-full overflow-x-auto rounded-lg border border-gray-200 p-0.5 text-sm [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
               {([
                 { key: "proses" as const, label: "Proses Steril", count: sterProses.length },
                 { key: "validasi" as const, label: "Validasi Hasil", count: sterValidasi.length },
@@ -500,7 +500,7 @@ function ProduksiCssdPage() {
                     setPage(1)
                   }}
                   className={
-                    "rounded-md px-3 py-1.5 font-medium transition-colors " +
+                    "shrink-0 whitespace-nowrap rounded-md px-3 py-1.5 font-medium transition-colors " +
                     (sterView === v.key
                       ? v.key === "gagal"
                         ? "bg-red-600 text-white"

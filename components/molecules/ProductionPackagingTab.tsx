@@ -103,14 +103,15 @@ function groupUnits(units: ProdPackagingUnit[]): UnitGroup[] {
   return groups
 }
 
-// Rincian isi sebuah paket dalam batch: instrumen penyusun + jumlah unitnya.
+// Rincian isi sebuah paket dalam batch: instrumen penyusun + jumlah unit + gambar.
 function paketBreakdown(batch: ProdPackagingBatch, packageName: string) {
-  const map = new Map<string, { name: string; qty: number }>()
+  const map = new Map<string, { name: string; qty: number; image: string | null }>()
   for (const u of batch.units) {
     if (u.source !== "paket" || u.package_name !== packageName) continue
     const name = u.instrument?.name ?? "Instrumen"
-    const cur = map.get(name) ?? { name, qty: 0 }
+    const cur = map.get(name) ?? { name, qty: 0, image: null }
     cur.qty += 1
+    if (!cur.image && u.instrument?.image_url) cur.image = u.instrument.image_url
     map.set(name, cur)
   }
   return [...map.values()]
@@ -421,13 +422,36 @@ export function ProductionPackagingTab({
                       <p className="mb-1 text-[11px] font-semibold text-gray-500">
                         Isi {openPaket.split("::")[1]}:
                       </p>
-                      <div className="flex flex-wrap gap-1">
+                      <div className="flex flex-wrap gap-1.5">
                         {paketBreakdown(batch, openPaket.split("::")[1]).map((p) => (
                           <span
                             key={p.name}
-                            className="rounded bg-white px-1.5 py-0.5 text-[11px] text-gray-600 ring-1 ring-gray-200"
+                            className="inline-flex items-center gap-1.5 rounded-md bg-white py-1 pl-1 pr-2 text-[11px] text-gray-600 ring-1 ring-gray-200"
                           >
-                            {p.name} ×{p.qty}
+                            {p.image ? (
+                              <button
+                                type="button"
+                                onClick={() => setZoom({ url: p.image as string, name: p.name })}
+                                title="Klik untuk perbesar"
+                                className="group relative h-7 w-7 shrink-0 cursor-zoom-in overflow-hidden rounded-md border border-gray-200"
+                              >
+                                {/* eslint-disable-next-line @next/next/no-img-element */}
+                                <img
+                                  src={p.image}
+                                  alt={p.name}
+                                  className="h-full w-full object-cover transition-transform group-hover:scale-105"
+                                />
+                                <span className="absolute inset-0 flex items-center justify-center bg-black/0 text-white opacity-0 transition group-hover:bg-black/30 group-hover:opacity-100">
+                                  <ZoomIn className="h-3 w-3" />
+                                </span>
+                              </button>
+                            ) : (
+                              <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-[#075489]/8">
+                                <Package className="h-3.5 w-3.5 text-[#075489]" />
+                              </span>
+                            )}
+                            <span className="font-medium text-gray-800">{p.name}</span>
+                            <span className="text-gray-400">×{p.qty}</span>
                           </span>
                         ))}
                       </div>

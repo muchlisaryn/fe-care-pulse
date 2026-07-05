@@ -44,8 +44,85 @@ export function DataTable<T extends object>({
 }: DataTableProps<T>) {
   const hasActions = !!(onEdit || onDelete || extraActions?.length)
 
+  // Tombol aksi baris — dipakai bersama oleh tampilan tabel (desktop) & kartu (mobile).
+  function renderActions(row: T, rowLoading: boolean) {
+    return (
+      <>
+        {extraActions?.map((action, k) => (
+          <Button
+            key={k}
+            size="xs"
+            variant="outline"
+            disabled={rowLoading}
+            onClick={() => action.onClick(row)}
+            className={action.className}
+          >
+            {action.label}
+          </Button>
+        ))}
+        {onEdit && (
+          <Button size="xs" variant="outline" disabled={rowLoading} onClick={() => onEdit(row)}>
+            Edit
+          </Button>
+        )}
+        {onDelete && (canDelete?.(row) ?? true) && (
+          <Button size="xs" variant="destructive" disabled={rowLoading} onClick={() => onDelete(row)}>
+            {rowLoading ? "..." : "Hapus"}
+          </Button>
+        )}
+      </>
+    )
+  }
+
   return (
-    <div className="overflow-x-auto">
+    <>
+      {/* Mobile: tiap baris jadi kartu (label : nilai) agar rapi & tak terpotong. */}
+      <div className="space-y-3 p-4 md:hidden">
+        {data.length === 0 ? (
+          <p className="py-10 text-center text-sm text-gray-400">{emptyMessage}</p>
+        ) : (
+          data.map((row, i) => {
+            const rowLoading = isRowLoading?.(row) ?? false
+            return (
+              <div
+                key={i}
+                className={cn(
+                  "overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm transition-opacity",
+                  rowLoading && "opacity-60"
+                )}
+              >
+                {!hideRowNumber && (
+                  <div className="flex items-center border-b border-gray-100 bg-gray-50/70 px-4 py-2">
+                    <span className="inline-flex h-6 items-center justify-center rounded-full bg-[#075489]/10 px-2.5 text-xs font-semibold text-[#075489]">
+                      No {rowNumber ? rowNumber(row, i) : i + 1}
+                    </span>
+                  </div>
+                )}
+                <dl className="divide-y divide-gray-50">
+                  {columns.map((col, j) => (
+                    <div key={j} className="flex items-start justify-between gap-4 px-4 py-2.5">
+                      <dt className="shrink-0 pt-0.5 text-[11px] font-medium uppercase tracking-wide text-gray-400">
+                        {col.header}
+                      </dt>
+                      <dd className="min-w-0 text-right text-sm font-medium text-gray-800">
+                        {col.cell(row, i)}
+                      </dd>
+                    </div>
+                  ))}
+                </dl>
+                {hasActions && (
+                  <div className="flex flex-wrap justify-end gap-2 border-t border-gray-100 bg-gray-50/50 px-4 py-2.5">
+                    {renderActions(row, rowLoading)}
+                  </div>
+                )}
+              </div>
+            )
+          })
+        )}
+      </div>
+
+      {/* Desktop: tabel penuh (scroll horizontal bila perlu). */}
+      <div className="hidden overflow-x-auto md:block">
       <table className="w-full text-sm">
         <thead>
           <tr className="border-b border-gray-100">
@@ -105,30 +182,7 @@ export function DataTable<T extends object>({
                   ))}
                   {hasActions && (
                     <td className="py-3 pl-3 pr-4">
-                      <div className="flex justify-end gap-2">
-                        {extraActions?.map((action, k) => (
-                          <Button
-                            key={k}
-                            size="xs"
-                            variant="outline"
-                            disabled={rowLoading}
-                            onClick={() => action.onClick(row)}
-                            className={action.className}
-                          >
-                            {action.label}
-                          </Button>
-                        ))}
-                        {onEdit && (
-                          <Button size="xs" variant="outline" disabled={rowLoading} onClick={() => onEdit(row)}>
-                            Edit
-                          </Button>
-                        )}
-                        {onDelete && (canDelete?.(row) ?? true) && (
-                          <Button size="xs" variant="destructive" disabled={rowLoading} onClick={() => onDelete(row)}>
-                            {rowLoading ? "..." : "Hapus"}
-                          </Button>
-                        )}
-                      </div>
+                      <div className="flex justify-end gap-2">{renderActions(row, rowLoading)}</div>
                     </td>
                   )}
                 </tr>
@@ -137,6 +191,7 @@ export function DataTable<T extends object>({
           )}
         </tbody>
       </table>
-    </div>
+      </div>
+    </>
   )
 }

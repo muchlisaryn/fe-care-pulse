@@ -973,7 +973,7 @@ function MonitoringCssd() {
             </p>
           </div>
           {/* Tab kategori order — gaya underline (seperti tab Google) */}
-          <div className="flex flex-wrap gap-6 border-b border-gray-200">
+          <div className="flex gap-5 overflow-x-auto border-b border-gray-200 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
             {(
               [
                 { key: "masuk", label: "Order Masuk", count: masukCount },
@@ -988,7 +988,7 @@ function MonitoringCssd() {
                   onClick={() => changeTab(t.key)}
                   aria-pressed={active}
                   className={
-                    "relative -mb-px flex items-center gap-2 border-b-2 px-1 pb-2.5 pt-1 text-sm transition-colors " +
+                    "relative -mb-px flex shrink-0 items-center gap-2 whitespace-nowrap border-b-2 px-1 pb-2.5 pt-1 text-sm transition-colors " +
                     (active
                       ? "border-[#075489] font-semibold text-[#075489]"
                       : "border-transparent font-medium text-gray-500 hover:text-gray-800")
@@ -1341,7 +1341,7 @@ function MonitoringCssd() {
         title={processTarget ? `Terima Order — ${processTarget.code}` : "Terima Order"}
         size="lg"
         footer={
-          <div className="flex w-full items-center justify-between gap-3">
+          <div className="flex w-full flex-col items-stretch gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
             {processError ? (
               <p className="text-sm text-red-600">{processError}</p>
             ) : (
@@ -1349,7 +1349,7 @@ function MonitoringCssd() {
                 Unit steril dialokasikan otomatis (FEFO) & order langsung siap didistribusikan.
               </span>
             )}
-            <div className="flex shrink-0 gap-2">
+            <div className="flex shrink-0 justify-end gap-2">
               <Button variant="outline" onClick={() => setProcessTarget(null)} disabled={processing}>
                 Batal
               </Button>
@@ -1416,7 +1416,7 @@ function MonitoringCssd() {
             ? returnOrder.items.filter((u) => !u.is_returned && returnCondById[u.id]).length
             : 0
           return (
-            <div className="flex w-full items-center justify-between gap-3">
+            <div className="flex w-full flex-col items-stretch gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
               {returnOrder && returnOrder.status !== "dikembalikan" ? (
                 <span className="text-xs text-gray-400">
                   {readyCount > 0
@@ -1426,7 +1426,7 @@ function MonitoringCssd() {
               ) : (
                 <span />
               )}
-              <div className="flex shrink-0 gap-2">
+              <div className="flex shrink-0 justify-end gap-2">
                 <Button variant="outline" onClick={() => setReturnOpen(false)}>
                   Tutup
                 </Button>
@@ -1825,7 +1825,7 @@ function OrderGroupCard({
   const orderOpen = expandedOrder.has(o.order_code)
   return (
           <div className={"rounded-lg border border-gray-200 border-l-4 " + STATUS_BORDER.dipinjam}>
-            <div className="flex items-start gap-1 px-1">
+            <div className="flex flex-col px-1 sm:flex-row sm:items-start sm:gap-1">
               <button
                 type="button"
                 onClick={() => toggleOrder(o.order_code)}
@@ -1855,27 +1855,33 @@ function OrderGroupCard({
                 </div>
                 <span className="shrink-0 text-xs text-gray-500">{o.totalQty} unit</span>
               </button>
-              {onReturn && (
-                <button
-                  type="button"
-                  onClick={() => onReturn(o.order_code)}
-                  title="Pengembalian order ini"
-                  aria-label="Pengembalian order ini"
-                  className="mt-1.5 flex shrink-0 items-center justify-center rounded-md border border-[#075489] bg-[#075489] p-1.5 text-white hover:bg-[#075489]/90"
-                >
-                  <Undo2 className="h-4 w-4" />
-                </button>
-              )}
-              {onPrintBarcode && (
-                <button
-                  type="button"
-                  onClick={() => onPrintBarcode(o.code_transaction ?? o.order_code)}
-                  title="Cetak barcode order"
-                  aria-label="Cetak barcode order"
-                  className="mt-1.5 flex shrink-0 items-center justify-center rounded-md border border-[#075489] p-1.5 text-[#075489] hover:bg-[#075489]/10"
-                >
-                  <BarcodeIcon className="h-4 w-4" />
-                </button>
+              {(onReturn || onPrintBarcode) && (
+                <div className="flex gap-1.5 border-t border-gray-100 px-2 py-2 sm:mt-1.5 sm:shrink-0 sm:border-0 sm:px-0 sm:py-0 sm:pr-1">
+                  {onReturn && (
+                    <button
+                      type="button"
+                      onClick={() => onReturn(o.order_code)}
+                      title="Pengembalian order ini"
+                      aria-label="Pengembalian order ini"
+                      className="flex flex-1 items-center justify-center gap-1.5 rounded-md border border-[#075489] bg-[#075489] px-3 py-1.5 text-xs font-medium text-white hover:bg-[#075489]/90 sm:flex-none sm:px-1.5"
+                    >
+                      <Undo2 className="h-4 w-4" />
+                      <span className="sm:hidden">Kembalikan</span>
+                    </button>
+                  )}
+                  {onPrintBarcode && (
+                    <button
+                      type="button"
+                      onClick={() => onPrintBarcode(o.code_transaction ?? o.order_code)}
+                      title="Cetak barcode order"
+                      aria-label="Cetak barcode order"
+                      className="flex flex-1 items-center justify-center gap-1.5 rounded-md border border-[#075489] px-3 py-1.5 text-xs font-medium text-[#075489] hover:bg-[#075489]/10 sm:flex-none sm:px-1.5"
+                    >
+                      <BarcodeIcon className="h-4 w-4" />
+                      <span className="sm:hidden">Barcode</span>
+                    </button>
+                  )}
+                </div>
               )}
             </div>
 
@@ -1991,7 +1997,7 @@ function IncomingOrderCard({
         (STATUS_BORDER[order.status] ?? "border-l-gray-300")
       }
     >
-      <div className="flex items-start gap-1 px-1">
+      <div className="flex flex-col px-1 sm:flex-row sm:items-start sm:gap-1">
         <button
           type="button"
           onClick={onToggle}
@@ -2023,18 +2029,18 @@ function IncomingOrderCard({
             {order.requested_qty} unit · {order.request_lines} jenis
           </span>
         </button>
-        <div className="mt-1.5 flex shrink-0 flex-wrap items-center justify-end gap-1.5 pr-1">
+        <div className="flex items-center gap-1.5 border-t border-gray-100 px-2 py-2 sm:mt-1.5 sm:shrink-0 sm:justify-end sm:border-0 sm:px-0 sm:py-0 sm:pr-1">
           <button
             type="button"
             onClick={onProcess}
-            className="rounded-md border border-[#4ba69d] bg-[#4ba69d] px-2 py-1 text-xs font-medium text-white hover:bg-[#4ba69d]/90"
+            className="flex-1 rounded-md border border-[#4ba69d] bg-[#4ba69d] px-3 py-1.5 text-xs font-medium text-white hover:bg-[#4ba69d]/90 sm:flex-none sm:px-2 sm:py-1"
           >
             Terima &amp; Distribusi
           </button>
           <button
             type="button"
             onClick={onCancel}
-            className="rounded-md border border-red-300 px-2 py-1 text-xs font-medium text-red-600 hover:bg-red-50"
+            className="flex-1 rounded-md border border-red-300 px-3 py-1.5 text-xs font-medium text-red-600 hover:bg-red-50 sm:flex-none sm:px-2 sm:py-1"
           >
             Batal
           </button>
@@ -2074,7 +2080,7 @@ function ReturnedOrderCard({
 }) {
   return (
     <div className={"rounded-lg border border-gray-200 border-l-4 " + STATUS_BORDER.dikembalikan}>
-      <div className="flex items-start gap-1 px-1">
+      <div className="flex flex-col px-1 sm:flex-row sm:items-start sm:gap-1">
         <button
           type="button"
           onClick={onToggle}
@@ -2103,15 +2109,18 @@ function ReturnedOrderCard({
           </div>
           <span className="shrink-0 text-xs text-gray-500">{order.total_units} unit</span>
         </button>
-        <button
-          type="button"
-          onClick={onHistory}
-          title="Riwayat peminjaman"
-          aria-label="Riwayat peminjaman"
-          className="mt-1.5 flex shrink-0 items-center justify-center rounded-md border border-[#075489] p-1.5 text-[#075489] hover:bg-[#075489]/10"
-        >
-          <History className="h-4 w-4" />
-        </button>
+        <div className="flex border-t border-gray-100 px-2 py-2 sm:mt-1.5 sm:shrink-0 sm:border-0 sm:px-0 sm:py-0 sm:pr-1">
+          <button
+            type="button"
+            onClick={onHistory}
+            title="Riwayat peminjaman"
+            aria-label="Riwayat peminjaman"
+            className="flex flex-1 items-center justify-center gap-1.5 rounded-md border border-[#075489] px-3 py-1.5 text-xs font-medium text-[#075489] hover:bg-[#075489]/10 sm:flex-none sm:px-1.5"
+          >
+            <History className="h-4 w-4" />
+            <span className="sm:hidden">Riwayat</span>
+          </button>
+        </div>
       </div>
 
       {expanded && (
@@ -2174,13 +2183,17 @@ function ReturnedUnitsDetail({ order }: { order: ReturnOrder }) {
 // Satu baris unit pada rincian order dikembalikan: kode + nama + kondisi keluar → masuk.
 function ReturnedUnitRow({ unit, satuan = false }: { unit: ReturnUnit; satuan?: boolean }) {
   return (
-    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 px-3 py-2">
-      {satuan && <Badge variant="default">Satuan</Badge>}
-      <span className="font-mono text-xs font-semibold text-[#4ba69d] bg-[#4ba69d]/10 px-2 py-0.5 rounded">
-        {unit.instrument_stock?.code ?? "—"}
-      </span>
-      <span className="text-sm text-gray-700">{unit.instrument_stock?.instrument?.name ?? "—"}</span>
-      <span className="ml-auto flex items-center gap-1.5 text-xs text-gray-500">
+    <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1.5 px-3 py-2">
+      {/* Kiri: identitas unit (badge + kode + nama) */}
+      <div className="flex min-w-0 items-center gap-2">
+        {satuan && <Badge variant="default">Satuan</Badge>}
+        <span className="shrink-0 font-mono text-xs font-semibold text-[#4ba69d] bg-[#4ba69d]/10 px-2 py-0.5 rounded">
+          {unit.instrument_stock?.code ?? "—"}
+        </span>
+        <span className="truncate text-sm text-gray-700">{unit.instrument_stock?.instrument?.name ?? "—"}</span>
+      </div>
+      {/* Kanan: kondisi keluar → masuk (turun ke baris bawah bila sempit) */}
+      <span className="flex items-center gap-1.5 text-xs text-gray-500">
         <span>{unit.condition_out?.name ?? "—"}</span>
         <span className="text-gray-300">→</span>
         <span className="font-medium text-gray-700">{unit.condition_in?.name ?? "—"}</span>

@@ -400,7 +400,7 @@ export function CleaningTab({
         title={active ? `Catatan Pencucian — ${active.code}` : "Catatan Pencucian"}
         size="lg"
         footer={
-          <div className="flex w-full items-center justify-between gap-3">
+          <div className="flex w-full flex-col items-stretch gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
             {error ? (
               <p className="text-sm text-red-600">{error}</p>
             ) : canceledActive ? (
@@ -412,7 +412,7 @@ export function CleaningTab({
                 Isi data pencucian, lalu Simpan. Tandai Selesai dari kartu untuk lanjut ke packaging.
               </span>
             )}
-            <div className="flex shrink-0 gap-2">
+            <div className="flex shrink-0 justify-end gap-2">
               <Button variant="outline" onClick={() => setActive(null)}>
                 Tutup
               </Button>
@@ -629,10 +629,10 @@ export function CleaningTab({
                 <button
                   type="button"
                   onClick={() => setFailMode(true)}
-                  className="flex items-center gap-1.5 text-xs font-medium text-red-600 hover:text-red-700"
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-red-300 bg-red-50 px-3 py-2 text-sm font-medium text-red-600 transition-colors hover:bg-red-100"
                 >
                   <XCircle className="h-4 w-4" />
-                  Tandai pencucian gagal (wajib diulang)
+                  Tandai Pencucian Gagal
                 </button>
               ))}
 
@@ -658,13 +658,13 @@ export function CleaningTab({
         title="Selesaikan Cleaning & Disinfection"
         size="sm"
         footer={
-          <div className="flex w-full items-center justify-between gap-3">
+          <div className="flex w-full flex-col items-stretch gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
             {confirmError ? (
               <p className="text-sm text-red-600">{confirmError}</p>
             ) : (
               <span className="text-xs text-gray-400">Order akan lanjut ke Inspection &amp; Packaging.</span>
             )}
-            <div className="flex shrink-0 gap-2">
+            <div className="flex shrink-0 justify-end gap-2">
               <Button
                 variant="outline"
                 onClick={() => setConfirmTarget(null)}
@@ -769,6 +769,8 @@ function CleaningOrderCard({
   const inProcess = !washed && !canceled && isWashingFilled(order)
   // Paket yang isinya sedang ditampilkan (klik chip paket).
   const [openPaket, setOpenPaket] = useState<string | null>(null)
+  // Foto instrumen yang sedang di-zoom (klik thumbnail isi set) — null = tidak ada.
+  const [zoom, setZoom] = useState<{ url: string; name: string } | null>(null)
   // Gambar per instrumen/paket (dari unit) untuk thumbnail di chip.
   const imageByName: Record<string, string> = {}
   for (const u of order.units ?? []) {
@@ -862,17 +864,39 @@ function CleaningOrderCard({
                   className="mt-1.5 rounded-md border border-gray-100 bg-gray-50 px-2 py-1.5"
                 >
                   <p className="mb-1 text-[11px] font-semibold text-gray-500">Isi {openPaket}:</p>
-                  <div className="flex flex-wrap gap-1">
+                  <div className="flex flex-wrap gap-1.5">
                     {paketBreakdown(order, openPaket).map((p) => (
                       <span
                         key={p.name}
-                        className="inline-flex items-center gap-1 rounded bg-white py-0.5 pl-0.5 pr-1.5 text-[11px] text-gray-600 ring-1 ring-gray-200"
+                        className="inline-flex items-center gap-1.5 rounded-md bg-white py-1 pl-1 pr-2 text-[11px] text-gray-600 ring-1 ring-gray-200"
                       >
                         {imageByName[p.name] ? (
-                          // eslint-disable-next-line @next/next/no-img-element
-                          <img src={imageByName[p.name]} alt={p.name} className="h-4 w-4 shrink-0 rounded object-cover" />
-                        ) : null}
-                        {p.name} ×{p.qty}
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              setZoom({ url: imageByName[p.name], name: p.name })
+                            }}
+                            title="Klik untuk perbesar"
+                            className="group relative h-7 w-7 shrink-0 cursor-zoom-in overflow-hidden rounded-md border border-gray-200"
+                          >
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                            <img
+                              src={imageByName[p.name]}
+                              alt={p.name}
+                              className="h-full w-full object-cover transition-transform group-hover:scale-105"
+                            />
+                            <span className="absolute inset-0 flex items-center justify-center bg-black/0 text-white opacity-0 transition group-hover:bg-black/30 group-hover:opacity-100">
+                              <ZoomIn className="h-3 w-3" />
+                            </span>
+                          </button>
+                        ) : (
+                          <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-[#075489]/8">
+                            <Package className="h-3.5 w-3.5 text-[#075489]" />
+                          </span>
+                        )}
+                        <span className="font-medium text-gray-800">{p.name}</span>
+                        <span className="text-gray-400">×{p.qty}</span>
                       </span>
                     ))}
                   </div>
@@ -931,6 +955,30 @@ function CleaningOrderCard({
           )}
         </div>
       </div>
+
+      {/* Zoom foto instrumen isi set — overlay layar penuh */}
+      {zoom && (
+        <div
+          className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 p-4"
+          onClick={() => setZoom(null)}
+          role="dialog"
+          aria-modal="true"
+        >
+          <button
+            type="button"
+            onClick={() => setZoom(null)}
+            className="absolute right-4 top-4 rounded-full bg-white/10 p-2 text-white hover:bg-white/20"
+            title="Tutup"
+          >
+            <X className="h-5 w-5" />
+          </button>
+          <div className="flex max-h-full max-w-3xl flex-col items-center gap-2" onClick={(e) => e.stopPropagation()}>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={zoom.url} alt={zoom.name} className="max-h-[80vh] w-auto rounded-lg object-contain shadow-2xl" />
+            <p className="text-sm font-medium text-white">{zoom.name}</p>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
