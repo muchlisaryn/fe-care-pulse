@@ -30,6 +30,7 @@ const emptyForm = {
   max_temperature: "",
   min_duration_minutes: "",
   max_duration_minutes: "",
+  sterile_shelf_life_days: "",
   status: "aktif",
   note: "",
 }
@@ -85,6 +86,7 @@ export default function MasterWasherMachinePage() {
       max_temperature: row.max_temperature ?? "",
       min_duration_minutes: row.min_duration_minutes?.toString() ?? "",
       max_duration_minutes: row.max_duration_minutes?.toString() ?? "",
+      sterile_shelf_life_days: row.sterile_shelf_life_days?.toString() ?? "",
       status: row.status,
       note: row.note ?? "",
     })
@@ -104,6 +106,7 @@ export default function MasterWasherMachinePage() {
         max_temperature: num(form.max_temperature),
         min_duration_minutes: num(form.min_duration_minutes),
         max_duration_minutes: num(form.max_duration_minutes),
+        sterile_shelf_life_days: num(form.sterile_shelf_life_days),
         status: form.status,
         note: form.note.trim() || null,
       }
@@ -172,6 +175,15 @@ export default function MasterWasherMachinePage() {
       cell: (row) => (
         <span className="text-gray-700">
           {fmtRange(row.min_duration_minutes, row.max_duration_minutes, " mnt")}
+        </span>
+      ),
+      className: "w-28",
+    },
+    {
+      header: "Batas Steril",
+      cell: (row) => (
+        <span className="text-gray-700">
+          {row.sterile_shelf_life_days === null ? "—" : `${row.sterile_shelf_life_days} hari`}
         </span>
       ),
       className: "w-28",
@@ -343,6 +355,20 @@ export default function MasterWasherMachinePage() {
               {rangeError}
             </p>
           )}
+          <div className="space-y-1.5">
+            <Label htmlFor="wm-shelf-life">Batas Steril (hari)</Label>
+            <Input
+              id="wm-shelf-life"
+              type="number"
+              min={1}
+              placeholder="Contoh: 7"
+              value={form.sterile_shelf_life_days}
+              onChange={(e) => setForm((f) => ({ ...f, sterile_shelf_life_days: e.target.value }))}
+            />
+            <p className="text-xs text-gray-400">
+              Masa simpan steril untuk alat yang dicuci di mesin ini. Menentukan tanggal kedaluwarsa.
+            </p>
+          </div>
           <div className="space-y-1.5">
             <Label htmlFor="wm-status">Status</Label>
             <Select

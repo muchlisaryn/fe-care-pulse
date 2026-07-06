@@ -2,17 +2,7 @@
 
 import { Fragment, useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
-import {
-  ChevronRight,
-  Plus,
-  Minus,
-  UserRound,
-  CalendarDays,
-  StickyNote,
-  PackageSearch,
-  ShieldCheck,
-  PackagePlus,
-} from "lucide-react"
+import { ChevronRight, Plus, Minus } from "lucide-react"
 import { Button } from "@/components/atoms/Button"
 import { Input } from "@/components/atoms/Input"
 import { Label } from "@/components/atoms/Label"
@@ -350,7 +340,6 @@ export default function TambahOrderInstrumenPage() {
       {/* Data Peminjam & Pasien */}
       <Card className="space-y-5">
         <FormSectionHeader
-          icon={UserRound}
           title="Data Peminjam & Pasien"
           description="Peminjam, ruangan tujuan, dan identitas pasien"
         />
@@ -418,7 +407,6 @@ export default function TambahOrderInstrumenPage() {
       {/* Jadwal Peminjaman */}
       <Card className="space-y-5">
         <FormSectionHeader
-          icon={CalendarDays}
           title="Jadwal Peminjaman"
           description="Kapan instrumen dipinjam dan direncanakan kembali"
           accent="#4ba69d"
@@ -461,7 +449,6 @@ export default function TambahOrderInstrumenPage() {
       {/* Catatan */}
       <Card className="space-y-5">
         <FormSectionHeader
-          icon={StickyNote}
           title="Catatan"
           description="Keterangan tambahan (opsional)"
         />
@@ -483,28 +470,14 @@ export default function TambahOrderInstrumenPage() {
       <Card className="p-0">
         <div className="flex items-center justify-between gap-3 border-b border-gray-100 px-5 py-4">
           <FormSectionHeader
-            icon={PackageSearch}
             title="Daftar Permintaan"
             description="Instrumen atau paket yang akan dipinjam"
           />
           {requests.length > 0 && <Badge variant="info">{totalQty} unit</Badge>}
         </div>
 
-        {/* Info: hanya barang steril yang bisa diorder */}
-        <div className="flex items-start gap-2 border-b border-gray-100 bg-[#4ba69d]/5 px-5 py-3 text-xs text-[#357c74]">
-          <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-[#4ba69d]" />
-          <span>
-            Hanya barang yang <strong className="font-semibold">sudah steril</strong> (tersimpan di gudang
-            steril) yang bisa diorder.
-          </span>
-        </div>
-
         {/* Form tambah permintaan */}
         <div className="bg-gray-50 px-5 py-4">
-          <div className="mb-3 flex items-center gap-2 text-xs font-bold uppercase tracking-widest text-gray-400">
-            <PackagePlus className="h-4 w-4" />
-            Tambah Permintaan
-          </div>
 
           {/* Pilihan mode: satuan vs paket */}
           <div className="mb-4 inline-flex rounded-lg border border-gray-200 bg-white p-1">

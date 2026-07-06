@@ -65,7 +65,9 @@ const METHOD_DEFAULTS: Record<string, { temperature: string; duration_minutes: s
   plasma: { temperature: "50", duration_minutes: "47" },
   panas_kering: { temperature: "170", duration_minutes: "60" },
 }
-const emptyForm = { machine: "", method: "uap", cycle_number: "", temperature: "", duration_minutes: "", sterilized_at: "", note: "" }
+// Masa simpan steril default (hari) — cocok dgn Sterilization::STERILE_SHELF_LIFE_DAYS di BE.
+const SHELF_LIFE_DAYS = 7
+const emptyForm = { machine: "", method: "uap", cycle_number: "", temperature: "", duration_minutes: "", sterilized_at: "", expiry_date: "", note: "" }
 
 /**
  * Tab Sterilisasi pipeline PRODUKSI. Beberapa item "Siap Disterilkan" (satuan/paket)
@@ -163,6 +165,7 @@ export function ProductionSterilizationTab({
         temperature: num(form.temperature),
         duration_minutes: num(form.duration_minutes),
         sterilized_at: new Date(form.sterilized_at).toISOString(),
+        expiry_date: form.expiry_date || null,
         note: form.note.trim() || null,
       })
       setDone({ batch: res.data?.data?.code ?? "—", count: selectedReady.length })
@@ -481,6 +484,11 @@ export function ProductionSterilizationTab({
             <div className="space-y-1.5">
               <Label htmlFor="pstr-at">Waktu Sterilisasi *</Label>
               <Input id="pstr-at" type="datetime-local" value={form.sterilized_at} onChange={(e) => setForm((f) => ({ ...f, sterilized_at: e.target.value }))} />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="pstr-expiry">Tanggal Kedaluwarsa Steril</Label>
+              <Input id="pstr-expiry" type="date" min={form.sterilized_at ? form.sterilized_at.slice(0, 10) : undefined} value={form.expiry_date} onChange={(e) => setForm((f) => ({ ...f, expiry_date: e.target.value }))} />
+              <p className="text-xs text-gray-400">Kosongkan untuk memakai default (tgl kemas + {SHELF_LIFE_DAYS} hari).</p>
             </div>
           </div>
 

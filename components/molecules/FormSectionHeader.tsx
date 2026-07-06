@@ -1,7 +1,7 @@
 import type { LucideIcon } from "lucide-react"
 
 type FormSectionHeaderProps = {
-  icon: LucideIcon
+  icon?: LucideIcon
   title: string
   description?: string
   /** Tailwind text/bg accent, e.g. "#075489" (default) or "#4ba69d". */
@@ -21,12 +21,14 @@ export function FormSectionHeader({
   return (
     <div className="flex items-center justify-between gap-3">
       <div className="flex items-center gap-3">
-        <div
-          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg"
-          style={{ backgroundColor: `${accent}1a`, color: accent }}
-        >
-          <Icon className="h-[18px] w-[18px]" />
-        </div>
+        {Icon && (
+          <div
+            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg"
+            style={{ backgroundColor: `${accent}1a`, color: accent }}
+          >
+            <Icon className="h-[18px] w-[18px]" />
+          </div>
+        )}
         <div>
           <h3 className="text-sm font-semibold text-gray-900">{title}</h3>
           {description && <p className="mt-0.5 text-xs text-gray-400">{description}</p>}

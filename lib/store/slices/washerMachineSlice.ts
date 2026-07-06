@@ -10,6 +10,7 @@ export type WasherMachine = {
   max_temperature: string | null
   min_duration_minutes: number | null
   max_duration_minutes: number | null
+  sterile_shelf_life_days: number | null
   status: "aktif" | "nonaktif"
   note: string | null
   created_at: string
