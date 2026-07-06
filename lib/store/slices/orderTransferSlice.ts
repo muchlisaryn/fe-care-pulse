@@ -24,6 +24,8 @@ export type OrderTransfer = {
   requested_by_user_id: number
   to_room_id: number
   borrowed_by: string | null
+  medical_record_no: string | null
+  patient_name: string | null
   note: string | null
   status: TransferStatus
   responded_at: string | null

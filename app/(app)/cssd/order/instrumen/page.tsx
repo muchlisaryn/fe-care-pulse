@@ -121,6 +121,8 @@ type BorrowedOrder = {
   id: number
   code: string
   borrowedBy: string | null
+  medicalRecordNo: string | null
+  patientName: string | null
   room: { id: number; name: string } | null
   orderDate: string | null
   orderTime: string | null
@@ -225,6 +227,9 @@ export default function OrderInstrumenPage() {
   const [pinjamTarget, setPinjamTarget] = useState<PinjamTarget | null>(null)
   const [pinjamRoomId, setPinjamRoomId] = useState("")
   const [pinjamBorrowedBy, setPinjamBorrowedBy] = useState("")
+  // Pinjam-alih bisa untuk pasien berbeda dari order sumber → dicatat per permintaan.
+  const [pinjamMedicalRecordNo, setPinjamMedicalRecordNo] = useState("")
+  const [pinjamPatientName, setPinjamPatientName] = useState("")
   const [pinjamNote, setPinjamNote] = useState("")
   const [pinjamSaving, setPinjamSaving] = useState(false)
   const [pinjamError, setPinjamError] = useState<string | null>(null)
@@ -260,6 +265,8 @@ export default function OrderInstrumenPage() {
         id: number
         code: string
         borrowed_by: string | null
+        medical_record_no: string | null
+        patient_name: string | null
         room: { id: number; name: string } | null
         order_date: string | null
         order_time: string | null
@@ -271,6 +278,8 @@ export default function OrderInstrumenPage() {
           id: o.id,
           code: o.code,
           borrowedBy: o.borrowed_by,
+          medicalRecordNo: o.medical_record_no,
+          patientName: o.patient_name,
           room: o.room,
           orderDate: o.order_date,
           orderTime: o.order_time,
@@ -341,6 +350,9 @@ export default function OrderInstrumenPage() {
     setPinjamRoomId("")
     // Default nama peminjam = user yang sedang login.
     setPinjamBorrowedBy(authName ?? "")
+    // Pasien dikosongkan — peminjam baru mengisi pasien tujuan pinjam-alih.
+    setPinjamMedicalRecordNo("")
+    setPinjamPatientName("")
     setPinjamNote("")
     setPinjamError(null)
     setPinjamSuccess(false)
@@ -357,6 +369,14 @@ export default function OrderInstrumenPage() {
       setPinjamError("Nama peminjam wajib diisi.")
       return
     }
+    if (!pinjamMedicalRecordNo.trim()) {
+      setPinjamError("No. RM pasien wajib diisi.")
+      return
+    }
+    if (!pinjamPatientName.trim()) {
+      setPinjamError("Nama pasien wajib diisi.")
+      return
+    }
     setPinjamSaving(true)
     setPinjamError(null)
     try {
@@ -364,6 +384,8 @@ export default function OrderInstrumenPage() {
         from_order_id: pinjamTarget.fromOrderId,
         to_room_id: Number(pinjamRoomId),
         borrowed_by: pinjamBorrowedBy.trim(),
+        medical_record_no: pinjamMedicalRecordNo.trim(),
+        patient_name: pinjamPatientName.trim(),
         note: pinjamNote.trim() || null,
         instrument_stock_ids: pinjamTarget.units.map((u) => u.stockId),
       })
@@ -497,7 +519,9 @@ export default function OrderInstrumenPage() {
     const out = []
     for (const o of borrowedOrders) {
       const borrowerMatch = !q || (o.borrowedBy ?? "").toLowerCase().includes(q) ||
-        (o.room?.name ?? "").toLowerCase().includes(q)
+        (o.room?.name ?? "").toLowerCase().includes(q) ||
+        (o.medicalRecordNo ?? "").toLowerCase().includes(q) ||
+        (o.patientName ?? "").toLowerCase().includes(q)
       const units = o.units.filter((u) => !q || borrowerMatch || unitMatch(u))
       if (units.length === 0) continue
 
@@ -627,6 +651,20 @@ export default function OrderInstrumenPage() {
         const name = row.borrowed_by ?? row.user?.name
         return name ? <span className="font-medium text-gray-900">{name}</span> : dash
       },
+    },
+    {
+      header: "Medical Record No.",
+      cell: (row) =>
+        row.medical_record_no ? (
+          <span className="font-mono text-sm text-gray-700">{row.medical_record_no}</span>
+        ) : (
+          dash
+        ),
+    },
+    {
+      header: "Patient Name",
+      cell: (row) =>
+        row.patient_name ? <span className="text-gray-700">{row.patient_name}</span> : dash,
     },
     {
       header: "Ruangan",
@@ -834,6 +872,8 @@ export default function OrderInstrumenPage() {
                             </span>
                           </div>
                           <div className="mt-1 flex flex-wrap gap-x-4 gap-y-0.5 text-xs text-gray-500">
+                            <span>No. RM: {o.medicalRecordNo ?? "—"}</span>
+                            <span>Pasien: {o.patientName ?? "—"}</span>
                             <span>Pinjam: {formatDateWithTime(o.orderDate, o.orderTime) ?? "—"}</span>
                             <span>Rencana kembali: {formatDate(o.returnPlanDate) ?? "—"}</span>
                           </div>
@@ -936,7 +976,13 @@ export default function OrderInstrumenPage() {
               </Button>
               <Button
                 onClick={handleSubmitPinjam}
-                disabled={pinjamSaving || !pinjamRoomId || !pinjamBorrowedBy.trim()}
+                disabled={
+                  pinjamSaving ||
+                  !pinjamRoomId ||
+                  !pinjamBorrowedBy.trim() ||
+                  !pinjamMedicalRecordNo.trim() ||
+                  !pinjamPatientName.trim()
+                }
                 className="bg-[#075489] hover:bg-[#075489]/90 text-white"
               >
                 {pinjamSaving ? "Mengirim..." : "Kirim Permintaan"}
@@ -1002,6 +1048,29 @@ export default function OrderInstrumenPage() {
                   />
                 </div>
 
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <div className="space-y-1">
+                    <label className="text-xs font-semibold uppercase tracking-wide text-gray-400">
+                      No. RM Pasien <span className="text-red-500">*</span>
+                    </label>
+                    <Input
+                      placeholder="No. rekam medis pasien"
+                      value={pinjamMedicalRecordNo}
+                      onChange={(e) => setPinjamMedicalRecordNo(e.target.value)}
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-xs font-semibold uppercase tracking-wide text-gray-400">
+                      Nama Pasien <span className="text-red-500">*</span>
+                    </label>
+                    <Input
+                      placeholder="Nama pasien"
+                      value={pinjamPatientName}
+                      onChange={(e) => setPinjamPatientName(e.target.value)}
+                    />
+                  </div>
+                </div>
+
                 <div className="space-y-1">
                   <label className="text-xs font-semibold uppercase tracking-wide text-gray-400">
                     Catatan (opsional)
@@ -1060,6 +1129,12 @@ export default function OrderInstrumenPage() {
                       </span>
                       {t.borrowed_by ? ` · a/n ${t.borrowed_by}` : ""}
                     </p>
+                    {(t.medical_record_no || t.patient_name) && (
+                      <p className="mt-0.5 text-xs text-gray-500">
+                        Pasien: {t.patient_name ?? "—"}
+                        {t.medical_record_no ? ` · No. RM ${t.medical_record_no}` : ""}
+                      </p>
+                    )}
                     {t.note && <p className="mt-1 text-xs text-gray-500 italic">“{t.note}”</p>}
                   </div>
                   <span className="shrink-0 text-xs text-gray-500">

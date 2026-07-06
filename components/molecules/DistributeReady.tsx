@@ -44,7 +44,8 @@ export function DistributeReady({
   function openDistribute(order: DistributeOrder) {
     setActive(order)
     setError(null)
-    setRecipient("")
+    // Default nama penerima = peminjam order ("Dipinjam Oleh"); tetap bisa diubah.
+    setRecipient(order.borrowed_by ?? "")
   }
 
   async function submit() {

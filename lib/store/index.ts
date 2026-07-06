@@ -13,6 +13,7 @@ import distributionReducer from "./slices/distributionSlice"
 import sterilizationReducer from "./slices/sterilizationSlice"
 import bmhpReducer from "./slices/bmhpSlice"
 import washerMachineReducer from "./slices/washerMachineSlice"
+import rackReducer from "./slices/rackSlice"
 import notifReducer from "./slices/notifSlice"
 import monitoringReducer from "./slices/monitoringSlice"
 import icd10Reducer from "./slices/icd10Slice"
@@ -42,6 +43,7 @@ export const store = configureStore({
     sterilizations: sterilizationReducer,
     bmhps: bmhpReducer,
     washerMachines: washerMachineReducer,
+    racks: rackReducer,
     notif: notifReducer,
     monitoring: monitoringReducer,
     cleaning: cleaningReducer,

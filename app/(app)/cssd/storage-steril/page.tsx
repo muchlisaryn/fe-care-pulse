@@ -4,7 +4,6 @@ import { useEffect, useMemo, useState } from "react"
 import {
   Warehouse,
   Search,
-  ScanLine,
   CalendarClock,
   AlertTriangle,
   MapPin,
@@ -19,6 +18,7 @@ import { Button } from "@/components/atoms/Button"
 import { Badge } from "@/components/atoms/Badge"
 import { Label } from "@/components/atoms/Label"
 import { Select } from "@/components/atoms/Select"
+import { SelectSearch } from "@/components/atoms/SelectSearch"
 import { Card } from "@/components/molecules/Card"
 import { StatCard } from "@/components/molecules/StatCard"
 import { PageHeader } from "@/components/molecules/PageHeader"
@@ -108,6 +108,8 @@ export default function StorageSterilPage() {
   const [error, setError] = useState<string | null>(null)
   // Foto instrumen yang sedang di-zoom (klik thumbnail) — null = tidak ada.
   const [zoom, setZoom] = useState<{ url: string; name: string } | null>(null)
+  // Pilihan lokasi rak dari Master Rak (untuk dropdown saat simpan ke gudang).
+  const [rackOptions, setRackOptions] = useState<{ id: number; name: string }[]>([])
 
   // Selalu segarkan saat halaman dibuka agar unit yang baru selesai disterilkan
   // langsung muncul (tanpa perlu refresh manual). Data cache tetap tampil seketika
@@ -117,6 +119,20 @@ export default function StorageSterilPage() {
     dispatch(fetchProductionStorageIncoming())
     dispatch(fetchStorageInventory())
   }, [dispatch])
+
+  // Muat pilihan rak dari Master Rak untuk dropdown lokasi rak.
+  useEffect(() => {
+    api
+      .get("/master/racks/options")
+      .then((res) => setRackOptions(res.data.data))
+      .catch(() => {})
+  }, [])
+
+  // Opsi untuk SelectSearch lokasi rak (value = nama rak, disimpan sebagai rack_code).
+  const rackSelectOptions = useMemo(
+    () => rackOptions.map((r) => ({ value: r.name, label: r.name })),
+    [rackOptions],
+  )
 
   function refresh() {
     dispatch(fetchStorageIncoming())
@@ -535,7 +551,7 @@ export default function StorageSterilPage() {
               <p className="text-sm text-red-600">{error}</p>
             ) : (
               <span className="text-xs text-gray-400">
-                Scan / isi lokasi rak tiap unit. Bila semua tersimpan, order masuk gudang steril.
+                Pilih lokasi rak tiap unit. Bila semua tersimpan, order masuk gudang steril.
               </span>
             )}
             <div className="flex shrink-0 justify-end gap-2">
@@ -557,24 +573,16 @@ export default function StorageSterilPage() {
           <div className="space-y-4">
             {/* Set rak untuk semua unit sekaligus */}
             <div className="space-y-1.5 rounded-lg border border-gray-200 bg-gray-50 px-4 py-3">
-              <Label htmlFor="rack-all">Scan / Isi Lokasi Rak untuk Semua Unit</Label>
+              <Label htmlFor="rack-all">Pilih Lokasi Rak untuk Semua Unit</Label>
               <div className="flex gap-2">
-                <div className="relative flex-1">
-                  <ScanLine className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 pointer-events-none" />
-                  <Input
-                    id="rack-all"
-                    value={setAll}
-                    onChange={(e) => setSetAll(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") {
-                        e.preventDefault()
-                        applyAll()
-                      }
-                    }}
-                    placeholder=""
-                    className="pl-9 font-mono"
-                  />
-                </div>
+                <SelectSearch
+                  options={rackSelectOptions}
+                  value={setAll}
+                  onChange={setSetAll}
+                  placeholder="— Pilih rak —"
+                  searchPlaceholder="Cari rak..."
+                  className="flex-1"
+                />
                 <Button type="button" variant="outline" onClick={applyAll} disabled={!setAll.trim()}>
                   Terapkan
                 </Button>
@@ -632,13 +640,14 @@ export default function StorageSterilPage() {
                             </span>
                           </Badge>
                         ) : (
-                          <div className="relative w-full sm:w-56">
-                            <ScanLine className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-gray-400 pointer-events-none" />
-                            <Input
+                          <div className="w-full sm:w-56">
+                            <SelectSearch
+                              options={rackSelectOptions}
                               value={groupRack}
-                              onChange={(e) => setGroupRack(g, e.target.value)}
-                              placeholder={isPaket ? "Lokasi rak paket" : "Lokasi rak"}
-                              className="h-9 pl-8 font-mono text-xs"
+                              onChange={(v) => setGroupRack(g, v)}
+                              placeholder={isPaket ? "— Pilih rak paket —" : "— Pilih rak —"}
+                              searchPlaceholder="Cari rak..."
+                              triggerClassName="py-1.5 text-xs"
                             />
                           </div>
                         )}
