@@ -1,11 +1,7 @@
 "use client"
 
 import { useMemo, useState } from "react"
-<<<<<<< HEAD
 import { FlaskConical, CheckCircle2, Layers, X, ChevronDown, ChevronRight, Check } from "lucide-react"
-=======
-import { FlaskConical, CheckCircle2, Layers, X, ChevronDown, Check, ZoomIn } from "lucide-react"
->>>>>>> 9fa8cd29714b0a8d5ef77bfa901635b6a48c1695
 import { Button } from "@/components/atoms/Button"
 import { Badge } from "@/components/atoms/Badge"
 import { Input } from "@/components/atoms/Input"
@@ -335,7 +331,6 @@ export function ProductionSterilizationTab({
                       {order.code_transaction && <span>{order.code_transaction}</span>}
                       {inBatch && order.sterilization && <span>Mesin: {order.sterilization.machine ?? "—"}</span>}
                     </div>
-<<<<<<< HEAD
                     {/* Riwayat → detail dibuka lewat modal saat kartu diklik. */}
                     {!isHistory && (
                       <>
@@ -378,45 +373,6 @@ export function ProductionSterilizationTab({
                                 </div>
                               </div>
                             ))}
-=======
-                    <button
-                      type="button"
-                      onClick={() => toggleUnits(key)}
-                      className="mt-1.5 flex items-center gap-1 text-xs font-medium text-gray-400 hover:text-gray-600"
-                    >
-                      Unit Disterilkan ({order.unit_count})
-                      <ChevronDown className={"h-3.5 w-3.5 transition-transform " + (unitsOpen ? "rotate-180" : "")} />
-                    </button>
-                    {unitsOpen && (
-                      <div className="mt-1.5 flex flex-wrap gap-2">
-                        {groups.map((g) => (
-                          <div
-                            key={g.instrument}
-                            className="inline-flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-2 py-1.5"
-                          >
-                            {g.image ? (
-                              <button
-                                type="button"
-                                onClick={() => setZoom({ url: g.image as string, name: g.instrument })}
-                                title="Klik untuk perbesar"
-                                className="group relative h-7 w-7 shrink-0 cursor-zoom-in overflow-hidden rounded border border-gray-200"
-                              >
-                                {/* eslint-disable-next-line @next/next/no-img-element */}
-                                <img src={g.image} alt={g.instrument} className="h-full w-full object-cover transition-transform group-hover:scale-105" />
-                                <span className="absolute inset-0 flex items-center justify-center bg-black/0 text-white opacity-0 transition group-hover:bg-black/30 group-hover:opacity-100">
-                                  <ZoomIn className="h-3 w-3" />
-                                </span>
-                              </button>
-                            ) : (
-                              <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded bg-[#075489]/8">
-                                <Layers className="h-3.5 w-3.5 text-[#075489]" />
-                              </span>
-                            )}
-                            <span className="truncate text-sm font-medium text-gray-800">{g.instrument}</span>
-                            <span className="inline-flex shrink-0 items-center rounded-full bg-[#075489]/10 px-2 py-0.5 text-xs font-semibold text-[#075489]">
-                              {g.units.length} unit
-                            </span>
->>>>>>> 9fa8cd29714b0a8d5ef77bfa901635b6a48c1695
                           </div>
                         )}
                       </>
