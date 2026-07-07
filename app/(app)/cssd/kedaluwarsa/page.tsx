@@ -119,7 +119,7 @@ export default function KedaluwarsaPage() {
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Alat Kedaluwarsa"
+        title="Alat Kedaluwarsa Steril"
         subtitle="Batch steril yang masa sterilnya sudah atau akan habis"
       />
 

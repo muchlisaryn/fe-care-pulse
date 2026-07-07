@@ -191,7 +191,7 @@ export default function LaporanPerAlatPage() {
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Laporan CSSD Per Alat"
+        title="Laporan Alat CSSD"
         subtitle="Rekap per batch sterilisasi — paket ditampilkan sebagai satu baris, klik untuk lihat detail tiap aset"
       />
 
