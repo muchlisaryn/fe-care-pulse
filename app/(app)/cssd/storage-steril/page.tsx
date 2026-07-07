@@ -394,7 +394,7 @@ export default function StorageSterilPage() {
               {incomingFiltered.map((order) => (
                 <div
                   key={`${order.source ?? "order"}-${order.id}`}
-                  className="rounded-lg border border-gray-200 border-l-4 border-l-[#075489]"
+                  className="rounded-lg border border-gray-200"
                 >
                   <div className="flex items-start justify-between gap-2 px-3 py-2.5">
                     <div className="flex min-w-0 items-start gap-2">
