@@ -61,7 +61,6 @@ export default function TambahOrderInstrumenPage() {
   const router = useRouter()
   const dispatch = useAppDispatch()
 
-  const currentUserName = useAppSelector((s) => s.auth.name)
   const rooms = useAppSelector((s) => s.rooms.items)
   const roomOptions = rooms.map((r) => ({ value: String(r.id), label: r.name }))
 
@@ -135,11 +134,6 @@ export default function TambahOrderInstrumenPage() {
       active = false
     }
   }, [dispatch])
-
-  // Prefill nama peminjam dengan user yang login (tetap bisa diubah manual).
-  useEffect(() => {
-    if (currentUserName) setBorrowedBy((prev) => prev || currentUserName)
-  }, [currentUserName])
 
   // Prefill tanggal & jam pinjam dengan waktu sekarang (tetap bisa diubah manual).
   useEffect(() => {
