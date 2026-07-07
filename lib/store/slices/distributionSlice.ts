@@ -18,14 +18,12 @@ export type Distribution = {
   id: number
   code: string
   room_id: number
-  sender_id: number | null
-  receiver_id: number
+  sender: string | null
+  receiver: string | null
   distributed_at: string | null
   status: DistributionStatus
   note: string | null
   room?: { id: number; code: string | null; name: string } | null
-  sender?: { id: number; name: string } | null
-  receiver?: { id: number; name: string } | null
   items?: DistributionItem[]
   items_count?: number
   created_at: string

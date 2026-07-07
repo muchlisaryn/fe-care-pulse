@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useMemo, useState } from "react"
-import { Search, Package, Plus, Trash2, Send, X } from "lucide-react"
+import { Search, Trash2, X } from "lucide-react"
 import { Button } from "@/components/atoms/Button"
 import { Input } from "@/components/atoms/Input"
 import { Label } from "@/components/atoms/Label"
@@ -22,7 +22,6 @@ import {
 import api from "@/lib/axios"
 
 type BmhpOption = { id: number; code: string; name: string; unit: string; stock_qty: number }
-type UserOption = { id: number; name: string }
 
 // Item BMHP yang dipilih di form sebelum disubmit.
 type FormItem = {
@@ -55,17 +54,16 @@ function nowLocalInput(): string {
 
 export default function DistribusiPage() {
   const dispatch = useAppDispatch()
-  const currentUser = useAppSelector((s) => s.auth.username ?? s.auth.name)
   const rooms = useAppSelector((s) => s.rooms.items)
   const { items: distributions, search, loading, loaded, dirty } = useAppSelector((s) => s.distributions)
 
   // Data referensi untuk form
   const [bmhps, setBmhps] = useState<BmhpOption[]>([])
-  const [users, setUsers] = useState<UserOption[]>([])
 
   // Form
   const [roomId, setRoomId] = useState("")
-  const [receiverId, setReceiverId] = useState("")
+  const [sender, setSender] = useState("")
+  const [receiver, setReceiver] = useState("")
   const [distributedAt, setDistributedAt] = useState(nowLocalInput())
   const [note, setNote] = useState("")
   const [formItems, setFormItems] = useState<FormItem[]>([])
@@ -86,16 +84,12 @@ export default function DistribusiPage() {
     let active = true
     ;(async () => {
       try {
-        const [bm, us] = await Promise.all([
-          api.get("/master/bmhps"),
-          api.get("/master/users"),
-        ])
+        const bm = await api.get("/master/bmhps")
         if (!active) return
         setBmhps(bm.data.data.data)
-        setUsers(us.data.data.data)
       } catch {
         if (!active) return
-        setFormError("Gagal memuat data referensi BMHP / penerima.")
+        setFormError("Gagal memuat data referensi BMHP.")
       }
     })()
     return () => {
@@ -109,7 +103,6 @@ export default function DistribusiPage() {
   }, [loaded, dirty, dispatch])
 
   const roomOptions = rooms.map((r) => ({ value: String(r.id), label: r.name }))
-  const userOptions = users.map((u) => ({ value: String(u.id), label: u.name }))
   const bmhpOptions = bmhps.map((b) => ({
     value: String(b.id),
     label: `${b.name} (sisa ${b.stock_qty} ${b.unit})`,
@@ -143,14 +136,15 @@ export default function DistribusiPage() {
 
   function resetForm() {
     setRoomId("")
-    setReceiverId("")
+    setSender("")
+    setReceiver("")
     setDistributedAt(nowLocalInput())
     setNote("")
     setFormItems([])
     setFormError(null)
   }
 
-  const canSubmit = roomId && receiverId && formItems.length > 0 && !saving
+  const canSubmit = roomId && sender.trim() && receiver.trim() && formItems.length > 0 && !saving
 
   async function handleSubmit() {
     if (!canSubmit) return
@@ -159,7 +153,8 @@ export default function DistribusiPage() {
     try {
       await api.post("/master/distributions", {
         room_id: Number(roomId),
-        receiver_id: Number(receiverId),
+        sender: sender.trim(),
+        receiver: receiver.trim(),
         distributed_at: distributedAt || null,
         note: note.trim() || null,
         items: formItems.map((it) => ({
@@ -245,7 +240,7 @@ export default function DistribusiPage() {
                   <dl className="space-y-0.5 text-xs text-gray-600">
                     <div className="flex gap-1">
                       <dt className="w-16 shrink-0 text-gray-400">Pengirim</dt>
-                      <dd>: {d.sender?.name ?? "—"}</dd>
+                      <dd>: {d.sender ?? "—"}</dd>
                     </div>
                     <div className="flex gap-1">
                       <dt className="w-16 shrink-0 text-gray-400">Unit</dt>
@@ -253,7 +248,7 @@ export default function DistribusiPage() {
                     </div>
                     <div className="flex gap-1">
                       <dt className="w-16 shrink-0 text-gray-400">Penerima</dt>
-                      <dd>: {d.receiver?.name ?? "—"}</dd>
+                      <dd>: {d.receiver ?? "—"}</dd>
                     </div>
                     <div className="flex gap-1">
                       <dt className="w-16 shrink-0 text-gray-400">Tanggal</dt>
@@ -314,14 +309,13 @@ export default function DistribusiPage() {
                     disabled={!newBmhpId}
                     className="shrink-0 bg-[#4ba69d] text-white hover:bg-[#4ba69d]/90"
                   >
-                    <Plus className="h-4 w-4" /> Tambah
+                    Tambah
                   </Button>
                 </div>
 
                 {/* Tabel item terpilih */}
                 {formItems.length === 0 ? (
                   <div className="flex flex-col items-center gap-1 py-6 text-gray-400">
-                    <Package className="h-6 w-6" />
                     <p className="text-sm">Belum ada BMHP dipilih.</p>
                   </div>
                 ) : (
@@ -377,8 +371,14 @@ export default function DistribusiPage() {
               </div>
               <div className="grid grid-cols-1 gap-4 px-4 py-3 sm:grid-cols-2">
                 <div className="space-y-1.5">
-                  <Label>Pengirim</Label>
-                  <Input value={currentUser ?? ""} disabled className="bg-gray-50" />
+                  <Label>
+                    Pengirim <span className="text-red-500">*</span>
+                  </Label>
+                  <Input
+                    value={sender}
+                    onChange={(e) => setSender(e.target.value)}
+                    placeholder="Nama pengirim"
+                  />
                 </div>
                 <div className="space-y-1.5">
                   <Label>Tanggal Distribusi</Label>
@@ -392,11 +392,10 @@ export default function DistribusiPage() {
                   <Label>
                     Penerima <span className="text-red-500">*</span>
                   </Label>
-                  <SelectSearch
-                    options={userOptions}
-                    value={receiverId}
-                    onChange={setReceiverId}
-                    placeholder="-- Pilih penerima --"
+                  <Input
+                    value={receiver}
+                    onChange={(e) => setReceiver(e.target.value)}
+                    placeholder="Nama penerima"
                   />
                 </div>
                 <div className="space-y-1.5 sm:col-span-2">
@@ -420,7 +419,7 @@ export default function DistribusiPage() {
                 disabled={!canSubmit}
                 className="bg-[#075489] text-white hover:bg-[#075489]/90"
               >
-                <Send className="h-4 w-4" /> {saving ? "Menyimpan..." : "Distribusikan"}
+                {saving ? "Menyimpan..." : "Distribusikan"}
               </Button>
             </div>
           </div>
@@ -446,8 +445,8 @@ export default function DistribusiPage() {
             <div className="grid grid-cols-2 gap-3 text-sm">
               <Info label="Unit" value={detail.room?.name} />
               <Info label="Status" value={detail.status === "dibatalkan" ? "Dibatalkan" : "Terdistribusi"} />
-              <Info label="Pengirim" value={detail.sender?.name} />
-              <Info label="Penerima" value={detail.receiver?.name} />
+              <Info label="Pengirim" value={detail.sender} />
+              <Info label="Penerima" value={detail.receiver} />
               <Info label="Tanggal" value={formatDateTime(detail.distributed_at)} />
               <Info label="Keterangan" value={detail.note} />
             </div>

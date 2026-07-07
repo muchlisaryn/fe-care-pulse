@@ -84,7 +84,7 @@ export default function KedaluwarsaPage() {
     },
     {
       header: "Mesin",
-      cell: (s) => <span className="text-gray-700">{s.machine}</span>,
+      cell: (s) => <span className="text-gray-700">{s.machine ?? "—"}</span>,
     },
     {
       header: "Jumlah Unit",

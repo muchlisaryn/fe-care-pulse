@@ -483,6 +483,11 @@ export function ProductionSterilizationTab({
               <Label htmlFor="pstr-at">Waktu Sterilisasi *</Label>
               <Input id="pstr-at" type="datetime-local" value={form.sterilized_at} onChange={(e) => setForm((f) => ({ ...f, sterilized_at: e.target.value }))} />
             </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="pstr-expiry">Tanggal Kedaluwarsa Steril</Label>
+              <Input id="pstr-expiry" type="date" min={form.sterilized_at ? form.sterilized_at.slice(0, 10) : undefined} value={form.expiry_date} onChange={(e) => setForm((f) => ({ ...f, expiry_date: e.target.value }))} />
+              <p className="text-xs text-gray-400">Kosongkan untuk memakai default (tgl sterilisasi + 7 hari).</p>
+            </div>
           </div>
 
           <div className="space-y-1.5">
