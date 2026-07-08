@@ -199,7 +199,7 @@ export default function LaporanPerAlatPage() {
         {/* Filter */}
         <form onSubmit={handleSearch} className="border-b border-gray-100 px-5 py-4">
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            <div className="space-y-1">
+            <div className="space-y-1 sm:col-span-2">
               <label className="text-xs font-semibold uppercase tracking-wide text-gray-400">Nama / Kode Alat</label>
               <div className="relative">
                 <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
