@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react"
 import Link from "next/link"
-import { Search, ChevronRight, ArrowLeftRight, Inbox, Loader2 } from "lucide-react"
+import { Search, ChevronRight, ArrowLeftRight, Loader2 } from "lucide-react"
 import { Button } from "@/components/atoms/Button"
 import { Badge } from "@/components/atoms/Badge"
 import { Input } from "@/components/atoms/Input"
@@ -249,11 +249,6 @@ export default function OrderInstrumenPage() {
     dispatch(fetchOrders())
   }, [loaded, dirty, dispatch])
 
-  // Muat daftar ruangan (untuk pilihan ruangan tujuan pada form Pinjam).
-  useEffect(() => {
-    dispatch(fetchRooms())
-  }, [dispatch])
-
   // Ambil order yang sedang dipinjam (beserta unit aktif + status request pending)
   // sebagai sumber unit yang bisa diminta. Dipakai saat modal dibuka & setelah
   // mengirim / membatalkan permintaan agar penanda pending ikut diperbarui.
@@ -335,6 +330,8 @@ export default function OrderInstrumenPage() {
     label: string,
     units: BorrowableUnit[],
   ) {
+    // Muat daftar ruangan (untuk pilihan ruangan tujuan) hanya saat form dibuka.
+    dispatch(fetchRooms())
     setPinjamTarget({
       fromOrderId: order.id,
       fromOrderCode: order.code,

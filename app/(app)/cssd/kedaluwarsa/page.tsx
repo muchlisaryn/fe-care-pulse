@@ -131,25 +131,27 @@ export default function KedaluwarsaPage() {
 
       <Card className="p-0">
         <div className="px-5 py-4 border-b border-gray-100">
-          <form onSubmit={applyDays} className="flex flex-col gap-3 sm:flex-row sm:items-end sm:gap-2">
-            <div className="flex items-end gap-2">
-              <div className="space-y-1">
-                <label className="text-xs font-semibold uppercase tracking-wide text-gray-400">
-                  Ambang (hari ke depan)
-                </label>
+          <form onSubmit={applyDays} className="space-y-3">
+            <div className="space-y-1.5">
+              <label className="block text-xs font-semibold uppercase tracking-wide text-gray-400">
+                Ambang (hari ke depan)
+              </label>
+              <div className="flex items-center gap-2">
                 <Input
                   type="number"
                   min={0}
                   value={daysInput}
                   onChange={(e) => setDaysInput(e.target.value)}
-                  className="w-32"
+                  className="w-28"
                 />
+                <Button type="submit" className="bg-[#075489] hover:bg-[#075489]/90 text-white">
+                  Terapkan
+                </Button>
               </div>
-              <Button type="submit" className="bg-[#075489] hover:bg-[#075489]/90 text-white">
-                Terapkan
-              </Button>
             </div>
-            <p className="text-xs text-gray-400 sm:ml-2 sm:pb-2">
+
+            <p className="flex items-center gap-1.5 text-xs text-gray-400">
+              <Clock className="h-3.5 w-3.5 shrink-0" />
               Menampilkan batch yang kedaluwarsa ≤ {days} hari ke depan (termasuk yang sudah lewat).
             </p>
           </form>
