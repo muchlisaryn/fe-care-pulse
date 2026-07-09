@@ -5,6 +5,8 @@ export type Room = {
   id: number
   code: string
   name: string
+  // Layanan ruangan: igd / rawat_jalan / rawat_inap (bisa null utk data lama).
+  layanan: "igd" | "rawat_jalan" | "rawat_inap" | null
   created_by: string
   updated_by: string
   deleted_at: string | null

@@ -5,6 +5,8 @@ import { Search, DoorOpen } from "lucide-react"
 import { Button } from "@/components/atoms/Button"
 import { Input } from "@/components/atoms/Input"
 import { Label } from "@/components/atoms/Label"
+import { Select } from "@/components/atoms/Select"
+import { Badge } from "@/components/atoms/Badge"
 import { Card } from "@/components/molecules/Card"
 import { StatCard } from "@/components/molecules/StatCard"
 import { DataTable, type Column } from "@/components/molecules/DataTable"
@@ -15,7 +17,16 @@ import { fetchRooms, setRoomSearch, setRoomPage, invalidateRooms, type Room } fr
 import { ConfirmDialog } from "@/components/molecules/ConfirmDialog"
 import api from "@/lib/axios"
 
-const emptyForm = { name: "" }
+// Pilihan layanan ruangan.
+const LAYANAN_OPTIONS = [
+  { value: "igd", label: "IGD" },
+  { value: "rawat_jalan", label: "Rawat Jalan" },
+  { value: "rawat_inap", label: "Rawat Inap" },
+] as const
+const layananLabel = (v: string | null) =>
+  LAYANAN_OPTIONS.find((o) => o.value === v)?.label ?? null
+
+const emptyForm = { name: "", layanan: "igd" }
 
 export default function MasterRuanganPage() {
   const dispatch = useAppDispatch()
@@ -50,7 +61,7 @@ export default function MasterRuanganPage() {
   }
 
   function openEdit(row: Room) {
-    setForm({ name: row.name })
+    setForm({ name: row.name, layanan: row.layanan ?? "igd" })
     setEditId(row.id)
     setModal("edit")
   }
@@ -96,6 +107,16 @@ export default function MasterRuanganPage() {
     {
       header: "Nama Ruangan",
       cell: (row) => <span className="font-medium text-gray-900">{row.name}</span>,
+    },
+    {
+      header: "Layanan",
+      cell: (row) =>
+        layananLabel(row.layanan) ? (
+          <Badge variant="info">{layananLabel(row.layanan)}</Badge>
+        ) : (
+          <span className="text-gray-400 text-xs">—</span>
+        ),
+      className: "w-36",
     },
   ]
 
@@ -194,8 +215,22 @@ export default function MasterRuanganPage() {
               id="r-nama"
               placeholder="Contoh: Poli Umum"
               value={form.name}
-              onChange={(e) => setForm({ name: e.target.value })}
+              onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
             />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="r-layanan">Layanan</Label>
+            <Select
+              id="r-layanan"
+              value={form.layanan}
+              onChange={(e) => setForm((f) => ({ ...f, layanan: e.target.value }))}
+            >
+              {LAYANAN_OPTIONS.map((o) => (
+                <option key={o.value} value={o.value}>
+                  {o.label}
+                </option>
+              ))}
+            </Select>
           </div>
         </div>
       </Modal>

@@ -45,6 +45,13 @@ type PaketItem = {
 
 type AddMode = "satuan" | "paket"
 
+// Label layanan ruangan (untuk tampilan opsi ruangan).
+const LAYANAN_LABEL: Record<string, string> = {
+  igd: "IGD",
+  rawat_jalan: "Rawat Jalan",
+  rawat_inap: "Rawat Inap",
+}
+
 // Isi paket per baris permintaan: nama instrumen + jumlah per satu set paket.
 type PaketContent = { name: string; perSet: number }
 
@@ -62,7 +69,10 @@ export default function TambahOrderInstrumenPage() {
   const dispatch = useAppDispatch()
 
   const rooms = useAppSelector((s) => s.rooms.items)
-  const roomOptions = rooms.map((r) => ({ value: String(r.id), label: r.name }))
+  const roomOptions = rooms.map((r) => ({
+    value: String(r.id),
+    label: r.layanan ? `${r.name} · ${LAYANAN_LABEL[r.layanan]}` : r.name,
+  }))
 
   const [roomId, setRoomId] = useState("")
   const [borrowedBy, setBorrowedBy] = useState("")
@@ -260,15 +270,18 @@ export default function TambahOrderInstrumenPage() {
   }
 
   const totalQty = requests.reduce((sum, r) => sum + (Number(r.quantity) || 0), 0)
-  // Wajib: peminjam, ruangan, tanggal + jam pinjam, identitas pasien, dan minimal 1 permintaan.
-  // Opsional: hanya Rencana Kembali (dan Catatan).
+  // Ruangan terpilih + layanannya. Identitas pasien hanya WAJIB untuk RAWAT INAP;
+  // rawat jalan / IGD → identitas pasien disembunyikan & tidak wajib.
+  const selectedRoom = rooms.find((r) => String(r.id) === roomId)
+  const needPatient = selectedRoom?.layanan === "rawat_inap"
+  // Wajib: peminjam, ruangan, tanggal + jam pinjam, minimal 1 permintaan, dan
+  // (khusus rawat inap) identitas pasien. Opsional: Rencana Kembali & Catatan.
   const canSubmit =
     borrowedBy.trim() &&
     roomId &&
     orderDate &&
     orderTime &&
-    medicalRecordNo.trim() &&
-    patientName.trim() &&
+    (!needPatient || (medicalRecordNo.trim() && patientName.trim())) &&
     requests.length > 0 &&
     !saving
 
@@ -296,8 +309,9 @@ export default function TambahOrderInstrumenPage() {
       await api.post("/master/orders", {
         room_id: Number(roomId),
         borrowed_by: borrowedBy.trim() || null,
-        medical_record_no: medicalRecordNo.trim() || null,
-        patient_name: patientName.trim() || null,
+        // Identitas pasien hanya dikirim untuk layanan rawat inap.
+        medical_record_no: needPatient ? medicalRecordNo.trim() || null : null,
+        patient_name: needPatient ? patientName.trim() || null : null,
         order_date: orderDate,
         order_time: orderTime || null,
         return_plan_date: returnPlanDate || null,
@@ -365,37 +379,50 @@ export default function TambahOrderInstrumenPage() {
           </div>
         </div>
 
-        {/* Identitas pasien (wajib) */}
-        <div className="border-t border-gray-100 pt-5">
-          <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-gray-400">
-            Identitas Pasien
-          </p>
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <div className="space-y-1.5">
-              <Label htmlFor="no-rm">
-                No. Rekam Medis (RM) Pasien <span className="text-red-500">*</span>
-              </Label>
-              <Input
-                id="no-rm"
-                value={medicalRecordNo}
-                onChange={(e) => setMedicalRecordNo(e.target.value)}
-                placeholder="mis. RM-00123"
-                className="font-mono"
-              />
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="nama-pasien">
-                Nama Pasien <span className="text-red-500">*</span>
-              </Label>
-              <Input
-                id="nama-pasien"
-                value={patientName}
-                onChange={(e) => setPatientName(e.target.value)}
-                placeholder="Nama lengkap pasien"
-              />
+        {/* Identitas pasien — hanya untuk layanan RAWAT INAP (wajib). Layanan
+            rawat jalan / IGD tidak memerlukan identitas pasien. */}
+        {needPatient ? (
+          <div className="border-t border-gray-100 pt-5">
+            <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-gray-400">
+              Identitas Pasien
+            </p>
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <div className="space-y-1.5">
+                <Label htmlFor="no-rm">
+                  No. Rekam Medis (RM) Pasien <span className="text-red-500">*</span>
+                </Label>
+                <Input
+                  id="no-rm"
+                  value={medicalRecordNo}
+                  onChange={(e) => setMedicalRecordNo(e.target.value)}
+                  placeholder="mis. RM-00123"
+                  className="font-mono"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="nama-pasien">
+                  Nama Pasien <span className="text-red-500">*</span>
+                </Label>
+                <Input
+                  id="nama-pasien"
+                  value={patientName}
+                  onChange={(e) => setPatientName(e.target.value)}
+                  placeholder="Nama lengkap pasien"
+                />
+              </div>
             </div>
           </div>
-        </div>
+        ) : selectedRoom ? (
+          <div className="border-t border-gray-100 pt-5">
+            <p className="text-xs text-gray-400">
+              Identitas pasien tidak diperlukan untuk layanan{" "}
+              <span className="font-medium text-gray-600">
+                {LAYANAN_LABEL[selectedRoom.layanan ?? ""] ?? "ruangan ini"}
+              </span>
+              .
+            </p>
+          </div>
+        ) : null}
       </Card>
 
       {/* Jadwal Peminjaman */}
