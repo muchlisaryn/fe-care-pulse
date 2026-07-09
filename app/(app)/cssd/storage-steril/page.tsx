@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import {
   Warehouse,
   Search,
@@ -110,6 +110,9 @@ export default function StorageSterilPage() {
   const [zoom, setZoom] = useState<{ url: string; name: string } | null>(null)
   // Pilihan lokasi rak dari Master Rak (untuk dropdown saat simpan ke gudang).
   const [rackOptions, setRackOptions] = useState<{ id: number; name: string }[]>([])
+  // Status muat pilihan rak (animasi loading dropdown) + penanda sudah dimuat.
+  const [rackOptionsLoading, setRackOptionsLoading] = useState(false)
+  const rackLoadedRef = useRef(false)
 
   // Selalu segarkan saat halaman dibuka agar unit yang baru selesai disterilkan
   // langsung muncul (tanpa perlu refresh manual). Data cache tetap tampil seketika
@@ -120,13 +123,21 @@ export default function StorageSterilPage() {
     dispatch(fetchStorageInventory())
   }, [dispatch])
 
-  // Muat pilihan rak dari Master Rak untuk dropdown lokasi rak.
-  useEffect(() => {
-    api
-      .get("/master/racks/options")
-      .then((res) => setRackOptions(res.data.data))
-      .catch(() => {})
-  }, [])
+  // Muat pilihan rak dari Master Rak — lazy, dipanggil saat tombol "Simpan ke Rak"
+  // ditekan (bukan saat mount). Hanya di-fetch sekali (cache via ref).
+  async function loadRackOptions() {
+    if (rackLoadedRef.current || rackOptionsLoading) return
+    setRackOptionsLoading(true)
+    try {
+      const res = await api.get("/master/racks/options")
+      setRackOptions(res.data.data)
+      rackLoadedRef.current = true
+    } catch {
+      // Abaikan — dropdown tetap kosong bila gagal memuat.
+    } finally {
+      setRackOptionsLoading(false)
+    }
+  }
 
   // Opsi untuk SelectSearch lokasi rak (value = nama rak, disimpan sebagai rack_code).
   const rackSelectOptions = useMemo(
@@ -141,6 +152,8 @@ export default function StorageSterilPage() {
   }
 
   function openStore(order: StorageIncomingOrder) {
+    // Muat pilihan rak saat modal "Simpan ke Rak" dibuka pertama kali.
+    loadRackOptions()
     setActive(order)
     setError(null)
     setSetAll("")
@@ -551,7 +564,7 @@ export default function StorageSterilPage() {
               <p className="text-sm text-red-600">{error}</p>
             ) : (
               <span className="text-xs text-gray-400">
-                Pilih lokasi rak tiap unit. Bila semua tersimpan, order masuk gudang steril.
+                Pilih lokasi rak tiap instrumen. Bila semua tersimpan, order masuk gudang steril.
               </span>
             )}
             <div className="flex shrink-0 justify-end gap-2">
@@ -573,12 +586,13 @@ export default function StorageSterilPage() {
           <div className="space-y-4">
             {/* Set rak untuk semua unit sekaligus */}
             <div className="space-y-1.5 rounded-lg border border-gray-200 bg-gray-50 px-4 py-3">
-              <Label htmlFor="rack-all">Pilih Lokasi Rak untuk Semua Unit</Label>
+              <Label htmlFor="rack-all">Pilih Lokasi Rak untuk Semua Instrumen</Label>
               <div className="flex gap-2">
                 <SelectSearch
                   options={rackSelectOptions}
                   value={setAll}
                   onChange={setSetAll}
+                  loading={rackOptionsLoading}
                   placeholder="— Pilih rak —"
                   searchPlaceholder="Cari rak..."
                   className="flex-1"
@@ -645,6 +659,7 @@ export default function StorageSterilPage() {
                               options={rackSelectOptions}
                               value={groupRack}
                               onChange={(v) => setGroupRack(g, v)}
+                              loading={rackOptionsLoading}
                               placeholder={isPaket ? "— Pilih rak paket —" : "— Pilih rak —"}
                               searchPlaceholder="Cari rak..."
                               triggerClassName="py-1.5 text-xs"

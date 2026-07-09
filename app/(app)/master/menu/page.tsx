@@ -44,6 +44,9 @@ type MenuForm = {
   sort_order: number
   icon: string
   is_open: boolean
+  // Saat menu (ber-url) dibuka, apakah sidebar utama tetap terbuka (true) atau
+  // otomatis ditutup/collapse (false).
+  open_sidebar: boolean
 }
 
 type GroupForm = {
@@ -62,6 +65,7 @@ const emptyForm: MenuForm = {
   sort_order: 0,
   icon: "",
   is_open: false,
+  open_sidebar: true,
 }
 
 const emptyGroupForm: GroupForm = {
@@ -236,6 +240,7 @@ export default function MasterMenuPage() {
         sort_order: detail.sort_order,
         icon: detail.icon ?? "",
         is_open: detail.is_open ?? false,
+        open_sidebar: detail.open_sidebar ?? true,
       })
     } catch {
     } finally {
@@ -263,6 +268,8 @@ export default function MasterMenuPage() {
             url: form.url || undefined,
             parent_id: form.parent_id ?? undefined,
             title_menu_id: null,
+            // Hanya relevan bila menu punya URL (halaman yang bisa dibuka).
+            open_sidebar: form.url.trim() ? form.open_sidebar : undefined,
           }
       if (modal === "tambah") {
         await api.post("/master/menus", payload)
@@ -577,6 +584,24 @@ export default function MasterMenuPage() {
                     onChange={(e) => setForm((p) => ({ ...p, url: e.target.value }))}
                   />
                 </div>
+
+                {/* Open Sidebar — hanya muncul bila URL terisi (menu = halaman). */}
+                {form.url.trim() !== "" && (
+                  <div className="flex items-center justify-between rounded-lg border border-gray-200 px-4 py-3">
+                    <div>
+                      <p className="text-sm font-medium text-gray-700">Open Sidebar</p>
+                      <p className="text-xs text-gray-400 mt-0.5">
+                        Aktif: sidebar utama tetap terbuka saat halaman ini dibuka. Nonaktif: sidebar
+                        otomatis ditutup (collapse).
+                      </p>
+                    </div>
+                    <Switch
+                      checked={form.open_sidebar}
+                      onChange={(v) => setForm((p) => ({ ...p, open_sidebar: v }))}
+                    />
+                  </div>
+                )}
+
                 <div className="space-y-1.5">
                   <Label>Parent Menu</Label>
                   <SelectSearch

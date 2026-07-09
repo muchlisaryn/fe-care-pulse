@@ -6,6 +6,7 @@ import { Search, ChevronRight, ArrowLeftRight, Loader2 } from "lucide-react"
 import { Button } from "@/components/atoms/Button"
 import { Badge } from "@/components/atoms/Badge"
 import { Input } from "@/components/atoms/Input"
+import { Label } from "@/components/atoms/Label"
 import { SelectSearch } from "@/components/atoms/SelectSearch"
 import { Card } from "@/components/molecules/Card"
 import { PageHeader } from "@/components/molecules/PageHeader"
@@ -20,6 +21,7 @@ import {
   fetchOrders,
   setOrderSearch,
   setOrderStatus,
+  setOrderDateRange,
   setOrderPage,
   invalidateOrders,
   type Order,
@@ -187,7 +189,7 @@ function formatDateWithTime(date: string | null, time: string | null) {
 
 export default function OrderInstrumenPage() {
   const dispatch = useAppDispatch()
-  const { items, totalItems, totalPages, page, search, status, loading, loaded, dirty } =
+  const { items, totalItems, totalPages, page, search, status, dateFrom, dateTo, loading, loaded, dirty } =
     useAppSelector((s) => s.orders)
 
   // Opsi filter status: "" = semua, lalu tiap status order.
@@ -626,6 +628,13 @@ export default function OrderInstrumenPage() {
 
   const columns: Column<Order>[] = [
     {
+      header: "Tanggal Pinjam",
+      cell: (row) => {
+        const f = formatDateWithTime(row.order_date, row.order_time)
+        return f ? <span className="text-sm text-gray-600">{f}</span> : dash
+      },
+    },
+    {
       header: "Kode",
       cell: (row) => (
         <div className="flex flex-col gap-1">
@@ -650,7 +659,7 @@ export default function OrderInstrumenPage() {
       },
     },
     {
-      header: "Medical Record No.",
+      header: "MR No",
       cell: (row) =>
         row.medical_record_no ? (
           <span className="font-mono text-sm text-gray-700">{row.medical_record_no}</span>
@@ -664,32 +673,7 @@ export default function OrderInstrumenPage() {
         row.patient_name ? <span className="text-gray-700">{row.patient_name}</span> : dash,
     },
     {
-      header: "Ruangan",
-      cell: (row) => (row.room?.name ? <span className="text-gray-700">{row.room.name}</span> : dash),
-    },
-    {
-      header: "Tanggal Pinjam",
-      cell: (row) => {
-        const f = formatDateWithTime(row.order_date, row.order_time)
-        return f ? <span className="text-sm text-gray-600">{f}</span> : dash
-      },
-    },
-    {
-      header: "Rencana Kembali",
-      cell: (row) => {
-        const f = formatDate(row.return_plan_date)
-        return f ? <span className="text-sm text-gray-600">{f}</span> : dash
-      },
-    },
-    {
-      header: "Tanggal Kembali",
-      cell: (row) => {
-        const f = formatDate(row.return_actual_date)
-        return f ? <span className="text-sm text-gray-600">{f}</span> : dash
-      },
-    },
-    {
-      header: "Unit",
+      header: "Instrumen",
       cell: (row) => <span className="text-gray-700">{row.items_count ?? row.items?.length ?? 0} unit</span>,
       className: "w-20",
     },
@@ -734,21 +718,32 @@ export default function OrderInstrumenPage() {
 
       <Card className="p-0">
         <div className="px-5 py-4 border-b border-gray-100">
-          <form onSubmit={handleSearch} className="flex flex-col gap-2 w-full sm:flex-row">
-            <div className="relative flex-1">
-              {loading ? (
-                <Loader2 className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 animate-spin text-[#075489] pointer-events-none" />
-              ) : (
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 pointer-events-none" />
-              )}
-              <Input
-                placeholder="Cari kode order, peminjam, atau ruangan..."
-                value={searchInput}
-                onChange={(e) => setSearchInput(e.target.value)}
-                className={"pl-9 " + (loading ? "cursor-not-allowed" : "")}
-              />
+          <form
+            onSubmit={handleSearch}
+            className="flex flex-col gap-3 lg:flex-row lg:flex-wrap lg:items-end"
+          >
+            {/* Pencarian */}
+            <div className="min-w-[220px] flex-1 space-y-1.5">
+              <Label htmlFor="order-search">Cari</Label>
+              <div className="relative">
+                {loading ? (
+                  <Loader2 className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 animate-spin text-[#075489] pointer-events-none" />
+                ) : (
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 pointer-events-none" />
+                )}
+                <Input
+                  id="order-search"
+                  placeholder="Kode order, peminjam, no. RM, nama pasien, ruangan..."
+                  value={searchInput}
+                  onChange={(e) => setSearchInput(e.target.value)}
+                  className={"pl-9 " + (loading ? "cursor-not-allowed" : "")}
+                />
+              </div>
             </div>
-            <div className="w-full sm:w-48 shrink-0">
+
+            {/* Status */}
+            <div className="w-full space-y-1.5 sm:w-48">
+              <Label>Status</Label>
               <SelectSearch
                 options={statusFilterOptions}
                 value={status}
@@ -756,9 +751,47 @@ export default function OrderInstrumenPage() {
                 placeholder="Semua Status"
               />
             </div>
-            <Button type="submit" className="bg-[#075489] hover:bg-[#075489]/90 text-white shrink-0">
-              Cari
-            </Button>
+
+            {/* Rentang tanggal pinjam */}
+            <div className="space-y-1.5">
+              <Label htmlFor="order-date-from">Dari Tanggal</Label>
+              <Input
+                id="order-date-from"
+                type="date"
+                value={dateFrom}
+                max={dateTo || undefined}
+                onChange={(e) => dispatch(setOrderDateRange({ from: e.target.value, to: dateTo }))}
+                className="sm:w-44"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="order-date-to">Sampai Tanggal</Label>
+              <Input
+                id="order-date-to"
+                type="date"
+                value={dateTo}
+                min={dateFrom || undefined}
+                onChange={(e) => dispatch(setOrderDateRange({ from: dateFrom, to: e.target.value }))}
+                className="sm:w-44"
+              />
+            </div>
+
+            {/* Aksi */}
+            <div className="flex gap-2">
+              <Button type="submit" className="bg-[#075489] hover:bg-[#075489]/90 text-white shrink-0">
+                Cari
+              </Button>
+              {(dateFrom || dateTo) && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => dispatch(setOrderDateRange({ from: "", to: "" }))}
+                  className="shrink-0"
+                >
+                  Reset
+                </Button>
+              )}
+            </div>
           </form>
         </div>
 
@@ -768,6 +801,7 @@ export default function OrderInstrumenPage() {
           <DataTable
             columns={columns}
             data={items}
+            hideRowNumber
             extraActions={[
               {
                 label: "Detail",

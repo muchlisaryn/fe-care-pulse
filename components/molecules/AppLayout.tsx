@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect, useRef } from "react"
-import { useRouter } from "next/navigation"
+import { usePathname, useRouter } from "next/navigation"
 import { Header } from "@/components/molecules/Header"
 import { Sidebar } from "@/components/molecules/Sidebar"
 import { useAppDispatch, useAppSelector } from "@/lib/store/hooks"
@@ -14,8 +14,10 @@ import { loadAuth } from "@/lib/auth"
 export function AppLayout({ children }: { children: React.ReactNode }) {
   const dispatch = useAppDispatch()
   const { hydrated, isAuthenticated } = useAppSelector((s) => s.auth)
+  const menus = useAppSelector((s) => s.auth.menus)
   const { incomingCount, loaded: notifLoaded } = useAppSelector((s) => s.notif)
   const router = useRouter()
+  const pathname = usePathname()
   const prevIncoming = useRef<number | null>(null)
 
   const [collapsed, setCollapsed] = useState(false)
@@ -26,6 +28,30 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
     const saved = localStorage.getItem("sidebar-collapsed")
     if (saved !== null) setCollapsed(saved === "true")
   }, [])
+
+  // Auto-collapse sidebar utama berdasarkan flag `open_sidebar` pada menu aktif
+  // (diatur di Master Menu). Menu dengan open_sidebar=false → sidebar ditutup saat
+  // halaman dibuka. Preferensi collapse manual (localStorage) tidak diubah.
+  useEffect(() => {
+    // Kumpulkan semua menu ber-url (induk + submenu) beserta flag open_sidebar.
+    const links: { url: string; openSidebar: boolean }[] = []
+    for (const section of menus ?? []) {
+      for (const m of section.menus ?? []) {
+        if (m.url) links.push({ url: m.url, openSidebar: m.open_sidebar ?? true })
+        for (const sub of m.menu ?? []) {
+          if (sub.url) links.push({ url: sub.url, openSidebar: sub.open_sidebar ?? true })
+        }
+      }
+    }
+    // Cocokkan URL terpanjang yang menjadi prefix dari pathname aktif.
+    let best: { url: string; openSidebar: boolean } | null = null
+    for (const l of links) {
+      if (pathname === l.url || pathname.startsWith(l.url + "/")) {
+        if (!best || l.url.length > best.url.length) best = l
+      }
+    }
+    if (best && !best.openSidebar) setCollapsed(true)
+  }, [pathname, menus])
 
   // Rehydrate Redux from localStorage every time AppLayout mounts.
   // Using a ref (not the Redux hydrated flag) so this runs again when

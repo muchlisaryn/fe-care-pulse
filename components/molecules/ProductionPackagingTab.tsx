@@ -1,11 +1,12 @@
 "use client"
 
-import { useMemo, useState } from "react"
-import { Package, Check, Circle, CheckCircle2, Printer, Search, ZoomIn, X, ChevronDown, ChevronRight } from "lucide-react"
+import { useEffect, useMemo, useRef, useState } from "react"
+import { Package, Check, Circle, Printer, Search, ZoomIn, X, ChevronDown, ChevronRight } from "lucide-react"
 import { Button } from "@/components/atoms/Button"
 import { Badge } from "@/components/atoms/Badge"
 import { Input } from "@/components/atoms/Input"
 import { Label } from "@/components/atoms/Label"
+import { SelectSearch } from "@/components/atoms/SelectSearch"
 import { Barcode } from "@/components/atoms/Barcode"
 import { Modal } from "@/components/molecules/Modal"
 import { useToast } from "@/components/molecules/ToastProvider"
@@ -16,6 +17,7 @@ import type {
   ProdSterilLabel,
   ProdSterilLabelItem,
 } from "@/lib/store/slices/productionPackagingSlice"
+import type { Printer as PrinterConfig } from "@/lib/store/slices/printerSlice"
 
 // Satu label fisik: SATU per paket (berisi daftar instrumen di dalamnya) atau
 // SATU per unit untuk instrumen satuan.
@@ -155,6 +157,75 @@ export function ProductionPackagingTab({
   // Batch riwayat yang detail/history-nya sedang ditampilkan di modal.
   const [historyBatch, setHistoryBatch] = useState<ProdPackagingBatch | null>(null)
 
+  // Daftar printer (dari Master Printer) untuk modal Cetak Label — lazy load.
+  const [printers, setPrinters] = useState<PrinterConfig[]>([])
+  const [printersLoading, setPrintersLoading] = useState(false)
+  const printersLoadedRef = useRef(false)
+  const [selectedPrinterId, setSelectedPrinterId] = useState("")
+  // Index kartu label yang dipilih untuk dicetak. Kosong = cetak semua.
+  const [selectedLabels, setSelectedLabels] = useState<Set<number>>(new Set())
+  function toggleLabel(i: number) {
+    setSelectedLabels((prev) => {
+      const next = new Set(prev)
+      if (next.has(i)) next.delete(i)
+      else next.add(i)
+      return next
+    })
+  }
+
+  // Muat daftar printer aktif dari Master Printer — sekali saja (cache via ref).
+  async function loadPrinters() {
+    if (printersLoadedRef.current || printersLoading) return
+    setPrintersLoading(true)
+    try {
+      const collected: PrinterConfig[] = []
+      let cur = 1
+      let last = 1
+      do {
+        const res = await api.get("/master/printers", { params: { page: cur } })
+        const p = res.data.data
+        collected.push(...p.data)
+        last = p.last_page
+        cur += 1
+      } while (cur <= last)
+      setPrinters(collected)
+      printersLoadedRef.current = true
+    } catch {
+      // Abaikan — dropdown tetap kosong bila gagal memuat.
+    } finally {
+      setPrintersLoading(false)
+    }
+  }
+
+  // Muat printer saat modal Cetak Label dibuka (label != null) + reset pilihan.
+  useEffect(() => {
+    if (label) {
+      loadPrinters()
+      setSelectedLabels(new Set())
+      setSelectedPrinterId("")
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [label])
+
+  // Opsi dropdown printer — hanya printer aktif.
+  const printerOptions = useMemo(
+    () =>
+      printers
+        .filter((p) => p.is_active)
+        .map((p) => ({ value: String(p.id), label: p.name })),
+    [printers],
+  )
+
+  // Auto-pilih printer DEFAULT (dari localStorage, di-set di Master Printer) saat
+  // modal terbuka & daftar printer siap. Key harus sama dgn DEFAULT_PRINTER_KEY.
+  useEffect(() => {
+    if (!label || selectedPrinterId) return
+    const def = typeof window !== "undefined" ? localStorage.getItem("master_printer_default") : null
+    if (def && printerOptions.some((o) => o.value === def)) {
+      setSelectedPrinterId(def)
+    }
+  }, [label, printerOptions, selectedPrinterId])
+
   const groups = useMemo(() => groupUnits(active?.units ?? []), [active])
   const total = active?.units.length ?? 0
   const checked = inspected.size
@@ -279,65 +350,26 @@ export function ProductionPackagingTab({
     }
   }
 
-  // Cetak Label Barcode Sterilisasi — SATU label per paket / per unit satuan.
+  // Cetak Label — untuk sementara TIDAK membuka PDF/print browser, hanya
+  // console.log printer terpilih + data label. TODO: sambungkan ke API cetak
+  // (kirim selectedPrinter + labelPayload ke print server).
   function printLabel() {
-    if (!label) return
+    if (!label || !selectedPrinterId) return
     const entries = groupLabelEntries(label.items)
     if (entries.length === 0) return
-    const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
-    const sterilDate = formatDate(label.packaged_at)
-    const expiry = formatDate(label.expiry_date)
 
-    const labels = entries
-      .map((e, i) => {
-        const svg = document.getElementById(`prod-steril-label-${i}`)
-        const barcodeSvg = svg ? new XMLSerializer().serializeToString(svg) : ""
-        const batchLine = e.kind === "paket" ? `${e.unitCodes.length} unit dalam paket` : (e.unitCode ?? "—")
-        // Nama Set: paket → nama set produksi; satuan → nama instrumen itu sendiri.
-        const namaSet = e.kind === "paket" ? label.set_name : e.title
-        return `
-          <div class="label">
-            <div class="head">LABEL STERILISASI CSSD</div>
-            <div class="bc">${barcodeSvg}</div>
-            <div class="batch">${esc(batchLine)}</div>
-            <table>
-              <tr><td class="k">Nama Set</td><td class="v">${esc(namaSet)}</td></tr>
-              <tr><td class="k">Petugas Pengemasan</td><td class="v">${esc(label.packer ?? "—")}</td></tr>
-              <tr><td class="k">Tanggal Sterilisasi</td><td class="v">${esc(sterilDate)}</td></tr>
-              <tr><td class="k">Indikator Kimia</td><td class="v">${esc(label.chemical_indicator ?? "—")}</td></tr>
-              <tr><td class="k">Tanggal Kadaluwarsa</td><td class="v">${esc(expiry)}</td></tr>
-            </table>
-          </div>`
-      })
-      .join("")
-
-    const w = window.open("", "_blank", "width=460,height=600")
-    if (!w) return
-    w.document.write(`
-      <html>
-        <head>
-          <title>Label Sterilisasi ${esc(label.batch)}</title>
-          <style>
-            body { margin: 0; font-family: Arial, Helvetica, sans-serif; }
-            .label { width: 360px; margin: 12px auto; border: 1px solid #000; padding: 12px; page-break-inside: avoid; }
-            .head { text-align: center; font-weight: 700; font-size: 13px; letter-spacing: 1px; border-bottom: 1px dashed #999; padding-bottom: 6px; }
-            .set { text-align: center; font-size: 16px; font-weight: 700; margin: 8px 0 2px; }
-            .sub { text-align: center; font-size: 11px; color: #555; margin-bottom: 6px; }
-            .bc { text-align: center; margin: 6px 0; }
-            .batch { text-align: center; font-family: 'Courier New', monospace; font-weight: 700; letter-spacing: 2px; font-size: 14px; }
-            table { width: 100%; font-size: 11px; margin-top: 8px; border-collapse: collapse; }
-            td { padding: 2px 0; }
-            td.k { color: #555; width: 45%; }
-            td.v { font-weight: 600; }
-            @media print { @page { margin: 6mm; } .label { margin: 0 auto 8mm; } }
-          </style>
-        </head>
-        <body>${labels}</body>
-      </html>
-    `)
-    w.document.close()
-    w.focus()
-    w.print()
+    const selectedPrinter = printers.find((p) => String(p.id) === selectedPrinterId) ?? null
+    const labelPayload = entries
+      // Kartu yang dipilih; bila tak ada yang dipilih → semua.
+      .filter((_, i) => selectedLabels.size === 0 || selectedLabels.has(i))
+      .map((e) => ({
+        kode_produksi: label.batch,
+        nama_instrumen: e.title,
+        petugas_pengemasan: label.packer ?? null,
+        tanggal_steril: label.packaged_at,
+        tanggal_kadaluarsa: label.expiry_date,
+      }))
+    console.log("[cetak-label]", { printer: selectedPrinter, labels: labelPayload })
   }
 
   // Label yang ditampilkan: satu per paket / satu per unit satuan.
@@ -484,7 +516,7 @@ export function ProductionPackagingTab({
                     className="inline-flex items-center gap-1.5 rounded-md border border-[#075489] px-3 py-1.5 text-xs font-medium text-[#075489] hover:bg-[#075489]/8 disabled:opacity-60"
                   >
                     <Printer className="h-3.5 w-3.5" />
-                    {labelLoadingId === batch.id ? "Memuat..." : "Lihat Label"}
+                    {labelLoadingId === batch.id ? "Memuat..." : "Cetak Label"}
                   </button>
                   <ChevronRight className="h-4 w-4 text-gray-300" />
                 </div>
@@ -660,78 +692,105 @@ export function ProductionPackagingTab({
       <Modal
         open={label !== null}
         onClose={closeLabel}
-        title="Label Sterilisasi Siap Dicetak"
+        title="Cetak Label"
         size="lg"
         footer={
-          <div className="flex w-full justify-end gap-2">
-            <Button variant="outline" onClick={closeLabel}>
-              Tutup
-            </Button>
-            <Button onClick={printLabel} className="bg-[#075489] hover:bg-[#075489]/90 text-white">
-              <Printer className="mr-1.5 h-4 w-4" />
-              Cetak Label
-            </Button>
+          <div className="flex w-full items-center justify-between gap-3">
+            {!selectedPrinterId ? (
+              <span className="text-xs text-amber-600">Pilih printer dulu untuk mencetak.</span>
+            ) : (
+              <span />
+            )}
+            <div className="flex shrink-0 gap-2">
+              <Button variant="outline" onClick={closeLabel}>
+                Tutup
+              </Button>
+              <Button
+                onClick={printLabel}
+                disabled={!selectedPrinterId}
+                className="bg-[#075489] hover:bg-[#075489]/90 text-white disabled:opacity-60"
+              >
+                <Printer className="mr-1.5 h-4 w-4" />
+                Cetak Label{selectedLabels.size > 0 ? ` (${selectedLabels.size})` : " (Semua)"}
+              </Button>
+            </div>
           </div>
         }
       >
         {label && (
           <div className="space-y-4">
-            <div className="flex items-center gap-3 rounded-lg bg-green-50 px-4 py-3">
-              <CheckCircle2 className="h-6 w-6 shrink-0 text-green-600" />
-              <p className="text-sm text-gray-700">
-                Packaging <span className="font-mono font-semibold">{label.batch}</span> selesai &amp;
-                berstatus <b>Siap Disterilkan</b>. Cetak label lalu tempel di kemasan luar.
-              </p>
-            </div>
-
-            <div className="grid grid-cols-2 gap-x-4 gap-y-2 rounded-lg border border-gray-200 bg-gray-50 px-4 py-3 text-sm sm:grid-cols-3">
-              <Info label="Nomor Produksi" value={label.batch} />
-              <Info label="Nama Set" value={label.set_name} />
-              <Info label="Petugas Pengemasan" value={label.packer} />
-              <Info label="Tanggal Sterilisasi" value={formatDate(label.packaged_at)} />
-              <Info label="Indikator Kimia" value={label.chemical_indicator} />
-              <Info label="Tanggal Kadaluwarsa" value={formatDate(label.expiry_date)} />
+            {/* Pilih printer (dari Master Printer) — wajib sebelum cetak */}
+            <div className="space-y-1.5">
+              <Label>
+                Printer <span className="text-red-500">*</span>
+              </Label>
+              <SelectSearch
+                options={printerOptions}
+                value={selectedPrinterId}
+                onChange={setSelectedPrinterId}
+                loading={printersLoading}
+                placeholder="Pilih printer..."
+                searchPlaceholder="Cari printer..."
+              />
             </div>
 
             <div>
-              <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-400">
-                Cetak Label
-              </p>
+              <div className="mb-2 flex items-center justify-between gap-2">
+                <p className="text-xs font-semibold uppercase tracking-wide text-gray-400">View Label</p>
+                <p className="text-xs text-gray-400">
+                  {selectedLabels.size > 0
+                    ? `${selectedLabels.size} dipilih`
+                    : "Klik kartu untuk pilih — kosong = cetak semua"}
+                </p>
+              </div>
               <div className="flex flex-wrap gap-3">
-                {labelEntries.map((e, i) => (
-                  <div key={i} className="w-[220px] rounded-lg border border-gray-200 p-3">
+                {labelEntries.map((e, i) => {
+                  const picked = selectedLabels.has(i)
+                  return (
+                  <div
+                    key={i}
+                    onClick={() => toggleLabel(i)}
+                    className={
+                      "relative w-[220px] cursor-pointer rounded-lg border p-3 text-center transition-colors " +
+                      (picked
+                        ? "border-[#075489] bg-[#075489]/5 ring-1 ring-[#075489]/20"
+                        : "border-gray-200 hover:border-[#075489]/40")
+                    }
+                  >
+                    {/* Penanda pilih */}
+                    <span
+                      className={
+                        "absolute right-2 top-2 flex h-4 w-4 items-center justify-center rounded border " +
+                        (picked ? "border-[#075489] bg-[#075489] text-white" : "border-gray-300 bg-white")
+                      }
+                    >
+                      {picked && <Check className="h-3 w-3" />}
+                    </span>
+                    {/* Barcode berisi kode produksi (batch). */}
                     <div className="my-2 flex justify-center">
-                      <Barcode id={`prod-steril-label-${i}`} value={e.barcodeValue} height={44} moduleWidth={1.6} />
+                      <Barcode id={`prod-steril-label-${i}`} value={label.batch} height={44} moduleWidth={1.6} />
                     </div>
-                    <div className="text-center font-mono text-[11px] font-semibold text-gray-700">
-                      {e.kind === "paket" ? `${e.unitCodes.length} unit` : (e.unitCode ?? "—")}
-                    </div>
+                    <div className="font-mono text-[11px] font-semibold text-gray-700">{label.batch}</div>
+                    <div className="mt-1 text-sm font-semibold text-gray-900">{e.title}</div>
                     <table className="mt-2 w-full text-left text-[10px]">
                       <tbody>
-                        <tr>
-                          <td className="py-0.5 pr-2 text-gray-500">Nama Set</td>
-                          <td className="py-0.5 font-medium text-gray-800">{e.kind === "paket" ? label.set_name : e.title}</td>
-                        </tr>
                         <tr>
                           <td className="py-0.5 pr-2 text-gray-500">Petugas Pengemasan</td>
                           <td className="py-0.5 font-medium text-gray-800">{label.packer ?? "—"}</td>
                         </tr>
                         <tr>
-                          <td className="py-0.5 pr-2 text-gray-500">Tanggal Sterilisasi</td>
+                          <td className="py-0.5 pr-2 text-gray-500">Tanggal Steril</td>
                           <td className="py-0.5 font-medium text-gray-800">{formatDate(label.packaged_at)}</td>
                         </tr>
                         <tr>
-                          <td className="py-0.5 pr-2 text-gray-500">Indikator Kimia</td>
-                          <td className="py-0.5 font-medium text-gray-800">{label.chemical_indicator ?? "—"}</td>
-                        </tr>
-                        <tr>
-                          <td className="py-0.5 pr-2 text-gray-500">Tanggal Kadaluwarsa</td>
+                          <td className="py-0.5 pr-2 text-gray-500">Tanggal Kadaluarsa</td>
                           <td className="py-0.5 font-medium text-gray-800">{formatDate(label.expiry_date)}</td>
                         </tr>
                       </tbody>
                     </table>
                   </div>
-                ))}
+                  )
+                })}
               </div>
             </div>
           </div>
@@ -754,7 +813,7 @@ export function ProductionPackagingTab({
                 className="inline-flex items-center gap-1.5 rounded-md border border-[#075489] px-3 py-1.5 text-xs font-medium text-[#075489] hover:bg-[#075489]/8 disabled:opacity-60"
               >
                 <Printer className="h-3.5 w-3.5" />
-                {labelLoadingId === historyBatch.id ? "Memuat..." : "Lihat Label"}
+                {labelLoadingId === historyBatch.id ? "Memuat..." : "Cetak Label"}
               </button>
             )}
             <Button variant="outline" onClick={() => setHistoryBatch(null)}>

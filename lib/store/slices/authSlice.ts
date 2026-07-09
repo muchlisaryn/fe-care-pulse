@@ -4,6 +4,8 @@ import api from "@/lib/axios";
 export type AuthSubMenu = {
   name: string;
   url: string | null;
+  icon?: string | null;
+  open_sidebar?: boolean;
 };
 
 export type AuthMenuGroup = {
@@ -12,6 +14,7 @@ export type AuthMenuGroup = {
   icon: string | null;
   sort_order: number;
   is_open: boolean;
+  open_sidebar?: boolean;
   menu: AuthSubMenu[] | null;
 };
 

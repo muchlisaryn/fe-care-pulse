@@ -108,6 +108,9 @@ type OrderState = {
   page: number
   search: string
   status: OrderStatus | "" // "" = semua status
+  // Filter rentang tanggal pinjam (order_date), format "YYYY-MM-DD"; "" = tidak difilter.
+  dateFrom: string
+  dateTo: string
   loading: boolean
   loaded: boolean
   dirty: boolean
@@ -120,15 +123,23 @@ const initialState: OrderState = {
   page: 1,
   search: "",
   status: "",
+  dateFrom: "",
+  dateTo: "",
   loading: false,
   loaded: false,
   dirty: false,
 }
 
 export const fetchOrders = createAsyncThunk("orders/fetch", async (_, { getState }) => {
-  const { page, search, status } = (getState() as { orders: OrderState }).orders
+  const { page, search, status, dateFrom, dateTo } = (getState() as { orders: OrderState }).orders
   const res = await api.get("/master/orders", {
-    params: { page, search: search || undefined, status: status || undefined },
+    params: {
+      page,
+      search: search || undefined,
+      status: status || undefined,
+      date_from: dateFrom || undefined,
+      date_to: dateTo || undefined,
+    },
   })
   return res.data.data
 })
@@ -144,6 +155,12 @@ const orderSlice = createSlice({
     },
     setOrderStatus(state, action: PayloadAction<OrderStatus | "">) {
       state.status = action.payload
+      state.page = 1
+      state.loaded = false
+    },
+    setOrderDateRange(state, action: PayloadAction<{ from: string; to: string }>) {
+      state.dateFrom = action.payload.from
+      state.dateTo = action.payload.to
       state.page = 1
       state.loaded = false
     },
@@ -174,5 +191,6 @@ const orderSlice = createSlice({
   },
 })
 
-export const { setOrderSearch, setOrderStatus, setOrderPage, invalidateOrders } = orderSlice.actions
+export const { setOrderSearch, setOrderStatus, setOrderDateRange, setOrderPage, invalidateOrders } =
+  orderSlice.actions
 export default orderSlice.reducer

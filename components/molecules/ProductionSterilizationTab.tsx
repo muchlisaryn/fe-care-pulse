@@ -27,6 +27,14 @@ function nowLocalInput(): string {
   return d.toISOString().slice(0, 16)
 }
 
+// Tanggal lokal (YYYY-MM-DD) sekarang + `days` hari, untuk <input type="date">.
+function plusDaysDateInput(days: number): string {
+  const d = new Date()
+  d.setDate(d.getDate() + days)
+  d.setMinutes(d.getMinutes() - d.getTimezoneOffset())
+  return d.toISOString().slice(0, 10)
+}
+
 
 function errMsg(e: unknown): string {
   const x = e as { response?: { data?: { message?: string } } }
@@ -136,7 +144,14 @@ export function ProductionSterilizationTab({
     if (selectedReady.length === 0) return
     setError(null)
     const preset = METHOD_DEFAULTS[emptyForm.method]
-    setForm({ ...emptyForm, sterilized_at: nowLocalInput(), temperature: preset?.temperature ?? "", duration_minutes: preset?.duration_minutes ?? "" })
+    setForm({
+      ...emptyForm,
+      sterilized_at: nowLocalInput(),
+      // Kedaluwarsa steril otomatis: 7 hari dari sekarang (bisa diubah operator).
+      expiry_date: plusDaysDateInput(7),
+      temperature: preset?.temperature ?? "",
+      duration_minutes: preset?.duration_minutes ?? "",
+    })
     setBatchOpen(true)
   }
 
@@ -510,10 +525,10 @@ export function ProductionSterilizationTab({
               <Label htmlFor="pstr-at">Waktu Sterilisasi *</Label>
               <Input id="pstr-at" type="datetime-local" value={form.sterilized_at} onChange={(e) => setForm((f) => ({ ...f, sterilized_at: e.target.value }))} />
             </div>
-            <div className="space-y-1.5">
+            <div className="space-y-1.5 sm:col-span-2">
               <Label htmlFor="pstr-expiry">Tanggal Kedaluwarsa Steril</Label>
               <Input id="pstr-expiry" type="date" min={form.sterilized_at ? form.sterilized_at.slice(0, 10) : undefined} value={form.expiry_date} onChange={(e) => setForm((f) => ({ ...f, expiry_date: e.target.value }))} />
-              <p className="text-xs text-gray-400">Kosongkan untuk memakai default (tgl sterilisasi + 7 hari).</p>
+              <p className="text-xs text-gray-400">Default 7 hari dari sekarang — bisa diubah.</p>
             </div>
           </div>
 

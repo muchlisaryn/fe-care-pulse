@@ -11,6 +11,7 @@ export type MenuChild = {
   id: number
   name: string
   url: string | null
+  open_sidebar?: boolean
 }
 
 // Parent menu (parent_id === null) inside a group.
@@ -23,6 +24,7 @@ export type MenuParent = {
   icon: string | null
   sort_order: number
   is_open: boolean
+  open_sidebar?: boolean
   menu: MenuChild[]
 }
 
@@ -42,6 +44,7 @@ export type MenuDetail = {
   icon: string | null
   sort_order: number
   is_open: boolean
+  open_sidebar: boolean
   title_menu: TitleMenuRef | null
   parent: MenuDetail | null
   children?: { id: number; name: string; url: string | null; sort_order: number }[]

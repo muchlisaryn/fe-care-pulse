@@ -2,7 +2,6 @@
 
 import { useRef, useState } from "react"
 import {
-  ChevronRight,
   ChevronDown,
   Package,
   CheckCircle2,
@@ -538,9 +537,9 @@ export function CleaningTab({
                 <Input
                   id="wash-machine"
                   value={machineNo}
-                  onChange={(e) => setMachineNo(e.target.value)}
-                  placeholder="mis. WD-01 / WSH-001"
-                  disabled={washedActive}
+                  readOnly
+                  placeholder="Otomatis dari mesin washer terpilih"
+                  className="cursor-not-allowed bg-gray-50"
                 />
               </div>
               {/* ID Operator disembunyikan — terisi otomatis dari user yang login. */}
@@ -918,16 +917,7 @@ function CleaningOrderCard({
           </div>
         </button>
         <div className="mt-1.5 mr-1 flex shrink-0 items-center gap-1.5 self-center">
-          {washed || canceled ? (
-            <button
-              type="button"
-              onClick={onOpen}
-              className="flex items-center gap-1 rounded-md border border-[#075489] px-2 py-1 text-xs font-medium text-[#075489] hover:bg-[#075489]/10"
-            >
-              Detail
-              <ChevronRight className="h-3.5 w-3.5" />
-            </button>
-          ) : (
+          {washed || canceled ? null : (
             inProcess ? (
               <button
                 type="button"

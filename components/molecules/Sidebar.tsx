@@ -19,6 +19,7 @@ import {
   Droplets,
   Warehouse,
   WashingMachine,
+  Printer,
   ChevronRight,
   X,
   Circle,
@@ -44,6 +45,7 @@ const ICON_MAP: Record<string, LucideIcon> = {
   droplets: Droplets,
   warehouse: Warehouse,
   "washing-machine": WashingMachine,
+  printer: Printer,
 }
 
 function getIcon(name: string | null): LucideIcon {
@@ -174,7 +176,9 @@ export function Sidebar({ className, collapsed = false, onExpand, onClose }: Sid
   function renderMenu(menu: AuthMenuGroup, sectionName: string) {
     const key = `${sectionName}::${menu.name}`
     const Icon = getIcon(menu.icon)
-    const hasSubs = !!(menu.menu && menu.menu.length > 0)
+    // Menu induk yang punya URL sendiri tampil sebagai LINK langsung (anaknya
+    // disembunyikan dari sidebar utama — dipakai untuk sidebar kedua, mis. Pengaturan).
+    const hasSubs = !!(menu.menu && menu.menu.length > 0) && !menu.url
     const active = isMenuActive(menu)
     const isOpen = openMenus[key] ?? menu.is_open
 
@@ -257,7 +261,7 @@ export function Sidebar({ className, collapsed = false, onExpand, onClose }: Sid
   function renderCollapsedMenu(menu: AuthMenuGroup, sectionName: string) {
     const key = `${sectionName}::${menu.name}`
     const Icon = getIcon(menu.icon)
-    const hasSubs = !!(menu.menu && menu.menu.length > 0)
+    const hasSubs = !!(menu.menu && menu.menu.length > 0) && !menu.url
     const active = isMenuActive(menu)
 
     const iconClass = cn(
