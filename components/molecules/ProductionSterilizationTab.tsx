@@ -291,32 +291,48 @@ export function ProductionSterilizationTab({
           return (
             <div
               key={key}
-              onClick={isHistory ? () => setDetailOrder(order) : undefined}
+              onClick={
+                isHistory
+                  ? () => setDetailOrder(order)
+                  : !inBatch
+                    ? () => toggleSelect(order.id)
+                    : undefined
+              }
               className={
-                "rounded-lg border border-gray-200" +
-                (isHistory ? " cursor-pointer hover:border-[#075489]/40 hover:bg-gray-50" : "")
+                "rounded-lg border transition-colors " +
+                (isHistory
+                  ? "border-gray-200 cursor-pointer hover:border-[#075489]/40 hover:bg-gray-50"
+                  : !inBatch
+                    ? "cursor-pointer " +
+                      (checked
+                        ? "border-[#075489] bg-[#075489]/5 ring-1 ring-[#075489]/20"
+                        : "border-gray-200 hover:border-[#075489]/40 hover:bg-gray-50")
+                    : "border-gray-200")
               }
             >
-              <div className="flex items-start justify-between gap-2 px-3 py-2.5">
-                <div className="flex min-w-0 items-start gap-2">
+              <div className="flex items-start justify-between gap-3 px-3 py-3">
+                <div className="flex min-w-0 flex-1 items-start gap-3">
                   {!inBatch && (
                     <input
                       type="checkbox"
                       checked={checked}
-                      onChange={() => toggleSelect(order.id)}
-                      className="mt-1 h-4 w-4 shrink-0 accent-[#075489]"
+                      readOnly
+                      // Seluruh kartu yang menangani klik pilih; checkbox hanya indikator.
+                      className="pointer-events-none mt-0.5 h-4 w-4 shrink-0 accent-[#075489]"
                       title="Pilih untuk digabung ke batch"
                     />
                   )}
-                  <div className="min-w-0">
+                  <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-2">
-                      <span className="text-sm font-semibold text-gray-900">
-                        {inBatch ? `Batch ${order.code}` : (order.borrowed_by ?? "—")}
-                      </span>
-                      {!inBatch && (
-                        <span className="font-mono text-xs font-semibold text-[#075489] bg-[#075489]/10 px-2 py-0.5 rounded">
+                      {inBatch ? (
+                        <span className="text-sm font-semibold text-gray-900">Batch {order.code}</span>
+                      ) : (
+                        <span className="rounded bg-[#075489]/10 px-2 py-0.5 font-mono text-sm font-semibold text-[#075489]">
                           {order.code}
                         </span>
+                      )}
+                      {!inBatch && order.borrowed_by && (
+                        <span className="truncate text-sm font-medium text-gray-700">{order.borrowed_by}</span>
                       )}
                       {inBatch &&
                         (order.sterilization?.status === "selesai" ? (
@@ -327,9 +343,14 @@ export function ProductionSterilizationTab({
                           <Badge variant="warning">Menunggu Validasi</Badge>
                         ))}
                     </div>
-                    <div className="mt-1 flex flex-wrap gap-x-4 gap-y-0.5 text-xs text-gray-500">
-                      <span>{order.unit_count} unit</span>
-                      {order.code_transaction && <span>{order.code_transaction}</span>}
+                    <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-gray-500">
+                      <span className="inline-flex items-center gap-1">
+                        <Layers className="h-3.5 w-3.5 text-gray-400" />
+                        {order.unit_count} unit
+                      </span>
+                      {order.code_transaction && (
+                        <span className="font-mono text-gray-400">{order.code_transaction}</span>
+                      )}
                       {inBatch && order.sterilization && <span>Mesin: {order.sterilization.machine ?? "—"}</span>}
                     </div>
                     {/* Riwayat → detail dibuka lewat modal saat kartu diklik. */}
@@ -337,14 +358,20 @@ export function ProductionSterilizationTab({
                       <>
                         <button
                           type="button"
-                          onClick={() => toggleUnits(key)}
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            toggleUnits(key)
+                          }}
                           className="mt-1.5 flex items-center gap-1 text-xs font-medium text-gray-400 hover:text-gray-600"
                         >
                           Unit Disterilkan ({order.unit_count})
                           <ChevronDown className={"h-3.5 w-3.5 transition-transform " + (unitsOpen ? "rotate-180" : "")} />
                         </button>
                         {unitsOpen && (
-                          <div className="mt-1.5 divide-y divide-gray-100 rounded-lg border border-gray-200 bg-white">
+                          <div
+                            onClick={(e) => e.stopPropagation()}
+                            className="mt-1.5 divide-y divide-gray-100 rounded-lg border border-gray-200 bg-white"
+                          >
                             {groups.map((g) => (
                               <div key={g.instrument} className="px-3 py-2">
                                 <div className="flex items-center gap-2">

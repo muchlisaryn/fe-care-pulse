@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useRef, useState } from "react"
 import {
   ChevronRight,
   ChevronDown,
@@ -144,6 +144,9 @@ export function CleaningTab({
   const [washerMachineId, setWasherMachineId] = useState<number | null>(null)
   const [machineInfo, setMachineInfo] = useState<ScannedMachine | null>(null)
   const [machines, setMachines] = useState<ScannedMachine[]>([])
+  // Status muat daftar mesin washer (animasi loading dropdown) + penanda sudah dimuat.
+  const [machinesLoading, setMachinesLoading] = useState(false)
+  const machinesLoadedRef = useRef(false)
   const [duration, setDuration] = useState("")
   // Notifikasi kegagalan suhu/waktu dari backend (parameter di luar ambang mesin).
   const [alertMsg, setAlertMsg] = useState<string | null>(null)
@@ -161,32 +164,34 @@ export function CleaningTab({
   const [cancelTarget, setCancelTarget] = useState<CleaningOrder | null>(null)
   const [cancelling, setCancelling] = useState(false)
 
-  // Muat daftar mesin washer aktif (master CSSD) untuk dropdown pilihan.
-  useEffect(() => {
-    let active = true
-    ;(async () => {
-      const collected: ScannedMachine[] = []
-      let cur = 1
-      let last = 1
-      try {
-        do {
-          const res = await api.get("/master/washer-machines", { params: { page: cur, status: "aktif" } })
-          const p = res.data.data
-          collected.push(...p.data)
-          last = p.last_page
-          cur += 1
-        } while (cur <= last && active)
-        if (active) setMachines(collected)
-      } catch {
-        // Abaikan — dropdown tetap kosong bila gagal memuat.
-      }
-    })()
-    return () => {
-      active = false
+  // Muat daftar mesin washer aktif (master CSSD) untuk dropdown — dipanggil lazy saat
+  // tombol Proses ditekan (bukan saat mount). Hanya di-fetch sekali (cache via ref).
+  async function loadMachines() {
+    if (machinesLoadedRef.current || machinesLoading) return
+    setMachinesLoading(true)
+    const collected: ScannedMachine[] = []
+    let cur = 1
+    let last = 1
+    try {
+      do {
+        const res = await api.get("/master/washer-machines", { params: { page: cur, status: "aktif" } })
+        const p = res.data.data
+        collected.push(...p.data)
+        last = p.last_page
+        cur += 1
+      } while (cur <= last)
+      setMachines(collected)
+      machinesLoadedRef.current = true
+    } catch {
+      // Abaikan — dropdown tetap kosong bila gagal memuat.
+    } finally {
+      setMachinesLoading(false)
     }
-  }, [])
+  }
 
   function openWashing(order: CleaningOrder) {
+    // Muat daftar mesin washer saat modal Proses dibuka pertama kali.
+    loadMachines()
     setActive(order)
     setError(null)
     setFailMode(false)
@@ -491,6 +496,7 @@ export function CleaningTab({
                   options={machines.map((m) => ({ value: String(m.id), label: `${m.code} — ${m.name}` }))}
                   value={washerMachineId ? String(washerMachineId) : ""}
                   onChange={selectMachine}
+                  loading={machinesLoading}
                   placeholder="Pilih mesin washer..."
                   searchPlaceholder="Cari kode / nama mesin..."
                 />
@@ -593,7 +599,9 @@ export function CleaningTab({
             </div>
             )}
 
-            {!washedActive && !canceledActive &&
+            {/* "Tandai Pencucian Gagal" hanya tersedia bila batch sudah diproses
+                (parameter pencucian sudah diisi & disimpan). */}
+            {!washedActive && !canceledActive && isWashingFilled(active) &&
               (failMode ? (
                 <div className="space-y-2 rounded-lg border border-red-200 bg-red-50 px-4 py-3">
                   <Label htmlFor="fail-reason" className="text-red-700">
@@ -789,11 +797,14 @@ function CleaningOrderCard({
         >
           <div className="flex min-w-0 items-start gap-2">
             <div className="min-w-0 flex-1">
-              {/* Baris atas: kode batch + status pencucian. */}
+              {/* Baris atas: kode batch + mesin + status pencucian. */}
               <div className="flex flex-wrap items-center gap-2">
                 <span className="font-mono text-xs font-semibold text-[#075489] bg-[#075489]/8 px-2 py-0.5 rounded">
                   {order.code_transaction ?? order.code}
                 </span>
+                {order.washing?.machine_no && (
+                  <span className="text-xs text-gray-500">Mesin: {order.washing.machine_no}</span>
+                )}
                 {washed && <Badge variant="success">Selesai Cuci</Badge>}
                 {order.washing?.status === "batal" && <Badge variant="default">Dibatalkan</Badge>}
                 {!washed && order.washing?.status === "gagal" && (
@@ -903,11 +914,6 @@ function CleaningOrderCard({
                 </div>
               )}
 
-              {order.washing?.machine_no && (
-                <div className="mt-1.5 text-xs text-gray-500">
-                  Mesin: {order.washing.machine_no}
-                </div>
-              )}
             </div>
           </div>
         </button>

@@ -14,7 +14,7 @@ import { Modal } from "@/components/molecules/Modal"
 import { PageHeader } from "@/components/molecules/PageHeader"
 import { Pagination } from "@/components/molecules/Pagination"
 import { useAppDispatch, useAppSelector } from "@/lib/store/hooks"
-import { fetchCleaning } from "@/lib/store/slices/cleaningSlice"
+import { fetchCleaning, invalidateCleaning } from "@/lib/store/slices/cleaningSlice"
 import { fetchProductionPackaging } from "@/lib/store/slices/productionPackagingSlice"
 import { fetchProductionSterilize } from "@/lib/store/slices/productionSterilizeSlice"
 import { CleaningTab } from "@/components/molecules/CleaningTab"
@@ -51,6 +51,21 @@ function errMsg(e: unknown): string {
   return x.response?.data?.message ?? "Terjadi kesalahan."
 }
 
+// Date lokal → "YYYY-MM-DD" untuk <input type="date">.
+function toDateInput(d: Date): string {
+  const x = new Date(d)
+  x.setMinutes(x.getMinutes() - x.getTimezoneOffset())
+  return x.toISOString().slice(0, 10)
+}
+
+// Rentang default filter Cleaning: 7 hari terakhir (hari ini − 7 s/d hari ini).
+function defaultDateRange(): { from: string; to: string } {
+  const to = new Date()
+  const from = new Date()
+  from.setDate(from.getDate() - 7)
+  return { from: toDateInput(from), to: toDateInput(to) }
+}
+
 /**
  * Produksi CSSD — awal lifecycle. CSSD memproses stok alat miliknya sendiri:
  * pilih jenis/paket + jumlah, lalu "Mulai Produksi" membuat batch internal yang
@@ -71,7 +86,40 @@ function ProduksiCssdPage() {
     PRODUKSI_TABS.includes(tabParam as ProduksiTab) ? (tabParam as ProduksiTab) : "produksi",
   )
   const [page, setPage] = useState(1)
+  // Query yang sudah diterapkan (dipakai untuk filter). Diperbarui hanya saat "Cari".
   const [search, setSearch] = useState("")
+  // Filter rentang tanggal (tab Cleaning) — berdasarkan tanggal batch diproses
+  // (processed_at, fallback order_date). Format "YYYY-MM-DD" dari <input type="date">.
+  // Default: 7 hari terakhir.
+  const [dateFrom, setDateFrom] = useState(() => defaultDateRange().from)
+  const [dateTo, setDateTo] = useState(() => defaultDateRange().to)
+  // Draft input (belum diterapkan) — di-commit ke state di atas saat tombol Cari ditekan.
+  const [searchInput, setSearchInput] = useState("")
+  const [dateFromInput, setDateFromInput] = useState(() => defaultDateRange().from)
+  const [dateToInput, setDateToInput] = useState(() => defaultDateRange().to)
+
+  // Terapkan filter (search + rentang tanggal) dari draft, lalu reset ke halaman 1.
+  function applyFilter(e?: React.FormEvent) {
+    e?.preventDefault()
+    setSearch(searchInput)
+    setDateFrom(dateFromInput)
+    setDateTo(dateToInput)
+    setPage(1)
+  }
+  // Reset ke kondisi awal: search kosong + rentang tanggal kembali ke 7 hari terakhir.
+  function resetFilter() {
+    const def = defaultDateRange()
+    setSearchInput("")
+    setDateFromInput(def.from)
+    setDateToInput(def.to)
+    setSearch("")
+    setDateFrom(def.from)
+    setDateTo(def.to)
+    setPage(1)
+  }
+  const defaultRange = defaultDateRange()
+  const hasFilter =
+    search !== "" || dateFrom !== defaultRange.from || dateTo !== defaultRange.to
   // Sub-tampilan pada tab Packaging: batch yang masih perlu dikemas vs riwayat
   // batch yang sudah dikemas (untuk lihat/cetak ulang label).
   const [pkgView, setPkgView] = useState<"pending" | "history">("pending")
@@ -89,30 +137,57 @@ function ProduksiCssdPage() {
   const sterilizePipeline = useAppSelector((s) => s.productionSterilize.items)
   const sterilizeLoading = useAppSelector((s) => s.productionSterilize.loading)
 
+  // Muat data pipeline setiap kali tab-nya dibuka — selalu fetch ulang (tanpa cache)
+  // agar datanya selalu terbaru. Membuka menu Produksi (tab "produksi") tidak memuat
+  // data cleaning/packaging/sterilisasi sama sekali.
   useEffect(() => {
-    dispatch(fetchCleaning())
-    dispatch(fetchProductionPackaging())
-    dispatch(fetchProductionSterilize())
-  }, [dispatch])
+    if (tab === "cleaning") dispatch(fetchCleaning())
+    else if (tab === "packaging") dispatch(fetchProductionPackaging())
+    else if (tab === "sterilization") dispatch(fetchProductionSterilize())
+  }, [tab, dispatch])
 
+  // Muat ulang data tab pipeline yang sedang aktif (dipanggil setelah aksi/mutasi).
   function refreshPipeline() {
-    dispatch(fetchCleaning())
-    dispatch(fetchProductionPackaging())
-    dispatch(fetchProductionSterilize())
+    if (tab === "cleaning") dispatch(fetchCleaning())
+    else if (tab === "packaging") dispatch(fetchProductionPackaging())
+    else if (tab === "sterilization") dispatch(fetchProductionSterilize())
   }
 
   const q = search.trim().toLowerCase()
   const cleaningFiltered = useMemo(() => {
-    if (!q) return cleaning
-    return cleaning.filter(
-      (o) =>
-        o.code.toLowerCase().includes(q) ||
-        (o.code_transaction ?? "").toLowerCase().includes(q) ||
-        (o.borrowed_by ?? "").toLowerCase().includes(q) ||
-        (o.room?.name ?? "").toLowerCase().includes(q) ||
-        o.items.some((it) => it.name.toLowerCase().includes(q)),
-    )
-  }, [cleaning, q])
+    // Batas rentang tanggal (inklusif): awal hari dateFrom s/d akhir hari dateTo.
+    const from = dateFrom ? new Date(`${dateFrom}T00:00:00`) : null
+    const to = dateTo ? new Date(`${dateTo}T23:59:59.999`) : null
+    return cleaning.filter((o) => {
+      if (
+        q &&
+        !(
+          o.code.toLowerCase().includes(q) ||
+          (o.code_transaction ?? "").toLowerCase().includes(q) ||
+          (o.borrowed_by ?? "").toLowerCase().includes(q) ||
+          (o.room?.name ?? "").toLowerCase().includes(q) ||
+          o.items.some((it) => it.name.toLowerCase().includes(q))
+        )
+      )
+        return false
+      if (from || to) {
+        // Tanggal acuan sesuai sub-tab: History → waktu selesai/dibatalkan;
+        // Proses → waktu diproses. Fallback ke processed_at / order_date.
+        const raw =
+          o.stage_status === "selesai"
+            ? o.washing?.completed_at ?? o.processed_at ?? o.order_date
+            : o.stage_status === "batal"
+              ? o.washing?.canceled_at ?? o.processed_at ?? o.order_date
+              : o.processed_at ?? o.order_date
+        if (!raw) return false
+        const d = new Date(raw)
+        if (Number.isNaN(d.getTime())) return false
+        if (from && d < from) return false
+        if (to && d > to) return false
+      }
+      return true
+    })
+  }, [cleaning, q, dateFrom, dateTo])
   const cleaningItems = useMemo(() => cleaningFiltered.filter((o) => o.status === "pencucian"), [cleaningFiltered])
   // Pisahkan cleaning: yang masih diproses vs riwayat (sudah selesai cuci & lanjut,
   // atau dibatalkan).
@@ -123,16 +198,35 @@ function ProduksiCssdPage() {
   )
   const cleaningActive = cleanView === "history" ? cleaningHistory : cleaningProses
   const packagingItems = useMemo(() => {
-    if (!q) return packaging
-    return packaging.filter(
-      (o) =>
-        o.code.toLowerCase().includes(q) ||
-        (o.code_transaction ?? "").toLowerCase().includes(q) ||
-        (o.borrowed_by ?? "").toLowerCase().includes(q) ||
-        o.items.some((it) => it.name.toLowerCase().includes(q)) ||
-        o.units.some((u) => (u.code ?? "").toLowerCase().includes(q)),
-    )
-  }, [packaging, q])
+    const from = dateFrom ? new Date(`${dateFrom}T00:00:00`) : null
+    const to = dateTo ? new Date(`${dateTo}T23:59:59.999`) : null
+    return packaging.filter((o) => {
+      if (
+        q &&
+        !(
+          o.code.toLowerCase().includes(q) ||
+          (o.code_transaction ?? "").toLowerCase().includes(q) ||
+          (o.borrowed_by ?? "").toLowerCase().includes(q) ||
+          o.items.some((it) => it.name.toLowerCase().includes(q)) ||
+          o.units.some((u) => (u.code ?? "").toLowerCase().includes(q))
+        )
+      )
+        return false
+      if (from || to) {
+        // History (selesai) → waktu dikemas/selesai; Proses → waktu diproses.
+        const raw =
+          o.stage_status === "selesai"
+            ? o.completed_at ?? o.packaged_at ?? o.processed_at
+            : o.processed_at
+        if (!raw) return false
+        const d = new Date(raw)
+        if (Number.isNaN(d.getTime())) return false
+        if (from && d < from) return false
+        if (to && d > to) return false
+      }
+      return true
+    })
+  }, [packaging, q, dateFrom, dateTo])
   // Pisahkan batch packaging: yang masih perlu dikemas vs riwayat (sudah dikemas).
   const packagingPending = useMemo(
     () => packagingItems.filter((b) => b.stage_status !== "selesai"),
@@ -144,15 +238,32 @@ function ProduksiCssdPage() {
   )
   const packagingActive = pkgView === "history" ? packagingHistory : packagingPending
   const sterilizationItems = useMemo(() => {
-    if (!q) return sterilizePipeline
-    return sterilizePipeline.filter(
-      (o) =>
-        o.code.toLowerCase().includes(q) ||
-        (o.code_transaction ?? "").toLowerCase().includes(q) ||
-        (o.borrowed_by ?? "").toLowerCase().includes(q) ||
-        o.units.some((u) => (u.code ?? "").toLowerCase().includes(q)),
-    )
-  }, [sterilizePipeline, q])
+    const from = dateFrom ? new Date(`${dateFrom}T00:00:00`) : null
+    const to = dateTo ? new Date(`${dateTo}T23:59:59.999`) : null
+    return sterilizePipeline.filter((o) => {
+      if (
+        q &&
+        !(
+          o.code.toLowerCase().includes(q) ||
+          (o.code_transaction ?? "").toLowerCase().includes(q) ||
+          (o.borrowed_by ?? "").toLowerCase().includes(q) ||
+          o.units.some((u) => (u.code ?? "").toLowerCase().includes(q))
+        )
+      )
+        return false
+      if (from || to) {
+        // History → waktu validasi; Validasi → waktu steril; Proses/Gagal → waktu diproses.
+        const raw =
+          o.sterilization?.validated_at ?? o.sterilization?.sterilized_at ?? o.processed_at
+        if (!raw) return false
+        const d = new Date(raw)
+        if (Number.isNaN(d.getTime())) return false
+        if (from && d < from) return false
+        if (to && d > to) return false
+      }
+      return true
+    })
+  }, [sterilizePipeline, q, dateFrom, dateTo])
   // Pisahkan pipeline sterilisasi jadi 3: siap-steril (tray, akan dibatch),
   // menunggu validasi (batch STR), dan unit gagal steril (antre re-proses).
   const sterProses = useMemo(
@@ -178,16 +289,6 @@ function ProduksiCssdPage() {
           ? sterHistory
           : sterProses
 
-  const tabCount: Record<ProduksiTab, number> = {
-    produksi: 0, // badge tidak ditampilkan untuk tab form
-    // Badge tab Cleaning hanya menghitung yang masih diproses (bukan riwayat).
-    cleaning: cleaningProses.length,
-    // Badge tab Packaging hanya menghitung yang masih perlu dikemas (bukan riwayat).
-    packaging: packagingPending.length,
-    // Badge tab Sterilisasi = alur normal (siap-steril + validasi, tanpa gagal steril).
-    sterilization: sterProses.length + sterValidasi.length,
-  }
-
   // Pagination tahap pipeline (tab non-produksi). Slice ber-tipe spesifik dihitung
   // di JSX agar props tiap Tab tidak ber-tipe union. Untuk tab Packaging & Sterilisasi,
   // jumlah & slice mengikuti sub-tampilan aktif.
@@ -198,7 +299,7 @@ function ProduksiCssdPage() {
         ? sterActive.length
         : tab === "cleaning"
           ? cleaningActive.length
-          : tabCount[tab]
+          : 0
   const pipelineLoading =
     tab === "sterilization" ? sterilizeLoading : tab === "packaging" ? packagingLoading : cleaningLoading
   const totalPages = Math.ceil(activeCount / ITEMS_PER_PAGE)
@@ -207,6 +308,10 @@ function ProduksiCssdPage() {
   function changeTab(next: ProduksiTab) {
     setTab(next)
     setPage(1)
+    // Selalu buka sub-tampilan pertama tiap ganti tab (mis. Proses Cleaning, bukan History).
+    setCleanView("proses")
+    setPkgView("pending")
+    setSterView("proses")
     // Catat tab aktif di URL: /cssd/produksi (form) atau /cssd/produksi?tab=cleaning
     router.replace(next === "produksi" ? "/cssd/produksi" : `/cssd/produksi?tab=${next}`, { scroll: false })
   }
@@ -228,33 +333,48 @@ function ProduksiCssdPage() {
   const [pickQty, setPickQty] = useState("1")
   const [paketItems, setPaketItems] = useState<PaketItem[]>([])
   const [loadingPaket, setLoadingPaket] = useState(false)
+  // Status muat opsi dropdown (untuk animasi loading di SelectSearch).
+  const [instrumentsLoading, setInstrumentsLoading] = useState(true)
+  const [catalogsLoading, setCatalogsLoading] = useState(true)
 
   useEffect(() => {
     let active = true
     // Muat semua jenis instrumen (endpoint paginate 20).
     ;(async () => {
-      const collected: InstrumentType[] = []
-      let cur = 1
-      let last = 1
-      do {
-        const res = await api.get("/master/instruments", { params: { page: cur } })
-        const p = res.data.data
-        collected.push(...p.data)
-        last = p.last_page
-        cur += 1
-      } while (cur <= last && active)
-      if (active) setInstruments(collected)
+      setInstrumentsLoading(true)
+      try {
+        const collected: InstrumentType[] = []
+        let cur = 1
+        let last = 1
+        do {
+          const res = await api.get("/master/instruments", { params: { page: cur } })
+          const p = res.data.data
+          collected.push(...p.data)
+          last = p.last_page
+          cur += 1
+        } while (cur <= last && active)
+        if (active) setInstruments(collected)
+      } finally {
+        if (active) setInstrumentsLoading(false)
+      }
     })()
     // Daftar katalog paket.
+    setCatalogsLoading(true)
     api
       .get("/master/instrument-catalogs", { params: { type: "paket" } })
       .then((res) => {
         if (active) setCatalogs(res.data.data.data)
       })
+      .finally(() => {
+        if (active) setCatalogsLoading(false)
+      })
     return () => {
       active = false
     }
   }, [])
+
+  // Loading opsi sesuai mode aktif (satuan → instrumen, paket → katalog).
+  const optionsLoading = mode === "satuan" ? instrumentsLoading : catalogsLoading
 
   const options = useMemo(
     () =>
@@ -351,8 +471,9 @@ function ProduksiCssdPage() {
       const res = await api.post("/master/production", { items, note: note.trim() || null })
       setLines([])
       setNote("")
-      // Batch baru langsung berstatus pencucian → muat ulang & alihkan ke tab Cleaning.
-      refreshPipeline()
+      // Batch baru langsung berstatus pencucian → tandai data cleaning perlu di-refresh,
+      // lalu alihkan ke tab Cleaning (efek lazy-load akan memuat ulang datanya).
+      dispatch(invalidateCleaning())
       changeTab("cleaning")
       toast.success(res.data?.message ?? "Batch produksi berhasil dibuat & masuk tahap Cleaning.")
     } catch (e) {
@@ -396,37 +517,72 @@ function ProduksiCssdPage() {
                 }
               >
                 {t.label}
-                {t.key !== "produksi" && (
-                  <span
-                    className={
-                      "rounded-full px-1.5 py-0.5 text-xs font-semibold " +
-                      (active ? "bg-[#075489]/10 text-[#075489]" : "bg-gray-100 text-gray-500")
-                    }
-                  >
-                    {tabCount[t.key]}
-                  </span>
-                )}
               </button>
             )
           })}
         </div>
 
-        {/* Pencarian untuk tahap pipeline */}
+        {/* Filter tahap pipeline: pencarian + rentang tanggal (semua tab pipeline) */}
         {tab !== "produksi" && (
-          <div className="px-5 py-3">
-            <div className="relative">
-              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
-              <Input
-                value={search}
-                onChange={(e) => {
-                  setSearch(e.target.value)
-                  setPage(1)
-                }}
-                placeholder="Cari nama/kode instrument..."
-                className="pl-9"
-              />
+          <form onSubmit={applyFilter} className="px-5 py-3">
+            <div className="flex flex-col gap-3 lg:flex-row lg:items-end">
+              {/* Pencarian nama/kode */}
+              <div className="flex-1 space-y-1.5">
+                <Label htmlFor="pipeline-search">Cari</Label>
+                <div className="relative">
+                  <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+                  <Input
+                    id="pipeline-search"
+                    value={searchInput}
+                    onChange={(e) => setSearchInput(e.target.value)}
+                    placeholder="Cari nama/kode instrument..."
+                    className="pl-9"
+                  />
+                </div>
+              </div>
+
+              {/* Rentang tanggal (semua tab pipeline) */}
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+                  <div className="space-y-1.5">
+                    <Label htmlFor="pipeline-date-from">Dari Tanggal</Label>
+                    <Input
+                      id="pipeline-date-from"
+                      type="date"
+                      value={dateFromInput}
+                      max={dateToInput || undefined}
+                      onChange={(e) => setDateFromInput(e.target.value)}
+                      className="sm:w-44"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="pipeline-date-to">Sampai Tanggal</Label>
+                    <Input
+                      id="pipeline-date-to"
+                      type="date"
+                      value={dateToInput}
+                      min={dateFromInput || undefined}
+                      onChange={(e) => setDateToInput(e.target.value)}
+                      className="sm:w-44"
+                    />
+                  </div>
+              </div>
+
+              {/* Aksi */}
+              <div className="flex gap-2">
+                <Button
+                  type="submit"
+                  className="bg-[#075489] hover:bg-[#075489]/90 text-white shrink-0"
+                >
+                  Cari
+                </Button>
+                {hasFilter && (
+                  <Button type="button" variant="outline" onClick={resetFilter} className="shrink-0">
+                    Reset
+                  </Button>
+                )}
+              </div>
             </div>
-          </div>
+          </form>
         )}
       </Card>
 
@@ -517,7 +673,7 @@ function ProduksiCssdPage() {
             <div className="py-16 text-center text-sm text-gray-400">Memuat data...</div>
           ) : activeCount === 0 ? (
             <div className="py-16 text-center text-sm text-gray-400">
-              {q
+              {q || dateFrom || dateTo
                 ? "Tidak ada data yang cocok."
                 : tab === "packaging"
                   ? pkgView === "history"
@@ -604,6 +760,7 @@ function ProduksiCssdPage() {
               options={options}
               value={pickId}
               onChange={handlePick}
+              loading={optionsLoading}
               placeholder={mode === "satuan" ? "Cari instrumen..." : "Cari paket..."}
             />
           </div>

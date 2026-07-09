@@ -2,6 +2,7 @@
 
 import { useState, useRef, useEffect } from "react"
 import { createPortal } from "react-dom"
+import { Loader2 } from "lucide-react"
 import { cn } from "@/lib/utils"
 
 export type SelectSearchOption = {
@@ -29,6 +30,8 @@ type SelectSearchProps = {
   searchPlaceholder?: string
   disabled?: boolean
   error?: boolean
+  /** Tampilkan animasi loading (spinner) saat opsi sedang dimuat. */
+  loading?: boolean
   className?: string
   /** Kelas tambahan untuk tombol pemicu (mis. samakan tinggi/padding dengan tombol lain). */
   triggerClassName?: string
@@ -42,6 +45,7 @@ export function SelectSearch({
   searchPlaceholder = "Cari...",
   disabled = false,
   error = false,
+  loading = false,
   className,
   triggerClassName,
 }: SelectSearchProps) {
@@ -151,7 +155,12 @@ export function SelectSearch({
           />
         </div>
         <ul className="min-h-0 flex-1 overflow-y-auto py-1">
-          {filtered.length === 0 ? (
+          {loading ? (
+            <li className="flex items-center justify-center gap-2 px-3 py-4 text-sm text-gray-400">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              Memuat opsi...
+            </li>
+          ) : filtered.length === 0 ? (
             <li className="px-3 py-2 text-sm text-gray-400 text-center">Tidak ditemukan.</li>
           ) : (
             filtered.map((option) => (
@@ -197,11 +206,15 @@ export function SelectSearch({
         )}
       >
         <span className={cn("truncate", selected ? "text-gray-900" : "text-gray-400")}>
-          {selected ? selected.label : placeholder}
+          {loading && !selected ? "Memuat opsi..." : selected ? selected.label : placeholder}
         </span>
-        <span className={cn("ml-2 shrink-0 text-gray-400 transition-transform duration-200", open && "rotate-180")}>
-          ▾
-        </span>
+        {loading ? (
+          <Loader2 className="ml-2 h-4 w-4 shrink-0 animate-spin text-gray-400" />
+        ) : (
+          <span className={cn("ml-2 shrink-0 text-gray-400 transition-transform duration-200", open && "rotate-180")}>
+            ▾
+          </span>
+        )}
       </button>
 
       {mounted && createPortal(dropdown, document.body)}
