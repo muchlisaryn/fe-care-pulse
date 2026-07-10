@@ -10,7 +10,6 @@ import {
   ScanLine,
   Undo2,
   ChevronRight,
-  Printer,
   History,
   Loader2,
   Barcode as BarcodeIcon,
@@ -18,7 +17,6 @@ import {
 import { Input } from "@/components/atoms/Input"
 import { Button } from "@/components/atoms/Button"
 import { Badge } from "@/components/atoms/Badge"
-import { Barcode } from "@/components/atoms/Barcode"
 import { Label } from "@/components/atoms/Label"
 import { Card } from "@/components/molecules/Card"
 import { StatCard } from "@/components/molecules/StatCard"
@@ -317,8 +315,6 @@ function MonitoringCssd() {
   const [expandedRoomOrder, setExpandedRoomOrder] = useState<Set<string>>(new Set())
   const [expandedRoomPaket, setExpandedRoomPaket] = useState<Set<string>>(new Set())
   const [roomDetailSearch, setRoomDetailSearch] = useState("")
-  // Kode order yang sedang ditampilkan barcode-nya (untuk dicetak/dipindai).
-  const [barcodeOrder, setBarcodeOrder] = useState<string | null>(null)
 
   const [detailRoom, setDetailRoom] = useState<MonitoredRoom | null>(null)
   const [roomsModalOpen, setRoomsModalOpen] = useState(false)
@@ -804,31 +800,6 @@ function MonitoringCssd() {
     setDetailRoom(room)
   }
 
-  // Cetak barcode kode order (Code 128) lewat jendela print.
-  function handlePrintBarcode() {
-    if (!barcodeOrder) return
-    const svg = document.getElementById("barcode-svg")
-    const data = svg ? new XMLSerializer().serializeToString(svg) : ""
-    const w = window.open("", "_blank", "width=480,height=320")
-    if (!w) return
-    w.document.write(`
-      <html>
-        <head>
-          <title>Barcode ${barcodeOrder}</title>
-          <style>
-            body { margin: 0; font-family: Arial, Helvetica, sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; }
-            .code { font-family: 'Courier New', monospace; font-weight: 700; letter-spacing: 3px; font-size: 18px; margin-top: 10px; }
-            @media print { @page { margin: 8mm; } }
-          </style>
-        </head>
-        <body>${data}<div class="code">${barcodeOrder}</div></body>
-      </html>
-    `)
-    w.document.close()
-    w.focus()
-    w.print()
-  }
-
   const totalUnit = allRows.reduce((sum, r) => sum + r.qty, 0)
   const totalOrder = new Set(allRows.map((r) => r.order_code)).size
   const totalTerlambat = allRows
@@ -1037,7 +1008,6 @@ function MonitoringCssd() {
                     toggleOrder={toggleMonOrder}
                     expandedPaket={expandedMonPaket}
                     togglePaket={toggleMonPaket}
-                    onPrintBarcode={setBarcodeOrder}
                     onReturn={openReturnFor}
                   />
                 ) : row.kind === "returned" ? (
@@ -1143,7 +1113,6 @@ function MonitoringCssd() {
                 toggleOrder={toggleRoomOrder}
                 expandedPaket={expandedRoomPaket}
                 togglePaket={toggleRoomPaket}
-                onPrintBarcode={setBarcodeOrder}
                 showRoom={false}
               />
             )}
@@ -1613,34 +1582,6 @@ function MonitoringCssd() {
         )}
       </Modal>
 
-      {/* Barcode kode transaksi — untuk dicetak & dipindai */}
-      <Modal
-        open={barcodeOrder !== null}
-        onClose={() => setBarcodeOrder(null)}
-        title="Barcode Transaksi"
-        size="lg"
-        footer={
-          <>
-            <Button variant="outline" onClick={() => setBarcodeOrder(null)}>
-              Tutup
-            </Button>
-            <Button onClick={handlePrintBarcode} className="bg-[#075489] hover:bg-[#075489]/90 text-white">
-              <Printer className="h-4 w-4" />
-              Cetak
-            </Button>
-          </>
-        }
-      >
-        {barcodeOrder && (
-          <div className="flex flex-col items-center gap-3 py-2">
-            <div className="rounded-lg border border-gray-200 bg-white p-4">
-              <Barcode id="barcode-svg" value={barcodeOrder} height={70} moduleWidth={2} />
-            </div>
-            <p className="font-mono text-sm font-bold tracking-widest text-gray-900">{barcodeOrder}</p>
-            <p className="text-xs text-gray-400">Pindai barcode untuk membaca kode transaksi.</p>
-          </div>
-        )}
-      </Modal>
     </div>
   )
 }
@@ -1662,7 +1603,6 @@ function OrderGroupList({
   toggleOrder,
   expandedPaket,
   togglePaket,
-  onPrintBarcode,
   showRoom = true,
 }: {
   groups: OrderGroup[]
@@ -1670,7 +1610,6 @@ function OrderGroupList({
   toggleOrder: (code: string) => void
   expandedPaket: Set<string>
   togglePaket: (key: string) => void
-  onPrintBarcode?: (orderCode: string) => void
   showRoom?: boolean
 }) {
   return (
@@ -1683,7 +1622,6 @@ function OrderGroupList({
           toggleOrder={toggleOrder}
           expandedPaket={expandedPaket}
           togglePaket={togglePaket}
-          onPrintBarcode={onPrintBarcode}
           showRoom={showRoom}
         />
       ))}
@@ -1698,7 +1636,6 @@ function OrderGroupCard({
   toggleOrder,
   expandedPaket,
   togglePaket,
-  onPrintBarcode,
   onReturn,
   showRoom = true,
 }: {
@@ -1707,7 +1644,6 @@ function OrderGroupCard({
   toggleOrder: (code: string) => void
   expandedPaket: Set<string>
   togglePaket: (key: string) => void
-  onPrintBarcode?: (orderCode: string) => void
   onReturn?: (orderCode: string) => void
   showRoom?: boolean
 }) {
@@ -1744,32 +1680,18 @@ function OrderGroupCard({
                 </div>
                 <span className="shrink-0 text-xs text-gray-500">{o.totalQty} unit</span>
               </button>
-              {(onReturn || onPrintBarcode) && (
+              {onReturn && (
                 <div className="flex gap-1.5 border-t border-gray-100 px-2 py-2 sm:mt-1.5 sm:shrink-0 sm:border-0 sm:px-0 sm:py-0 sm:pr-1">
-                  {onReturn && (
-                    <button
-                      type="button"
-                      onClick={() => onReturn(o.order_code)}
-                      title="Pengembalian order ini"
-                      aria-label="Pengembalian order ini"
-                      className="flex flex-1 items-center justify-center gap-1.5 rounded-md border border-[#075489] bg-[#075489] px-3 py-1.5 text-xs font-medium text-white hover:bg-[#075489]/90 sm:flex-none sm:px-1.5"
-                    >
-                      <Undo2 className="h-4 w-4" />
-                      <span className="sm:hidden">Kembalikan</span>
-                    </button>
-                  )}
-                  {onPrintBarcode && (
-                    <button
-                      type="button"
-                      onClick={() => onPrintBarcode(o.code_transaction ?? o.order_code)}
-                      title="Cetak barcode order"
-                      aria-label="Cetak barcode order"
-                      className="flex flex-1 items-center justify-center gap-1.5 rounded-md border border-[#075489] px-3 py-1.5 text-xs font-medium text-[#075489] hover:bg-[#075489]/10 sm:flex-none sm:px-1.5"
-                    >
-                      <BarcodeIcon className="h-4 w-4" />
-                      <span className="sm:hidden">Barcode</span>
-                    </button>
-                  )}
+                  <button
+                    type="button"
+                    onClick={() => onReturn(o.order_code)}
+                    title="Pengembalian order ini"
+                    aria-label="Pengembalian order ini"
+                    className="flex flex-1 items-center justify-center gap-1.5 rounded-md border border-[#075489] bg-[#075489] px-3 py-1.5 text-xs font-medium text-white hover:bg-[#075489]/90 sm:flex-none sm:px-1.5"
+                  >
+                    <Undo2 className="h-4 w-4" />
+                    <span className="sm:hidden">Kembalikan</span>
+                  </button>
                 </div>
               )}
             </div>

@@ -12,6 +12,8 @@ import { DataTable, type Column } from "@/components/molecules/DataTable"
 import { Modal } from "@/components/molecules/Modal"
 import { ConfirmDialog } from "@/components/molecules/ConfirmDialog"
 import { Pagination } from "@/components/molecules/Pagination"
+import { useToast } from "@/components/molecules/ToastProvider"
+import { testPrintPrinter } from "@/lib/printServer"
 import { useAppDispatch, useAppSelector } from "@/lib/store/hooks"
 import {
   fetchPrinters,
@@ -165,6 +167,7 @@ const CodePageHint = (
 
 export default function MasterPrinterPage() {
   const dispatch = useAppDispatch()
+  const toast = useToast()
   const { items, totalItems, totalPages, page, search, loading, loaded, dirty } = useAppSelector(
     (s) => s.printers,
   )
@@ -179,6 +182,8 @@ export default function MasterPrinterPage() {
   const [deletingId, setDeletingId] = useState<number | null>(null)
   // Id printer default (dari localStorage, per-komputer).
   const [defaultId, setDefaultId] = useState<number | null>(null)
+  // Id printer yang sedang menjalankan test print (state loading per baris).
+  const [testingId, setTestingId] = useState<number | null>(null)
 
   useEffect(() => {
     if (loaded && !dirty) return
@@ -299,6 +304,19 @@ export default function MasterPrinterPage() {
     }
   }
 
+  // Test print — kirim printer ini ke print server, yang mencetak frasa acak.
+  async function handleTestPrint(row: PrinterType) {
+    if (testingId !== null) return
+    setTestingId(row.id)
+    try {
+      toast.success(await testPrintPrinter(row))
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Gagal melakukan test print.")
+    } finally {
+      setTestingId(null)
+    }
+  }
+
   const columns: Column<PrinterType>[] = [
     {
       header: "Nama Printer",
@@ -406,6 +424,14 @@ export default function MasterPrinterPage() {
           <DataTable
             columns={columns}
             data={items}
+            extraActions={[
+              {
+                label: (row) => (testingId === row.id ? "Mencetak..." : "Test Print"),
+                onClick: handleTestPrint,
+                disabled: (row) => testingId !== null && testingId !== row.id,
+                className: "border-[#4ba69d] text-[#4ba69d] hover:bg-[#4ba69d]/5",
+              },
+            ]}
             onEdit={openEdit}
             onDelete={(row) => setDeleteTarget(row)}
             isRowLoading={(row) => deletingId === row.id}

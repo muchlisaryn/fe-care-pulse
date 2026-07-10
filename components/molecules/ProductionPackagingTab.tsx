@@ -11,6 +11,7 @@ import { Barcode } from "@/components/atoms/Barcode"
 import { Modal } from "@/components/molecules/Modal"
 import { useToast } from "@/components/molecules/ToastProvider"
 import api from "@/lib/axios"
+import { isEscposPrinter, printCssdLabels, type CssdLabelPayload } from "@/lib/printServer"
 import type {
   ProdPackagingBatch,
   ProdPackagingUnit,
@@ -157,11 +158,17 @@ export function ProductionPackagingTab({
   // Batch riwayat yang detail/history-nya sedang ditampilkan di modal.
   const [historyBatch, setHistoryBatch] = useState<ProdPackagingBatch | null>(null)
 
-  // Daftar printer (dari Master Printer) untuk modal Cetak Label — lazy load.
+  // Daftar printer (dari Master Printer) untuk modal Cetak Label. Diambil ulang
+  // tiap modal dibuka: konfigurasi (auto_cut, paper_size, device_path, ...) bisa
+  // saja baru diubah di Master Printer, dan tab ini tidak ikut Redux `printers`
+  // sehingga tak menerima sinyal invalidatePrinters().
   const [printers, setPrinters] = useState<PrinterConfig[]>([])
   const [printersLoading, setPrintersLoading] = useState(false)
-  const printersLoadedRef = useRef(false)
+  // Cegah fetch ganda saat modal dibuka (mis. double-effect React StrictMode).
+  const printersInFlightRef = useRef(false)
   const [selectedPrinterId, setSelectedPrinterId] = useState("")
+  // Pengiriman label ke print server sedang berjalan.
+  const [printing, setPrinting] = useState(false)
   // Index kartu label yang dipilih untuk dicetak. Kosong = cetak semua.
   const [selectedLabels, setSelectedLabels] = useState<Set<number>>(new Set())
   function toggleLabel(i: number) {
@@ -173,9 +180,12 @@ export function ProductionPackagingTab({
     })
   }
 
-  // Muat daftar printer aktif dari Master Printer — sekali saja (cache via ref).
+  // Muat daftar printer aktif dari Master Printer. Sengaja tanpa cache lintas
+  // modal — konfigurasi printer yang basi akan salah cetak (mis. tetap memotong
+  // kertas padahal auto_cut baru dimatikan), dan daftarnya cuma beberapa baris.
   async function loadPrinters() {
-    if (printersLoadedRef.current || printersLoading) return
+    if (printersInFlightRef.current) return
+    printersInFlightRef.current = true
     setPrintersLoading(true)
     try {
       const collected: PrinterConfig[] = []
@@ -189,11 +199,11 @@ export function ProductionPackagingTab({
         cur += 1
       } while (cur <= last)
       setPrinters(collected)
-      printersLoadedRef.current = true
     } catch {
       // Abaikan — dropdown tetap kosong bila gagal memuat.
     } finally {
       setPrintersLoading(false)
+      printersInFlightRef.current = false
     }
   }
 
@@ -207,11 +217,12 @@ export function ProductionPackagingTab({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [label])
 
-  // Opsi dropdown printer — hanya printer aktif.
+  // Opsi dropdown printer — hanya printer aktif & ESC/POS, karena endpoint
+  // /print-label pada print server menolak bahasa printer lain (zpl/tspl/epl).
   const printerOptions = useMemo(
     () =>
       printers
-        .filter((p) => p.is_active)
+        .filter((p) => p.is_active && isEscposPrinter(p))
         .map((p) => ({ value: String(p.id), label: p.name })),
     [printers],
   )
@@ -350,16 +361,19 @@ export function ProductionPackagingTab({
     }
   }
 
-  // Cetak Label — untuk sementara TIDAK membuka PDF/print browser, hanya
-  // console.log printer terpilih + data label. TODO: sambungkan ke API cetak
-  // (kirim selectedPrinter + labelPayload ke print server).
-  function printLabel() {
-    if (!label || !selectedPrinterId) return
+  // Cetak Label — kirim printer terpilih + data label ke care-pulse-print-server
+  // (POST /api/print-label), yang mencetak ke printer termal ESC/POS. Seluruh
+  // konfigurasi (auto_cut, paper_size, char_per_line, code_page) ikut apa adanya
+  // dari Master Printer lewat printerPayload() — halaman ini tidak menimpanya.
+  async function printLabel() {
+    if (!label || !selectedPrinterId || printing) return
     const entries = groupLabelEntries(label.items)
     if (entries.length === 0) return
 
-    const selectedPrinter = printers.find((p) => String(p.id) === selectedPrinterId) ?? null
-    const labelPayload = entries
+    const selectedPrinter = printers.find((p) => String(p.id) === selectedPrinterId)
+    if (!selectedPrinter) return
+
+    const labelPayload: CssdLabelPayload[] = entries
       // Kartu yang dipilih; bila tak ada yang dipilih → semua.
       .filter((_, i) => selectedLabels.size === 0 || selectedLabels.has(i))
       .map((e) => ({
@@ -369,7 +383,16 @@ export function ProductionPackagingTab({
         tanggal_steril: label.packaged_at,
         tanggal_kadaluarsa: label.expiry_date,
       }))
-    console.log("[cetak-label]", { printer: selectedPrinter, labels: labelPayload })
+
+    setPrinting(true)
+    try {
+      const message = await printCssdLabels(selectedPrinter, labelPayload)
+      toast.success(message)
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Gagal mencetak label.")
+    } finally {
+      setPrinting(false)
+    }
   }
 
   // Label yang ditampilkan: satu per paket / satu per unit satuan.
@@ -702,16 +725,18 @@ export function ProductionPackagingTab({
               <span />
             )}
             <div className="flex shrink-0 gap-2">
-              <Button variant="outline" onClick={closeLabel}>
+              <Button variant="outline" onClick={closeLabel} disabled={printing}>
                 Tutup
               </Button>
               <Button
                 onClick={printLabel}
-                disabled={!selectedPrinterId}
+                disabled={!selectedPrinterId || printing}
                 className="bg-[#075489] hover:bg-[#075489]/90 text-white disabled:opacity-60"
               >
                 <Printer className="mr-1.5 h-4 w-4" />
-                Cetak Label{selectedLabels.size > 0 ? ` (${selectedLabels.size})` : " (Semua)"}
+                {printing
+                  ? "Mencetak..."
+                  : `Cetak Label${selectedLabels.size > 0 ? ` (${selectedLabels.size})` : " (Semua)"}`}
               </Button>
             </div>
           </div>

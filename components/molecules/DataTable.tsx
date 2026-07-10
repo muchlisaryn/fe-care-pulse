@@ -11,9 +11,12 @@ export type Column<T> = {
 }
 
 export type ExtraAction<T> = {
-  label: string
+  // Fungsi bila label bergantung pada baris (mis. "Mencetak..." saat proses).
+  label: string | ((row: T) => string)
   onClick: (row: T) => void
   className?: string
+  // Nonaktifkan tombol untuk baris tertentu, di luar isRowLoading.
+  disabled?: (row: T) => boolean
 }
 
 type DataTableProps<T extends object> = {
@@ -53,11 +56,11 @@ export function DataTable<T extends object>({
             key={k}
             size="xs"
             variant="outline"
-            disabled={rowLoading}
+            disabled={rowLoading || (action.disabled?.(row) ?? false)}
             onClick={() => action.onClick(row)}
             className={action.className}
           >
-            {action.label}
+            {typeof action.label === "function" ? action.label(row) : action.label}
           </Button>
         ))}
         {onEdit && (
