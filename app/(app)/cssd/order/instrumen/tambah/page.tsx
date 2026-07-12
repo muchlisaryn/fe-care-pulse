@@ -381,7 +381,7 @@ export default function TambahOrderInstrumenPage() {
 
         {/* Identitas pasien — hanya untuk layanan RAWAT INAP (wajib). Layanan
             rawat jalan / IGD tidak memerlukan identitas pasien. */}
-        {needPatient ? (
+        {needPatient && (
           <div className="border-t border-gray-100 pt-5">
             <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-gray-400">
               Identitas Pasien
@@ -412,17 +412,7 @@ export default function TambahOrderInstrumenPage() {
               </div>
             </div>
           </div>
-        ) : selectedRoom ? (
-          <div className="border-t border-gray-100 pt-5">
-            <p className="text-xs text-gray-400">
-              Identitas pasien tidak diperlukan untuk layanan{" "}
-              <span className="font-medium text-gray-600">
-                {LAYANAN_LABEL[selectedRoom.layanan ?? ""] ?? "ruangan ini"}
-              </span>
-              .
-            </p>
-          </div>
-        ) : null}
+        )}
       </Card>
 
       {/* Jadwal Peminjaman */}

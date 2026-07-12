@@ -149,13 +149,11 @@ export function OrderTimeline({ events }: { events: TimelineEvent[] | undefined 
 
   if (!events || events.length === 0) return null
 
-  // Default ringkas: tampil hanya sampai event "Diterima CSSD"; sisanya (dipinjam,
-  // dipindah, dikembalikan, dst.) diintip samar di balik kaca agar tak banyak scroll.
-  const accIndex = events.findIndex((e) => e.type === "diterima")
-  const cutoff = accIndex >= 0 ? accIndex + 1 : events.length
-  const visible = events.slice(0, cutoff)
-  const hidden = events.slice(cutoff)
-  const collapsed = !expanded && hidden.length > 0
+  // Default ringkas: hanya event TERAKHIR (posisi order saat ini) yang tampil;
+  // seluruh riwayat sebelumnya disembunyikan di balik tombol agar tidak panjang.
+  const latest = events[events.length - 1]
+  const hiddenCount = events.length - 1
+  const collapsed = !expanded && hiddenCount > 0
 
   return (
     <div>
@@ -166,35 +164,15 @@ export function OrderTimeline({ events }: { events: TimelineEvent[] | undefined 
       {collapsed ? (
         <>
           <ol>
-            {visible.map((ev) => (
-              // Semua item terlihat punya garis penghubung — menyambung ke peek di bawah.
-              <TimelineItem key={ev.id} ev={ev} showConnector padBottom />
-            ))}
+            <TimelineItem ev={latest} showConnector={false} padBottom={false} />
           </ol>
-
-          {/* Peek event tersembunyi di balik kaca (frosted): konten tetap terlihat
-              samar, ditutup gradient + blur, dengan tombol untuk membuka semuanya. */}
-          <div className="relative -mt-1 overflow-hidden">
-            <ol className="pointer-events-none max-h-24 opacity-70" aria-hidden>
-              {hidden.map((ev, i) => (
-                <TimelineItem
-                  key={ev.id}
-                  ev={ev}
-                  showConnector={i < hidden.length - 1}
-                  padBottom
-                />
-              ))}
-            </ol>
-            <button
-              type="button"
-              onClick={() => setExpanded(true)}
-              className="absolute inset-0 flex items-center justify-center bg-gradient-to-b from-white/10 via-white/55 to-white/90 backdrop-blur-[3px] transition hover:backdrop-blur-[2px]"
-            >
-              <span className="inline-flex items-center gap-1.5 rounded-full border border-white/70 bg-white/60 px-3.5 py-1.5 text-xs font-medium text-[#075489] shadow-sm">
-                <ChevronDown className="h-3.5 w-3.5" /> Tampilkan semua tracking ({hidden.length})
-              </span>
-            </button>
-          </div>
+          <button
+            type="button"
+            onClick={() => setExpanded(true)}
+            className="ml-6 mt-2 inline-flex items-center gap-1 text-xs font-medium text-[#075489] hover:underline"
+          >
+            <ChevronDown className="h-3.5 w-3.5" /> Tampilkan semua tracking ({hiddenCount})
+          </button>
         </>
       ) : (
         <>
@@ -208,7 +186,7 @@ export function OrderTimeline({ events }: { events: TimelineEvent[] | undefined 
               />
             ))}
           </ol>
-          {hidden.length > 0 && (
+          {hiddenCount > 0 && (
             <button
               type="button"
               onClick={() => setExpanded(false)}

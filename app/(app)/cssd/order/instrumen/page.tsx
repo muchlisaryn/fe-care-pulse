@@ -636,19 +636,20 @@ export default function OrderInstrumenPage() {
     },
     {
       header: "Kode",
-      cell: (row) => (
-        <div className="flex flex-col gap-1">
-          <span className="font-mono text-xs font-semibold text-[#075489] bg-[#075489]/8 px-2 py-1 rounded w-fit">
+      // No. invoice (code_transaction) baru terbit setelah order diterima. Selama
+      // belum ada, tampilkan no. order sebagai gantinya — hanya satu kode per baris.
+      cell: (row) => {
+        const invoice = row.status !== "diajukan" ? row.code_transaction : null
+        return invoice ? (
+          <span className="font-mono text-xs font-semibold text-[#4ba69d] bg-[#4ba69d]/10 px-2 py-1 rounded w-fit inline-block">
+            {invoice}
+          </span>
+        ) : (
+          <span className="font-mono text-xs font-semibold text-[#075489] bg-[#075489]/8 px-2 py-1 rounded w-fit inline-block">
             {row.code}
           </span>
-          {/* Kode transaksi barcode muncul setelah order diterima (status ≠ diajukan). */}
-          {row.status !== "diajukan" && row.code_transaction && (
-            <span className="font-mono text-[11px] font-semibold text-[#4ba69d] bg-[#4ba69d]/10 px-2 py-0.5 rounded w-fit">
-              {row.code_transaction}
-            </span>
-          )}
-        </div>
-      ),
+        )
+      },
       className: "w-36",
     },
     {

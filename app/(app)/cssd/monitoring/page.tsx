@@ -12,7 +12,7 @@ import {
   ChevronRight,
   History,
   Loader2,
-  Barcode as BarcodeIcon,
+  Wrench,
 } from "lucide-react"
 import { Input } from "@/components/atoms/Input"
 import { Button } from "@/components/atoms/Button"
@@ -98,6 +98,8 @@ type ReturnUnit = {
   source: "satuan" | "paket"
   package_name: string | null
   is_returned: boolean
+  /** Kode batch produksi (PRD-...) — label pada bungkus steril unit ini. */
+  production_code: string | null
   instrument_stock: { code: string | null; instrument: { name: string } | null } | null
   condition_out: { id: number; name: string } | null
   condition_in: { id: number; name: string } | null
@@ -293,19 +295,16 @@ function MonitoringCssd() {
   const [searchInput, setSearchInput] = useState("")
   const [searchQuery, setSearchQuery] = useState("")
   const [page, setPage] = useState(1)
-  // Mode scan (sekali-pakai): diaktifkan lewat tombol scan. Saat barcode order
-  // terbaca, langsung buka modal Pengembalian untuk order itu. Pencarian manual
-  // tetap perlu tekan "Cari".
-  const [scanArmed, setScanArmed] = useState(false)
-  // Buffer karakter dari barcode scanner saat mode scan aktif (input modal
-  // disabled, jadi ketikan scanner ditangkap lewat listener keydown global).
-  const scanBufferRef = useRef("")
-  // Sedang menelusuri ke database (scan barcode/kode order ke endpoint scan).
-  const [scanLoading, setScanLoading] = useState(false)
   // Pencarian manual dengan debounce sedang berlangsung (indikator visual).
   const [searching, setSearching] = useState(false)
-  // Notifikasi sementara hasil scan (mis. order tidak dikenal).
-  const [scanNotice, setScanNotice] = useState<{ type: "error" | "info"; message: string } | null>(null)
+  // Mode scan pada kolom pencarian Daftar Order: saat aktif, kolom TIDAK bisa
+  // diketik manual & tombol Cari nonaktif — kolom hanya menampilkan hasil pindaian
+  // barcode (scanner berperilaku sebagai keyboard, ditangkap listener global).
+  const [scanArmed, setScanArmed] = useState(false)
+  const [scanLoading, setScanLoading] = useState(false)
+  const scanBufferRef = useRef("")
+  // Notifikasi sementara hasil scan (mis. no. transaksi tidak dikenal).
+  const [scanNotice, setScanNotice] = useState<string | null>(null)
   // Tabel utama dikelompokkan per order (peminjam) → di dalamnya per paket / satuan.
   const [expandedMonOrder, setExpandedMonOrder] = useState<Set<string>>(new Set())
   const [expandedMonPaket, setExpandedMonPaket] = useState<Set<string>>(new Set())
@@ -356,6 +355,16 @@ function MonitoringCssd() {
   const [returnCondById, setReturnCondById] = useState<Record<number, string>>({})
   const [returnSaving, setReturnSaving] = useState(false)
   const [returnUnitSearch, setReturnUnitSearch] = useState("")
+  // Konfirmasi sebelum simpan: pengembalian tidak bisa diedit / dibatalkan.
+  const [confirmReturnOpen, setConfirmReturnOpen] = useState(false)
+  // Kode yang diketik / dipindai di dalam modal Pengembalian saat belum ada order
+  // termuat. Barcode scanner mengetik kode lalu menekan Enter → form ter-submit.
+  const [returnLookupCode, setReturnLookupCode] = useState("")
+  // Deteksi input dari scanner: scanner "mengetik" jauh lebih cepat dari manusia
+  // (< 40 ms antar karakter). Bila terdeteksi, kode dicari otomatis tanpa menunggu
+  // tombol Cari — berguna untuk scanner yang tidak mengirim Enter di akhir.
+  const scanTypedFastRef = useRef(false)
+  const lastKeystrokeAtRef = useRef(0)
 
   // Muat daftar kondisi (pilihan kondisi masuk) hanya saat modal Pengembalian
   // dibuka — bukan saat halaman dimuat — agar tidak mem-fetch sebelum dibutuhkan.
@@ -371,7 +380,45 @@ function MonitoringCssd() {
     setReturnDate(todayInput())
     setReturnCondById({})
     setReturnUnitSearch("")
+    setReturnLookupCode("")
+    scanTypedFastRef.current = false
+    lastKeystrokeAtRef.current = 0
   }
+
+  // Perubahan isi input scan: tandai apakah kecepatan ketiknya khas scanner.
+  function handleReturnLookupChange(value: string) {
+    const now = Date.now()
+    const gap = now - lastKeystrokeAtRef.current
+    lastKeystrokeAtRef.current = now
+
+    if (value.length <= 1) {
+      // Karakter pertama (atau input dikosongkan) — belum bisa dinilai.
+      scanTypedFastRef.current = false
+    } else if (gap < 40) {
+      scanTypedFastRef.current = true // beruntun sangat cepat → mesin, bukan manusia
+    } else if (gap > 300) {
+      scanTypedFastRef.current = false // jeda panjang → diketik manual
+    }
+
+    setReturnLookupCode(value)
+  }
+
+  // Auto-cari saat kode datang dari scanner: begitu aliran karakter berhenti
+  // (~200 ms), langsung lookup. Ketikan manual tidak ikut ter-trigger — tetap
+  // perlu Enter / tombol Cari.
+  useEffect(() => {
+    if (!returnOpen || returnOrder || lookupLoading) return
+    if (!scanTypedFastRef.current) return
+    const code = returnLookupCode.trim()
+    if (code.length < 4) return
+
+    const t = setTimeout(() => {
+      scanTypedFastRef.current = false
+      runLookup(code)
+    }, 200)
+    return () => clearTimeout(t)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [returnLookupCode, returnOpen, returnOrder, lookupLoading])
 
   // Cari order dari kode (nomor order ORD-xxx atau kode unit alat).
   async function runLookup(raw: string) {
@@ -405,68 +452,6 @@ function MonitoringCssd() {
     runLookup(code)
   }
 
-  // Scan barcode transaksi (mode scan): cari ordernya. Order dipinjam → buka modal
-  // Pengembalian; sudah dikembalikan → buka modal Riwayat. Modal scan hanya
-  // ditutup saat sukses; saat gagal modal tetap terbuka + tampilkan error agar
-  // bisa scan/ketik ulang (jangan menutup modal & jangan clear di awal supaya
-  // ketikan tidak hilang).
-  // Kosongkan buffer & tampilan input scan (dipakai saat reset/clear scan).
-  function clearScanInput() {
-    scanBufferRef.current = ""
-    setSearchInput("")
-  }
-
-  async function runScanReturn(raw: string) {
-    const code = raw.trim()
-    if (!code || scanLoading) return
-    setScanNotice(null)
-    setScanLoading(true)
-    try {
-      const res = await api.post("/master/orders/scan", { code })
-      const order: ReturnOrder = res.data.data
-      if (order.status === "dipinjam") {
-        // Masih dipinjam → buka modal Pengembalian dengan order hasil scan.
-        setScanArmed(false)
-        clearScanInput()
-        setReturnOpen(true)
-        setReturnError(null)
-        setReturnCondById({})
-        setReturnDate(order.return_actual_date?.slice(0, 10) || todayInput())
-        setReturnedBy(order.returned_by ?? order.borrowed_by ?? "")
-        setReturnOrder(order)
-      } else if (order.status === "dikembalikan") {
-        // Sudah dikembalikan → buka modal Riwayat Pengembalian (read-only).
-        setScanArmed(false)
-        clearScanInput()
-        setHistoryOpen(true)
-        setHistoryLoading(false)
-        setHistoryOrder(order)
-      } else {
-        // Status lain → tetap di modal scan, bersihkan input untuk scan ulang.
-        clearScanInput()
-        setScanNotice({
-          type: "error",
-          message: `Order ${order.code} berstatus "${order.status}", bukan order aktif.`,
-        })
-      }
-    } catch (err) {
-      const x = err as { response?: { data?: { message?: string } } }
-      clearScanInput()
-      setScanNotice({
-        type: "error",
-        message: x.response?.data?.message ?? `No. transaksi "${code}" tidak dikenal.`,
-      })
-    } finally {
-      setScanLoading(false)
-    }
-  }
-
-  // Notifikasi scan otomatis hilang setelah beberapa detik.
-  useEffect(() => {
-    if (!scanNotice) return
-    const t = setTimeout(() => setScanNotice(null), 4000)
-    return () => clearTimeout(t)
-  }, [scanNotice])
 
   // Kembalikan unit yang kondisi masuknya sudah diisi. Pengembalian bisa dicicil:
   // unit tanpa kondisi masuk dibiarkan (belum kembali) dan bisa dikembalikan nanti.
@@ -498,11 +483,13 @@ function MonitoringCssd() {
         items,
       })
       setReturnOrder(res.data.data)
+      setConfirmReturnOpen(false)
       refreshMonitoring() // muat ulang distribusi ruangan & riwayat
       dispatch(invalidateOrders())
     } catch (err) {
       const x = err as { response?: { data?: { message?: string } } }
       setReturnError(x.response?.data?.message ?? "Gagal menyimpan pengembalian.")
+      setConfirmReturnOpen(false)
     } finally {
       setReturnSaving(false)
     }
@@ -572,13 +559,13 @@ function MonitoringCssd() {
 
   function handleSearch(e: React.FormEvent) {
     e.preventDefault()
+    if (scanArmed) return // mode scan: pencarian manual dimatikan
     setSearchQuery(searchInput.trim())
     setPage(1)
-    setScanArmed(false)
   }
 
-  // Pencarian manual dengan debounce: setelah berhenti mengetik ~1 detik, terapkan
-  // filter. Tidak berlaku saat mode scan (scan punya alurnya sendiri ke database).
+  // Pencarian dengan debounce: setelah berhenti mengetik ~1 detik, terapkan filter.
+  // Tidak berlaku saat mode scan — hasil pindaian tidak dipakai sebagai filter.
   useEffect(() => {
     if (scanArmed) return
     const q = searchInput.trim()
@@ -592,22 +579,83 @@ function MonitoringCssd() {
     return () => clearTimeout(t)
   }, [searchInput, searchQuery, scanArmed])
 
-  // Aktifkan mode scan: kosongkan buffer + tampilan input & notif.
-  useEffect(() => {
-    if (!scanArmed) return
-    clearScanInput()
-    setScanNotice(null)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [scanArmed])
+  // Nyalakan/matikan mode scan. Saat dinyalakan, kolom pencarian dikosongkan dan
+  // filter aktif dilepas supaya tampilan tidak menyesatkan.
+  function toggleScan() {
+    setScanArmed((armed) => {
+      const next = !armed
+      scanBufferRef.current = ""
+      setSearchInput("")
+      setScanNotice(null)
+      if (next && searchQuery) {
+        setSearchQuery("")
+        setPage(1)
+      }
+      return next
+    })
+  }
 
-  // Tangkap input barcode scanner secara GLOBAL selama mode scan aktif. Input di
-  // modal sengaja disabled (tidak bisa diketik manual); barcode scanner berperilaku
-  // sebagai keyboard, jadi karakternya ditangkap di sini lalu ditampilkan. Enter
-  // (suffix scanner) langsung memproses.
+  // Hasil pindaian barcode transaksi: order masih dipinjam → buka modal
+  // Pengembalian; sudah dikembalikan → buka modal Riwayat. Status lain / kode tidak
+  // dikenal → notifikasi, mode scan tetap aktif agar bisa pindai ulang.
+  async function runScanReturn(raw: string) {
+    const code = raw.trim()
+    if (!code || scanLoading) return
+    setScanNotice(null)
+    setScanLoading(true)
+    try {
+      const res = await api.post("/master/orders/scan", { code })
+      const order: ReturnOrder = res.data.data
+      if (order.status === "dipinjam") {
+        setScanArmed(false)
+        scanBufferRef.current = ""
+        setSearchInput("")
+        openReturn()
+        setReturnOrder(order)
+        setReturnDate(order.return_actual_date?.slice(0, 10) || todayInput())
+        setReturnedBy(order.returned_by ?? order.borrowed_by ?? "")
+      } else if (order.status === "dikembalikan") {
+        setScanArmed(false)
+        scanBufferRef.current = ""
+        setSearchInput("")
+        setHistoryOpen(true)
+        setHistoryLoading(false)
+        setHistoryOrder(order)
+      } else {
+        scanBufferRef.current = ""
+        setSearchInput("")
+        setScanNotice(`Order ${order.code} berstatus "${order.status}", bukan order aktif.`)
+      }
+    } catch (err) {
+      const x = err as { response?: { data?: { message?: string } } }
+      scanBufferRef.current = ""
+      setSearchInput("")
+      setScanNotice(x.response?.data?.message ?? `Kode "${code}" tidak dikenal.`)
+    } finally {
+      setScanLoading(false)
+    }
+  }
+
+  // Notifikasi scan hilang sendiri setelah beberapa detik.
+  useEffect(() => {
+    if (!scanNotice) return
+    const t = setTimeout(() => setScanNotice(null), 4000)
+    return () => clearTimeout(t)
+  }, [scanNotice])
+
+  // Tangkap ketikan barcode scanner secara GLOBAL selama mode scan aktif. Kolom
+  // pencarian sengaja dikunci (readOnly), jadi karakter ditangkap di sini lalu
+  // ditampilkan. Enter (suffix scanner) langsung memproses.
   useEffect(() => {
     if (!scanArmed) return
     function onKey(e: KeyboardEvent) {
       if (scanLoading) return
+      if (e.key === "Escape") {
+        setScanArmed(false)
+        scanBufferRef.current = ""
+        setSearchInput("")
+        return
+      }
       if (e.key === "Enter") {
         e.preventDefault()
         runScanReturn(scanBufferRef.current)
@@ -618,7 +666,6 @@ function MonitoringCssd() {
         setSearchInput(scanBufferRef.current)
         return
       }
-      // Hanya karakter tunggal yang dapat dicetak (abaikan Shift, Tab, panah, dll.).
       if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
         scanBufferRef.current += e.key
         setSearchInput(scanBufferRef.current)
@@ -629,8 +676,7 @@ function MonitoringCssd() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scanArmed, scanLoading])
 
-  // Auto-find: saat mode scan aktif & buffer berhenti berubah selama 1 detik,
-  // otomatis telusuri (untuk scanner tanpa suffix Enter).
+  // Scanner tanpa suffix Enter: proses otomatis saat aliran karakter berhenti ~1 detik.
   useEffect(() => {
     if (!scanArmed) return
     const code = searchInput.trim()
@@ -808,19 +854,6 @@ function MonitoringCssd() {
 
   return (
     <div className="space-y-6">
-      {/* Notifikasi hasil scan (mis. order tidak dikenal) — disembunyikan saat
-          modal scan terbuka karena errornya sudah tampil di dalam modal. */}
-      {scanNotice && !scanArmed && (
-        <div
-          className={`fixed right-4 top-4 z-[60] max-w-sm rounded-lg px-4 py-3 text-sm shadow-lg ${
-            scanNotice.type === "error" ? "bg-red-600 text-white" : "bg-[#075489] text-white"
-          }`}
-          role="alert"
-        >
-          {scanNotice.message}
-        </div>
-      )}
-
       <PageHeader
         title="Monitoring Distribusi Instrumen"
         subtitle="Pantau instrumen yang sedang dipinjam di tiap ruangan"
@@ -920,7 +953,7 @@ function MonitoringCssd() {
 
           <form onSubmit={handleSearch} className="flex gap-2 w-full">
             <div className="relative flex-1">
-              {scanLoading || searching ? (
+              {searching || scanLoading ? (
                 <Loader2 className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 animate-spin text-[#075489] pointer-events-none" />
               ) : (
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 pointer-events-none" />
@@ -932,19 +965,27 @@ function MonitoringCssd() {
                     ? "Mencari ke database..."
                     : scanArmed
                       ? "Mode scan aktif — pindai barcode transaksi..."
-                      : ""
+                      : "Cari order / peminjam / instrumen..."
                 }
                 value={searchInput}
                 onChange={(e) => setSearchInput(e.target.value)}
+                // Mode scan: kolom hanya menampilkan hasil pindaian, tidak bisa diketik.
+                readOnly={scanArmed}
                 className={
-                  "pl-9 pr-10 " + (scanArmed || scanLoading || searching ? "cursor-not-allowed" : "")
+                  "pl-9 pr-10 " +
+                  (scanArmed ? "cursor-not-allowed font-mono tracking-wider bg-gray-50" : "")
                 }
                 autoComplete="off"
               />
               <button
                 type="button"
-                onClick={() => setScanArmed((v) => !v)}
-                title={scanArmed ? "Batalkan mode scan" : "Scan barcode transaksi (pengembalian / riwayat)"}
+                onClick={toggleScan}
+                title={
+                  scanArmed
+                    ? "Matikan mode scan (kembali ke pencarian manual)"
+                    : "Aktifkan mode scan barcode transaksi"
+                }
+                aria-pressed={scanArmed}
                 className={
                   "absolute right-2 top-1/2 -translate-y-1/2 flex h-7 w-7 items-center justify-center rounded-md transition-colors " +
                   (scanArmed ? "bg-[#4ba69d] text-white" : "text-gray-400 hover:bg-gray-100")
@@ -953,10 +994,26 @@ function MonitoringCssd() {
                 <ScanLine className="h-4 w-4" />
               </button>
             </div>
-            <Button type="submit" className="bg-[#075489] hover:bg-[#075489]/90 text-white shrink-0">
+            <Button
+              type="submit"
+              disabled={scanArmed}
+              className="bg-[#075489] hover:bg-[#075489]/90 text-white shrink-0"
+            >
               Cari
             </Button>
           </form>
+
+          {scanArmed && (
+            <p className="text-xs text-gray-400">
+              Mode scan aktif: pencarian manual dimatikan. Pindai barcode transaksi untuk membuka
+              Pengembalian (order dipinjam) atau Riwayat (order sudah kembali). Tekan Esc atau klik
+              ikon scan lagi untuk kembali mencari manual.
+            </p>
+          )}
+
+          {scanNotice && (
+            <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600">{scanNotice}</p>
+          )}
         </div>
 
         {/* Grup "Siap Distribusi" (digudang) — selalu di atas, tidak dipaginasi. */}
@@ -1033,47 +1090,6 @@ function MonitoringCssd() {
           onPageChange={setPage}
         />
       </Card>
-
-      {/* Mode scan: modal instruksi pindai barcode order */}
-      <Modal
-        open={scanArmed}
-        onClose={() => setScanArmed(false)}
-        title="Scan Barcode Transaksi"
-        size="sm"
-        footer={
-          <Button variant="outline" onClick={() => setScanArmed(false)}>
-            Batal
-          </Button>
-        }
-      >
-        <div className="flex flex-col items-center gap-4 py-2 text-center">
-          <div className="flex h-16 w-16 items-center justify-center rounded-full bg-[#4ba69d]/10">
-            {scanLoading ? (
-              <Loader2 className="h-8 w-8 animate-spin text-[#4ba69d]" />
-            ) : (
-              <BarcodeIcon className="h-8 w-8 text-[#4ba69d]" />
-            )}
-          </div>
-          <div>
-            <p className="text-base font-semibold text-gray-900">
-              {scanLoading ? "Mencari ke database..." : "Silakan pindai barcode transaksi"}
-            </p>
-          </div>
-          <Input
-            id="scan-modal-input"
-            value={searchInput}
-            readOnly
-            disabled
-            placeholder="Menunggu hasil pindai barcode..."
-            className="text-center font-mono tracking-wider"
-          />
-          {scanNotice?.type === "error" && (
-            <p className="w-full rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600">
-              {scanNotice.message}
-            </p>
-          )}
-        </div>
-      </Modal>
 
       {/* Detail unit dipinjam di ruangan terpilih */}
       <Modal
@@ -1277,7 +1293,11 @@ function MonitoringCssd() {
       {/* Pengembalian: scan nomor order / kode unit, lalu cek kondisi per unit */}
       <Modal
         open={returnOpen}
-        onClose={() => setReturnOpen(false)}
+        onClose={() => {
+          // Jangan ikut tertutup saat Escape ditekan di modal konfirmasi.
+          if (confirmReturnOpen || returnSaving) return
+          setReturnOpen(false)
+        }}
         title="Pengembalian Instrumen"
         size="lg"
         footer={(() => {
@@ -1302,7 +1322,7 @@ function MonitoringCssd() {
                 </Button>
                 {returnOrder && returnOrder.status !== "dikembalikan" && (
                   <Button
-                    onClick={handleSaveReturns}
+                    onClick={() => setConfirmReturnOpen(true)}
                     disabled={returnSaving || readyCount === 0}
                     className="bg-[#075489] hover:bg-[#075489]/90 text-white"
                   >
@@ -1315,66 +1335,64 @@ function MonitoringCssd() {
         })()}
       >
         <div className="space-y-5">
-          {lookupLoading && (
-            <div className="py-10 text-center text-sm text-gray-400">Memuat data order...</div>
-          )}
+          {/* Belum ada order termuat: pindai barcode atau ketik kodenya manual.
+              Scanner mengetik kode + Enter → form ini ter-submit seperti pencarian biasa. */}
+          {!returnOrder && (
+            <form
+              onSubmit={(e) => {
+                e.preventDefault()
+                runLookup(returnLookupCode)
+              }}
+              className="flex flex-col items-center rounded-xl border border-dashed border-gray-300 bg-gray-50/70 px-6 py-10 text-center"
+            >
+              <div className="flex h-14 w-14 items-center justify-center rounded-full bg-[#4ba69d]/10">
+                {lookupLoading ? (
+                  <Loader2 className="h-6 w-6 animate-spin text-[#4ba69d]" />
+                ) : (
+                  <ScanLine className="h-6 w-6 text-[#4ba69d]" />
+                )}
+              </div>
 
-          {returnError && (
-            <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600">{returnError}</p>
+              <p className="mt-4 text-sm font-semibold text-gray-800">
+                Pindai barcode kode produksi
+              </p>
+              <p className="mt-1.5 max-w-sm text-xs leading-relaxed text-gray-400">
+                Hasil scan langsung dicari otomatis. Bisa juga diketik manual lalu tekan Enter:
+                kode produksi (PRD…), No. order (ORD…), No. transaksi, atau kode unit alat.
+              </p>
+
+              <div className="mt-5 flex w-full max-w-sm gap-2">
+                <Input
+                  autoFocus
+                  value={returnLookupCode}
+                  onChange={(e) => handleReturnLookupChange(e.target.value)}
+                  placeholder="Scan / ketik kode..."
+                  autoComplete="off"
+                  disabled={lookupLoading}
+                  className="font-mono"
+                />
+                <Button
+                  type="submit"
+                  disabled={!returnLookupCode.trim() || lookupLoading}
+                  className="shrink-0 bg-[#075489] hover:bg-[#075489]/90 text-white"
+                >
+                  {lookupLoading ? "Mencari..." : "Cari"}
+                </Button>
+              </div>
+
+              {returnError && (
+                <p className="mt-4 w-full max-w-sm rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600">
+                  {returnError}
+                </p>
+              )}
+            </form>
           )}
 
           {returnOrder && (
-            <div className="space-y-4">
-              <div className="grid grid-cols-1 gap-4 rounded-lg border border-gray-200 bg-gray-50 px-4 py-3 sm:grid-cols-2">
-                <DetailField label="Nomor Order" value={returnOrder.code} />
-                <DetailField label="Ruangan / Unit" value={returnOrder.room?.name} />
-                <DetailField label="Dipinjam Oleh" value={returnOrder.borrowed_by} />
-                <DetailField
-                  label="Periode"
-                  value={`${formatDate(returnOrder.order_date)} → ${formatDate(returnOrder.return_plan_date)}`}
-                />
-              </div>
-
-              {/* Riwayat peminjaman: dibuat → diterima CSSD → dipinjam ruangan lain → selesai */}
-              <OrderTimeline events={returnOrder.timeline} />
-
-              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                <div className="space-y-1.5">
-                  <Label htmlFor="return-by">Dikembalikan Oleh</Label>
-                  <Input
-                    id="return-by"
-                    value={returnedBy}
-                    onChange={(e) => setReturnedBy(e.target.value)}
-                    placeholder="Nama orang yang mengembalikan"
-                    disabled={returnOrder.status === "dikembalikan"}
-                  />
-                </div>
-                <div className="space-y-1.5">
-                  <Label htmlFor="return-date">Tanggal Pengembalian</Label>
-                  <Input
-                    id="return-date"
-                    type="date"
-                    value={returnDate}
-                    onChange={(e) => setReturnDate(e.target.value)}
-                    disabled={returnOrder.status === "dikembalikan"}
-                  />
-                </div>
-              </div>
-
-              {(() => {
-                const total = returnOrder.items.length
-                const back = returnOrder.items.filter((u) => u.is_returned).length
-                return (
-                  <div className="flex items-center justify-between">
-                    <p className="text-xs font-semibold uppercase tracking-wide text-gray-400">
-                      Unit Instrumen
-                    </p>
-                    <span className="text-xs text-gray-500">
-                      {back}/{total} dikembalikan
-                    </span>
-                  </div>
-                )
-              })()}
+            <div className="space-y-5">
+              {returnError && (
+                <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600">{returnError}</p>
+              )}
 
               {returnOrder.status === "dikembalikan" && (
                 <p className="rounded-lg bg-green-50 px-3 py-2 text-sm text-green-700">
@@ -1382,110 +1400,403 @@ function MonitoringCssd() {
                 </p>
               )}
 
-              {/* Pencarian unit instrumen: filter lokal daftar unit pada order ini */}
-              <div className="relative">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 pointer-events-none" />
-                <Input
-                  placeholder="Cari unit instrumen (kode / nama / paket)..."
-                  value={returnUnitSearch}
-                  onChange={(e) => setReturnUnitSearch(e.target.value)}
-                  className="pl-9"
-                />
-              </div>
+              {/* Ringkasan order + tombol scan order lain */}
+              <section className="rounded-lg border border-gray-200 bg-gray-50">
+                <div className="flex items-center justify-between gap-3 border-b border-gray-200 px-4 py-2.5">
+                  <span className="font-mono text-xs font-semibold text-[#075489] bg-[#075489]/8 px-2 py-0.5 rounded">
+                    {returnOrder.code}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={openReturn}
+                    className="flex items-center gap-1 text-xs font-medium text-gray-500 hover:text-[#075489]"
+                  >
+                    <ScanLine className="h-3.5 w-3.5" />
+                    Scan order lain
+                  </button>
+                </div>
+                <div className="grid grid-cols-1 gap-4 px-4 py-3 sm:grid-cols-3">
+                  <DetailField label="Ruangan / Unit" value={returnOrder.room?.name} />
+                  <DetailField label="Dipinjam Oleh" value={returnOrder.borrowed_by} />
+                  <DetailField
+                    label="Periode"
+                    value={`${formatDate(returnOrder.order_date)} → ${formatDate(returnOrder.return_plan_date)}`}
+                  />
+                </div>
+              </section>
 
+              {/* Riwayat peminjaman: dibuat → diterima CSSD → dipinjam ruangan lain → selesai */}
+              <OrderTimeline events={returnOrder.timeline} />
+
+              {/* Data pengembalian */}
+              <section className="space-y-3">
+                <p className="text-xs font-semibold uppercase tracking-wide text-gray-400">
+                  Data Pengembalian
+                </p>
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                  <div className="space-y-1.5">
+                    <Label htmlFor="return-by">Dikembalikan Oleh</Label>
+                    <Input
+                      id="return-by"
+                      value={returnedBy}
+                      onChange={(e) => setReturnedBy(e.target.value)}
+                      placeholder="Nama orang yang mengembalikan"
+                      disabled={returnOrder.status === "dikembalikan"}
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="return-date">Tanggal Pengembalian</Label>
+                    <Input
+                      id="return-date"
+                      type="date"
+                      value={returnDate}
+                      onChange={(e) => setReturnDate(e.target.value)}
+                      disabled={returnOrder.status === "dikembalikan"}
+                    />
+                  </div>
+                </div>
+              </section>
+
+              {/* Daftar unit: dikelompokkan per paket (unit lepas masuk grup "Satuan"),
+                  sehingga nama paket cukup tampil sekali di kepala grup. */}
               {(() => {
+                const total = returnOrder.items.length
+                const back = returnOrder.items.filter((u) => u.is_returned).length
                 const q = returnUnitSearch.trim().toLowerCase()
                 const visibleUnits = q
                   ? returnOrder.items.filter((u) => {
                       const code = u.instrument_stock?.code?.toLowerCase() ?? ""
                       const name = u.instrument_stock?.instrument?.name?.toLowerCase() ?? ""
                       const pkg = u.package_name?.toLowerCase() ?? ""
-                      return code.includes(q) || name.includes(q) || pkg.includes(q)
+                      const prod = u.production_code?.toLowerCase() ?? ""
+                      return code.includes(q) || name.includes(q) || pkg.includes(q) || prod.includes(q)
                     })
                   : returnOrder.items
+
+                const groupMap = new Map<string, { name: string | null; units: ReturnUnit[] }>()
+                for (const u of visibleUnits) {
+                  const name = u.source === "paket" ? (u.package_name ?? "Paket") : null
+                  const key = name ?? "__satuan__"
+                  const g = groupMap.get(key) ?? { name, units: [] }
+                  g.units.push(u)
+                  groupMap.set(key, g)
+                }
+                const groups = [...groupMap.values()]
+
+                const readonly = returnOrder.status === "dikembalikan"
+                const condIdByName = (n: string) => {
+                  const c = conditions.find((x) => x.name === n)
+                  return c ? String(c.id) : ""
+                }
+                const baikId = condIdByName("Baik")
+
                 return (
-              <div className="overflow-hidden rounded-lg border border-gray-200">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="border-b border-gray-100 bg-gray-50">
-                      <th className="py-2.5 px-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-400">
-                        Unit
-                      </th>
-                      <th className="py-2.5 px-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-400">
-                        Kondisi Keluar
-                      </th>
-                      <th className="py-2.5 px-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-400 w-44">
-                        Kondisi Masuk
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-gray-50">
-                    {visibleUnits.length === 0 ? (
-                      <tr>
-                        <td colSpan={3} className="py-8 text-center text-sm text-gray-400">
-                          Tidak ada unit yang cocok dengan pencarian.
-                        </td>
-                      </tr>
+                  <section className="space-y-3">
+                    <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                      <p className="text-xs font-semibold uppercase tracking-wide text-gray-400">
+                        Unit Instrumen
+                        <span className="ml-2 font-normal normal-case tracking-normal text-gray-500">
+                          {back}/{total} dikembalikan
+                        </span>
+                      </p>
+                      <div className="relative sm:w-72">
+                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 pointer-events-none" />
+                        <Input
+                          placeholder="Cari unit (kode / nama / paket)..."
+                          value={returnUnitSearch}
+                          onChange={(e) => setReturnUnitSearch(e.target.value)}
+                          className="pl-9"
+                        />
+                      </div>
+                    </div>
+
+                    {groups.length === 0 ? (
+                      <div className="rounded-lg border border-gray-200 py-8 text-center text-sm text-gray-400">
+                        Tidak ada unit yang cocok dengan pencarian.
+                      </div>
                     ) : (
-                      visibleUnits.map((u) => (
-                      <tr key={u.id}>
-                        <td className="py-2.5 px-3">
-                          <span className="font-mono text-xs font-semibold text-[#4ba69d] bg-[#4ba69d]/10 px-2 py-0.5 rounded">
-                            {u.instrument_stock?.code ?? "—"}
-                          </span>
-                          {u.instrument_stock?.instrument?.name && (
-                            <span className="ml-2 text-gray-700">
-                              {u.instrument_stock.instrument.name}
-                            </span>
-                          )}
-                          {u.source === "paket" && u.package_name && (
-                            <span className="ml-2 text-xs text-gray-400">· {u.package_name}</span>
-                          )}
-                        </td>
-                        <td className="py-2.5 px-3 text-gray-700">
-                          {u.condition_out?.name ?? <span className="text-gray-400 text-xs">—</span>}
-                        </td>
-                        <td className="py-2.5 px-3">
-                          {u.is_returned ? (
-                            u.condition_in?.name ?? <span className="text-gray-400 text-xs">—</span>
-                          ) : (
-                            <div className="grid w-max grid-cols-2 gap-1">
-                              {RETURN_CONDITIONS.map((rc) => {
-                                const cond = conditions.find((c) => c.name === rc.name)
-                                const id = cond ? String(cond.id) : ""
-                                const active = !!id && returnCondById[u.id] === id
-                                return (
+                      <div className="space-y-3">
+                        {groups.map((g) => {
+                          const pending = g.units.filter((u) => !u.is_returned)
+                          const allBaik =
+                            !!baikId &&
+                            pending.length > 0 &&
+                            pending.every((u) => returnCondById[u.id] === baikId)
+                          return (
+                            <div
+                              key={g.name ?? "__satuan__"}
+                              className="overflow-hidden rounded-lg border border-gray-200"
+                            >
+                              {/* Kepala grup: nama paket + progres kembali + aksi massal */}
+                              <div className="flex items-center justify-between gap-3 border-b border-gray-200 bg-gray-50 px-3 py-2">
+                                <div className="flex min-w-0 items-center gap-2">
+                                  {g.name ? (
+                                    <Package className="h-4 w-4 shrink-0 text-[#075489]" />
+                                  ) : (
+                                    <Wrench className="h-4 w-4 shrink-0 text-gray-400" />
+                                  )}
+                                  <span className="truncate text-sm font-semibold text-gray-800">
+                                    {g.name ?? "Instrumen Satuan"}
+                                  </span>
+                                  {/* Kode batch produksi = label bungkus steril grup ini
+                                      (lebih dari satu bila isinya dari beberapa batch). */}
+                                  {[...new Set(g.units.map((u) => u.production_code).filter(Boolean))].map(
+                                    (code) => (
+                                      <span
+                                        key={code}
+                                        className="shrink-0 rounded bg-[#075489]/8 px-1.5 py-0.5 font-mono text-xs font-semibold text-[#075489]"
+                                      >
+                                        {code}
+                                      </span>
+                                    ),
+                                  )}
+                                </div>
+                                {!readonly && !!baikId && pending.length > 0 && (
                                   <button
-                                    key={rc.code}
                                     type="button"
-                                    disabled={!cond}
-                                    title={rc.name}
-                                    onClick={() => setReturnCondById((prev) => ({ ...prev, [u.id]: id }))}
-                                    className={
-                                      "h-7 min-w-[36px] rounded-md border px-2 text-xs font-semibold transition-colors disabled:opacity-40 " +
-                                      (active
-                                        ? "border-[#075489] bg-[#075489] text-white"
-                                        : "border-gray-300 text-gray-600 hover:bg-gray-100")
+                                    onClick={() =>
+                                      setReturnCondById((prev) => {
+                                        const next = { ...prev }
+                                        for (const u of pending) next[u.id] = baikId
+                                        return next
+                                      })
                                     }
+                                    disabled={allBaik}
+                                    className="shrink-0 text-xs font-medium text-[#075489] hover:underline disabled:text-gray-300 disabled:no-underline"
                                   >
-                                    {rc.code}
+                                    Tandai semua Baik
                                   </button>
-                                )
-                              })}
+                                )}
+                              </div>
+
+                              {/* Baris unit: kode + nama, kondisi keluar, kondisi masuk */}
+                              <div className="divide-y divide-gray-100">
+                                {g.units.map((u) => (
+                                  <div
+                                    key={u.id}
+                                    className="grid grid-cols-1 gap-2 px-3 py-2.5 text-sm transition-colors hover:bg-gray-50/60 sm:grid-cols-[minmax(0,1fr)_8rem_13rem] sm:items-center sm:gap-3"
+                                  >
+                                    <div className="flex min-w-0 items-center gap-2">
+                                      <span className="shrink-0 rounded bg-[#4ba69d]/10 px-2 py-0.5 font-mono text-xs font-semibold text-[#4ba69d]">
+                                        {u.instrument_stock?.code ?? "—"}
+                                      </span>
+                                      <span className="truncate text-gray-700">
+                                        {u.instrument_stock?.instrument?.name ?? (
+                                          <span className="text-xs text-gray-400">—</span>
+                                        )}
+                                      </span>
+                                    </div>
+
+                                    <div className="flex items-center gap-1.5 text-gray-700">
+                                      <span className="text-xs text-gray-400 sm:hidden">
+                                        Kondisi keluar:
+                                      </span>
+                                      {u.condition_out?.name ?? (
+                                        <span className="text-xs text-gray-400">—</span>
+                                      )}
+                                    </div>
+
+                                    {u.is_returned ? (
+                                      <div className="flex items-center gap-1.5">
+                                        <span className="text-xs text-gray-400 sm:hidden">
+                                          Kondisi masuk:
+                                        </span>
+                                        <span className="text-gray-700">
+                                          {u.condition_in?.name ?? (
+                                            <span className="text-xs text-gray-400">—</span>
+                                          )}
+                                        </span>
+                                      </div>
+                                    ) : (
+                                      <div className="flex gap-1">
+                                        {RETURN_CONDITIONS.map((rc) => {
+                                          const id = condIdByName(rc.name)
+                                          const active = !!id && returnCondById[u.id] === id
+                                          return (
+                                            <button
+                                              key={rc.code}
+                                              type="button"
+                                              disabled={!id}
+                                              title={active ? `${rc.name} — klik lagi untuk batal` : rc.name}
+                                              // Klik tombol yang sedang aktif = batalkan pilihan (salah pencet).
+                                              onClick={() =>
+                                                setReturnCondById((prev) => {
+                                                  const next = { ...prev }
+                                                  if (next[u.id] === id) delete next[u.id]
+                                                  else next[u.id] = id
+                                                  return next
+                                                })
+                                              }
+                                              className={
+                                                "h-7 flex-1 rounded-md border text-xs font-semibold transition-colors disabled:opacity-40 " +
+                                                (active
+                                                  ? "border-[#075489] bg-[#075489] text-white"
+                                                  : "border-gray-300 text-gray-600 hover:bg-gray-100")
+                                              }
+                                            >
+                                              {rc.code}
+                                            </button>
+                                          )
+                                        })}
+                                      </div>
+                                    )}
+                                  </div>
+                                ))}
+                              </div>
                             </div>
-                          )}
-                        </td>
-                      </tr>
-                      ))
+                          )
+                        })}
+                      </div>
                     )}
-                  </tbody>
-                </table>
-              </div>
+                  </section>
                 )
               })()}
             </div>
           )}
         </div>
+      </Modal>
+
+      {/* Konfirmasi simpan pengembalian — data tidak bisa diedit / dibatalkan setelah disimpan */}
+      <Modal
+        open={confirmReturnOpen}
+        onClose={returnSaving ? () => {} : () => setConfirmReturnOpen(false)}
+        title="Konfirmasi Pengembalian"
+        size="md"
+        footer={
+          <>
+            <Button
+              variant="outline"
+              onClick={() => setConfirmReturnOpen(false)}
+              disabled={returnSaving}
+            >
+              Periksa Lagi
+            </Button>
+            <Button
+              onClick={handleSaveReturns}
+              disabled={returnSaving}
+              className="bg-[#075489] hover:bg-[#075489]/90 text-white"
+            >
+              {returnSaving ? "Menyimpan..." : "Ya, Simpan Pengembalian"}
+            </Button>
+          </>
+        }
+      >
+        {returnOrder &&
+          (() => {
+            const pending = returnOrder.items.filter((u) => !u.is_returned)
+            const ready = pending.filter((u) => returnCondById[u.id])
+            const willClose = ready.length === pending.length
+            // Rekap jumlah unit per kondisi masuk yang dipilih.
+            const recap = RETURN_CONDITIONS.map((rc) => {
+              const cond = conditions.find((c) => c.name === rc.name)
+              const id = cond ? String(cond.id) : ""
+              return {
+                name: rc.name,
+                count: id ? ready.filter((u) => returnCondById[u.id] === id).length : 0,
+              }
+            }).filter((r) => r.count > 0)
+
+            return (
+              <div className="space-y-4">
+                <div className="flex items-start gap-4">
+                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-amber-50">
+                    <AlertTriangle className="h-5 w-5 text-amber-600" />
+                  </div>
+                  <p className="pt-1 text-sm leading-relaxed text-gray-600">
+                    Pastikan kondisi masuk tiap unit sudah benar. Setelah disimpan, data
+                    pengembalian <span className="font-semibold text-gray-900">tidak bisa diubah
+                    atau dibatalkan</span>.
+                  </p>
+                </div>
+
+                {recap.length > 0 && (
+                  <div className="flex flex-wrap gap-2">
+                    {recap.map((r) => (
+                      <span
+                        key={r.name}
+                        className="rounded-md border border-gray-200 bg-white px-2.5 py-1 text-xs font-medium text-gray-700"
+                      >
+                        {r.name}
+                        <span className="ml-1.5 font-semibold text-[#075489]">{r.count}</span>
+                      </span>
+                    ))}
+                  </div>
+                )}
+
+                {/* Instrumen yang dikembalikan kali ini, lengkap dengan kondisi masuknya. */}
+                <div className="space-y-2">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-gray-400">
+                    Dikembalikan ({ready.length})
+                  </p>
+                  <div className="divide-y divide-gray-100 overflow-hidden rounded-lg border border-gray-200">
+                    {ready.map((u) => (
+                      <div
+                        key={u.id}
+                        className="flex items-center justify-between gap-3 px-3 py-2 text-sm"
+                      >
+                        <div className="flex min-w-0 items-center gap-2">
+                          <span className="shrink-0 rounded bg-[#4ba69d]/10 px-2 py-0.5 font-mono text-xs font-semibold text-[#4ba69d]">
+                            {u.instrument_stock?.code ?? "—"}
+                          </span>
+                          <span className="truncate text-gray-700">
+                            {u.instrument_stock?.instrument?.name ?? "—"}
+                          </span>
+                          {u.source === "paket" && u.package_name && (
+                            <span className="shrink-0 truncate text-xs text-gray-400">
+                              · {u.package_name}
+                            </span>
+                          )}
+                        </div>
+                        <span className="shrink-0 text-xs font-semibold text-[#075489]">
+                          {conditions.find((c) => String(c.id) === returnCondById[u.id])?.name ??
+                            "—"}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Sisanya tidak ikut disimpan: tetap tercatat dipinjam. */}
+                {!willClose && (
+                  <div className="space-y-2">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-gray-400">
+                      Belum Dikembalikan ({pending.length - ready.length})
+                      <span className="ml-2 font-normal normal-case tracking-normal text-gray-500">
+                        tetap tercatat dipinjam
+                      </span>
+                    </p>
+                    <div className="divide-y divide-gray-100 overflow-hidden rounded-lg border border-gray-200 bg-gray-50/60">
+                      {pending
+                        .filter((u) => !returnCondById[u.id])
+                        .map((u) => (
+                          <div
+                            key={u.id}
+                            className="flex items-center justify-between gap-3 px-3 py-2 text-sm"
+                          >
+                            <div className="flex min-w-0 items-center gap-2">
+                              <span className="shrink-0 rounded bg-gray-200 px-2 py-0.5 font-mono text-xs font-semibold text-gray-500">
+                                {u.instrument_stock?.code ?? "—"}
+                              </span>
+                              <span className="truncate text-gray-600">
+                                {u.instrument_stock?.instrument?.name ?? "—"}
+                              </span>
+                              {u.source === "paket" && u.package_name && (
+                                <span className="shrink-0 truncate text-xs text-gray-400">
+                                  · {u.package_name}
+                                </span>
+                              )}
+                            </div>
+                            <span className="shrink-0 text-xs text-gray-400">
+                              Kondisi belum diisi
+                            </span>
+                          </div>
+                        ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )
+          })()}
       </Modal>
 
       {/* Riwayat pengembalian (read-only) untuk order yang sudah dikembalikan */}
@@ -1808,7 +2119,7 @@ function IncomingOrderCard({
         (STATUS_BORDER[order.status] ?? "border-l-gray-300")
       }
     >
-      <div className="flex flex-col px-1 sm:flex-row sm:items-start sm:gap-1">
+      <div className="flex flex-col px-1 sm:flex-row sm:items-center sm:gap-1">
         <button
           type="button"
           onClick={onToggle}
@@ -1836,24 +2147,21 @@ function IncomingOrderCard({
               </div>
             </div>
           </div>
-          <span className="shrink-0 text-xs text-gray-500">
-            {order.requested_qty} unit · {order.request_lines} jenis
-          </span>
         </button>
-        <div className="flex items-center gap-1.5 border-t border-gray-100 px-2 py-2 sm:mt-1.5 sm:shrink-0 sm:justify-end sm:border-0 sm:px-0 sm:py-0 sm:pr-1">
+        <div className="flex items-center gap-1.5 border-t border-gray-100 px-2 py-2 sm:shrink-0 sm:justify-end sm:border-0 sm:px-0 sm:py-0 sm:pr-1">
           <button
             type="button"
             onClick={onProcess}
             className="flex-1 rounded-md border border-[#4ba69d] bg-[#4ba69d] px-3 py-1.5 text-xs font-medium text-white hover:bg-[#4ba69d]/90 sm:flex-none sm:px-2 sm:py-1"
           >
-            Terima &amp; Distribusi
+            Terima
           </button>
           <button
             type="button"
             onClick={onCancel}
             className="flex-1 rounded-md border border-red-300 px-3 py-1.5 text-xs font-medium text-red-600 hover:bg-red-50 sm:flex-none sm:px-2 sm:py-1"
           >
-            Batal
+            Tolak
           </button>
         </div>
       </div>

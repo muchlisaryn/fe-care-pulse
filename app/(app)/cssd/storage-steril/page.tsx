@@ -257,6 +257,8 @@ export default function StorageSterilPage() {
         r.rack_code.toLowerCase().includes(q) ||
         (r.unit.code ?? "").toLowerCase().includes(q) ||
         (r.unit.instrument ?? "").toLowerCase().includes(q) ||
+        (r.package_name ?? "").toLowerCase().includes(q) ||
+        (r.production_code ?? "").toLowerCase().includes(q) ||
         (r.order?.code ?? "").toLowerCase().includes(q),
     )
   }, [inventory, q])
@@ -306,8 +308,8 @@ export default function StorageSterilPage() {
           </span>
           <span className="truncate text-gray-700">{r.unit.instrument ?? "—"}</span>
         </div>
-        {/* Kanan: meta (rak/batch) + tanggal kedaluwarsa + status — mengelompok agar
-            saat wrap di mobile pindah ke baris bawah sebagai satu kesatuan. */}
+        {/* Kanan: meta (rak/batch). Kedaluwarsa TIDAK diulang per unit — sama untuk
+            seluruh isi bungkus, jadi cukup tampil sekali di kepala grup. */}
         <div className="flex flex-wrap items-center gap-2">
           {groupBy === "batch" && (
             <span className="inline-flex items-center gap-1 text-xs text-gray-500">
@@ -316,16 +318,6 @@ export default function StorageSterilPage() {
             </span>
           )}
           {groupBy === "rak" && r.batch && <span className="font-mono text-xs text-gray-500">{r.batch}</span>}
-          <span className={"text-xs " + (r.alert ? "font-semibold text-red-600" : "text-gray-500")}>
-            {formatDate(r.expiry_date)}
-          </span>
-          {r.expired ? (
-            <Badge variant="danger">Kedaluwarsa</Badge>
-          ) : r.alert ? (
-            <Badge variant="danger">{r.days_to_expiry}h lagi</Badge>
-          ) : (
-            <Badge variant="success">Di Gudang</Badge>
-          )}
         </div>
       </div>
     )
@@ -496,51 +488,92 @@ export default function StorageSterilPage() {
                       {open && (
                         <div className="border-t border-gray-100">
                           {(() => {
-                            // Pisah unit paket (dikelompokkan per nama paket) & satuan.
-                            const pakets = new Map<string, typeof g.items>()
-                            const satuan: typeof g.items = []
+                            // Kelompokkan sesuai bentuknya saat DIPRODUKSI: paket per nama
+                            // paket, satuan per jenis instrumen — masing-masing dipisah lagi
+                            // per batch produksi, karena bungkus steril berbeda batch adalah
+                            // barang berbeda meski isinya sejenis.
+                            const bundles = new Map<
+                              string,
+                              {
+                                source: "satuan" | "paket"
+                                name: string
+                                productionCode: string | null
+                                units: typeof g.items
+                              }
+                            >()
                             for (const r of g.items) {
-                              if (r.source === "paket") {
-                                const k = r.package_name ?? "Paket"
-                                const arr = pakets.get(k) ?? []
-                                arr.push(r)
-                                pakets.set(k, arr)
-                              } else satuan.push(r)
+                              const name =
+                                r.source === "paket"
+                                  ? r.package_name ?? "Paket"
+                                  : r.unit.instrument ?? "Instrumen"
+                              const key = `${r.source}|${name}|${r.production_code ?? ""}`
+                              const b =
+                                bundles.get(key) ??
+                                {
+                                  source: r.source,
+                                  name,
+                                  productionCode: r.production_code,
+                                  units: [] as typeof g.items,
+                                }
+                              b.units.push(r)
+                              bundles.set(key, b)
                             }
-                            return (
-                              <>
-                                {[...pakets.entries()].map(([pkg, units]) => {
-                                  const pkey = `${g.key}::${pkg}`
-                                  const popen = q ? true : openPkt.has(pkey)
-                                  const alerts = units.filter((u) => u.alert).length
-                                  return (
-                                    <div key={pkey} className="border-b border-gray-50 last:border-0">
-                                      <button
-                                        type="button"
-                                        onClick={() => togglePkt(pkey)}
-                                        className="flex w-full flex-wrap items-center gap-x-2 gap-y-1 px-4 py-2 text-sm hover:bg-gray-50"
+
+                            return [...bundles.entries()].map(([key, b]) => {
+                              const pkey = `${g.key}::${key}`
+                              const popen = q ? true : openPkt.has(pkey)
+                              const isPaket = b.source === "paket"
+                              // Kedaluwarsa berlaku untuk seluruh isi bungkus → wakili dengan
+                              // unit paling awal kedaluwarsa, tampil sekali di kepala grup.
+                              const soonest = b.units.reduce((a, u) =>
+                                (u.days_to_expiry ?? Infinity) < (a.days_to_expiry ?? Infinity) ? u : a,
+                              )
+                              return (
+                                <div key={pkey} className="border-b border-gray-50 last:border-0">
+                                  <button
+                                    type="button"
+                                    onClick={() => togglePkt(pkey)}
+                                    className="flex w-full flex-wrap items-center gap-x-2 gap-y-1 px-4 py-2 text-sm hover:bg-gray-50"
+                                  >
+                                    {popen ? (
+                                      <ChevronDown className="h-3.5 w-3.5 shrink-0 text-gray-400" />
+                                    ) : (
+                                      <ChevronRight className="h-3.5 w-3.5 shrink-0 text-gray-400" />
+                                    )}
+                                    <Badge variant={isPaket ? "info" : "default"}>
+                                      {isPaket ? "Paket" : "Satuan"}
+                                    </Badge>
+                                    <span className="font-medium text-gray-800">{b.name}</span>
+                                    {b.productionCode ? (
+                                      <span className="font-mono text-xs font-semibold text-[#075489] bg-[#075489]/8 px-1.5 py-0.5 rounded">
+                                        {b.productionCode}
+                                      </span>
+                                    ) : (
+                                      <span className="text-xs text-gray-400">—</span>
+                                    )}
+                                    <span className="text-xs text-gray-400">{b.units.length} unit</span>
+                                    <span className="ml-auto flex items-center gap-2">
+                                      <span
+                                        className={
+                                          "text-xs " +
+                                          (soonest.alert ? "font-semibold text-red-600" : "text-gray-500")
+                                        }
                                       >
-                                        {popen ? (
-                                          <ChevronDown className="h-3.5 w-3.5 shrink-0 text-gray-400" />
-                                        ) : (
-                                          <ChevronRight className="h-3.5 w-3.5 shrink-0 text-gray-400" />
-                                        )}
-                                        <Badge variant="info">Paket</Badge>
-                                        <span className="font-medium text-gray-800">{pkg}</span>
-                                        <span className="text-xs text-gray-400">{units.length} unit</span>
-                                        {alerts > 0 && (
-                                          <Badge variant="danger" className="ml-auto">
-                                            {alerts} perlu perhatian
-                                          </Badge>
-                                        )}
-                                      </button>
-                                      {popen && <div className="bg-gray-50/40">{units.map(renderUnitRow)}</div>}
-                                    </div>
-                                  )
-                                })}
-                                {satuan.map(renderUnitRow)}
-                              </>
-                            )
+                                        {formatDate(soonest.expiry_date)}
+                                      </span>
+                                      {soonest.expired ? (
+                                        <Badge variant="danger">Kedaluwarsa</Badge>
+                                      ) : soonest.alert ? (
+                                        <Badge variant="danger">{soonest.days_to_expiry}h lagi</Badge>
+                                      ) : (
+                                        <Badge variant="success">Di Gudang</Badge>
+                                      )}
+                                    </span>
+                                  </button>
+                                  {popen && <div className="bg-gray-50/40">{b.units.map(renderUnitRow)}</div>}
+                                </div>
+                              )
+                            })
                           })()}
                         </div>
                       )}
