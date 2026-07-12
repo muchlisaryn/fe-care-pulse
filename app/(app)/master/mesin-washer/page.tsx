@@ -26,10 +26,8 @@ import api from "@/lib/axios"
 const emptyForm = {
   name: "",
   location: "",
-  min_temperature: "",
-  max_temperature: "",
-  min_duration_minutes: "",
-  max_duration_minutes: "",
+  temperature: "",
+  duration_minutes: "",
   sterile_shelf_life_days: "",
   status: "aktif",
   note: "",
@@ -48,19 +46,6 @@ export default function MasterWasherMachinePage() {
   const [saving, setSaving] = useState(false)
   const [deleteTarget, setDeleteTarget] = useState<WasherMachine | null>(null)
   const [deletingId, setDeletingId] = useState<number | null>(null)
-
-  // Validasi ambang: min tidak boleh lebih besar dari max (suhu & durasi).
-  const parseNum = (v: string) => (v.trim() === "" ? null : Number(v))
-  const minT = parseNum(form.min_temperature)
-  const maxT = parseNum(form.max_temperature)
-  const minD = parseNum(form.min_duration_minutes)
-  const maxD = parseNum(form.max_duration_minutes)
-  const rangeError =
-    minT !== null && maxT !== null && minT > maxT
-      ? "Suhu minimum tidak boleh lebih besar dari suhu maksimum."
-      : minD !== null && maxD !== null && minD > maxD
-        ? "Durasi minimum tidak boleh lebih besar dari durasi maksimum."
-        : null
 
   useEffect(() => {
     if (loaded && !dirty) return
@@ -82,10 +67,8 @@ export default function MasterWasherMachinePage() {
     setForm({
       name: row.name,
       location: row.location ?? "",
-      min_temperature: row.min_temperature ?? "",
-      max_temperature: row.max_temperature ?? "",
-      min_duration_minutes: row.min_duration_minutes?.toString() ?? "",
-      max_duration_minutes: row.max_duration_minutes?.toString() ?? "",
+      temperature: row.temperature ?? "",
+      duration_minutes: row.duration_minutes?.toString() ?? "",
       sterile_shelf_life_days: row.sterile_shelf_life_days?.toString() ?? "",
       status: row.status,
       note: row.note ?? "",
@@ -95,17 +78,15 @@ export default function MasterWasherMachinePage() {
   }
 
   async function handleSave() {
-    if (!form.name.trim() || rangeError) return
+    if (!form.name.trim()) return
     setSaving(true)
     try {
       const num = (v: string) => (v.trim() === "" ? null : Number(v))
       const payload = {
         name: form.name.trim(),
         location: form.location.trim() || null,
-        min_temperature: num(form.min_temperature),
-        max_temperature: num(form.max_temperature),
-        min_duration_minutes: num(form.min_duration_minutes),
-        max_duration_minutes: num(form.max_duration_minutes),
+        temperature: num(form.temperature),
+        duration_minutes: num(form.duration_minutes),
         sterile_shelf_life_days: num(form.sterile_shelf_life_days),
         status: form.status,
         note: form.note.trim() || null,
@@ -134,13 +115,8 @@ export default function MasterWasherMachinePage() {
     }
   }
 
-  const fmtTemp = (v: string | null) => (v === null ? "—" : `${Number(v)}°C`)
-  const fmtRange = (min: string | number | null, max: string | number | null, suffix: string) => {
-    if (min === null && max === null) return "—"
-    const lo = min === null ? "?" : Number(min)
-    const hi = max === null ? "?" : Number(max)
-    return `${lo}–${hi}${suffix}`
-  }
+  const fmtValue = (v: string | number | null, suffix: string) =>
+    v === null || v === "" ? "—" : `${Number(v)}${suffix}`
 
   const columns: Column<WasherMachine>[] = [
     {
@@ -163,20 +139,12 @@ export default function MasterWasherMachinePage() {
     },
     {
       header: "Suhu",
-      cell: (row) => (
-        <span className="text-gray-700">
-          {fmtRange(row.min_temperature, row.max_temperature, "°C")}
-        </span>
-      ),
+      cell: (row) => <span className="text-gray-700">{fmtValue(row.temperature, "°C")}</span>,
       className: "w-28",
     },
     {
       header: "Durasi",
-      cell: (row) => (
-        <span className="text-gray-700">
-          {fmtRange(row.min_duration_minutes, row.max_duration_minutes, " mnt")}
-        </span>
-      ),
+      cell: (row) => <span className="text-gray-700">{fmtValue(row.duration_minutes, " mnt")}</span>,
       className: "w-28",
     },
     {
@@ -275,7 +243,7 @@ export default function MasterWasherMachinePage() {
             </Button>
             <Button
               onClick={handleSave}
-              disabled={saving || !form.name.trim() || rangeError !== null}
+              disabled={saving || !form.name.trim()}
               className="bg-[#075489] hover:bg-[#075489]/90 text-white"
             >
               {saving ? "Menyimpan..." : "Simpan"}
@@ -304,57 +272,31 @@ export default function MasterWasherMachinePage() {
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1.5">
-              <Label htmlFor="wm-min-temp">Suhu Min (°C)</Label>
+              <Label htmlFor="wm-temp">Suhu Standar (°C)</Label>
               <Input
-                id="wm-min-temp"
+                id="wm-temp"
                 type="number"
                 step="0.01"
-                placeholder="55"
-                value={form.min_temperature}
-                onChange={(e) => setForm((f) => ({ ...f, min_temperature: e.target.value }))}
+                placeholder="60"
+                value={form.temperature}
+                onChange={(e) => setForm((f) => ({ ...f, temperature: e.target.value }))}
               />
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="wm-max-temp">Suhu Max (°C)</Label>
+              <Label htmlFor="wm-dur">Durasi Standar (mnt)</Label>
               <Input
-                id="wm-max-temp"
+                id="wm-dur"
                 type="number"
-                step="0.01"
-                placeholder="93"
-                value={form.max_temperature}
-                onChange={(e) => setForm((f) => ({ ...f, max_temperature: e.target.value }))}
+                min={0}
+                placeholder="20"
+                value={form.duration_minutes}
+                onChange={(e) => setForm((f) => ({ ...f, duration_minutes: e.target.value }))}
               />
             </div>
           </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-1.5">
-              <Label htmlFor="wm-min-dur">Durasi Min (mnt)</Label>
-              <Input
-                id="wm-min-dur"
-                type="number"
-                min={0}
-                placeholder="10"
-                value={form.min_duration_minutes}
-                onChange={(e) => setForm((f) => ({ ...f, min_duration_minutes: e.target.value }))}
-              />
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="wm-max-dur">Durasi Max (mnt)</Label>
-              <Input
-                id="wm-max-dur"
-                type="number"
-                min={0}
-                placeholder="30"
-                value={form.max_duration_minutes}
-                onChange={(e) => setForm((f) => ({ ...f, max_duration_minutes: e.target.value }))}
-              />
-            </div>
-          </div>
-          {rangeError && (
-            <p className="rounded-lg bg-red-50 px-3 py-2 text-sm font-medium text-red-600">
-              {rangeError}
-            </p>
-          )}
+          <p className="text-xs text-gray-400">
+            Nilai standar dipakai sebagai batas minimum — hasil pencucian di bawahnya ditandai gagal.
+          </p>
           <div className="space-y-1.5">
             <Label htmlFor="wm-shelf-life">Batas Steril (hari)</Label>
             <Input

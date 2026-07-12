@@ -659,18 +659,9 @@ export default function OrderInstrumenPage() {
       },
     },
     {
-      header: "MR No",
+      header: "Ruangan",
       cell: (row) =>
-        row.medical_record_no ? (
-          <span className="font-mono text-sm text-gray-700">{row.medical_record_no}</span>
-        ) : (
-          dash
-        ),
-    },
-    {
-      header: "Patient Name",
-      cell: (row) =>
-        row.patient_name ? <span className="text-gray-700">{row.patient_name}</span> : dash,
+        row.room?.name ? <span className="text-gray-700">{row.room.name}</span> : dash,
     },
     {
       header: "Instrumen",

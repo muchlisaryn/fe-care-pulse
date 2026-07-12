@@ -79,37 +79,34 @@ export function isWashingFilled(order: CleaningOrder): boolean {
   )
 }
 
-// Hasil scan barcode mesin washer (master washer_machines).
+// Hasil scan barcode mesin washer (master washer_machines). Suhu & durasi standar
+// = batas minimum untuk deteksi kegagalan pencucian.
 type ScannedMachine = {
   id: number
   code: string
   name: string
-  min_temperature: string | null
-  max_temperature: string | null
-  min_duration_minutes: number | null
-  max_duration_minutes: number | null
+  temperature: string | null
+  duration_minutes: number | null
 }
 
-function rangeText(
-  min: string | number | null,
-  max: string | number | null,
-  suffix: string
-): string | null {
-  if (min === null && max === null) return null
-  const lo = min === null ? "?" : Number(min)
-  const hi = max === null ? "?" : Number(max)
-  return `${lo}–${hi}${suffix}`
+// Teks nilai standar mesin, mis. "60°C" / "20 mnt". null bila belum diisi.
+function stdText(value: string | number | null, suffix: string): string | null {
+  if (value === null) return null
+  return `${Number(value)}${suffix}`
 }
 
-// Titik tengah ambang min–max (untuk auto-isi parameter saat scan mesin).
-// "" bila kedua ambang kosong; bila salah satu kosong, pakai yang ada.
-function midpoint(min: string | number | null, max: string | number | null): string {
-  const lo = min === null ? null : Number(min)
-  const hi = max === null ? null : Number(max)
-  if (lo !== null && hi !== null) return String(Math.round((lo + hi) / 2))
-  if (lo !== null) return String(lo)
-  if (hi !== null) return String(hi)
-  return ""
+// Nilai auto-isi dari standar mesin ("" bila standar kosong).
+function toInput(value: string | number | null): string {
+  return value === null ? "" : String(Number(value))
+}
+
+// True bila `valStr` numerik & di BAWAH nilai standar mesin (standar null
+// diabaikan). Standar diperlakukan sebagai batas minimum.
+function belowStandard(valStr: string, standard: string | number | null): boolean {
+  if (standard === null || valStr.trim() === "") return false
+  const v = Number(valStr)
+  if (Number.isNaN(v)) return false
+  return v < Number(standard)
 }
 
 /**
@@ -205,29 +202,28 @@ export function CleaningTab({
     setDetergent(w?.detergent_type ?? "")
     setDuration(w?.duration_minutes != null ? String(w.duration_minutes) : "")
     setWasherMachineId(w?.washer_machine_id ?? null)
-    // Mesin tersimpan ditampilkan tanpa ambang (ambang lengkap hanya saat dipilih).
+    // Mesin tersimpan ditampilkan tanpa standar (standar lengkap hanya saat dipilih;
+    // begitu daftar mesin termuat, `activeMachine` mengambil standar dari master).
     setMachineInfo(
       w?.washer_machine
         ? {
             ...w.washer_machine,
-            min_temperature: null,
-            max_temperature: null,
-            min_duration_minutes: null,
-            max_duration_minutes: null,
+            temperature: null,
+            duration_minutes: null,
           }
         : null
     )
     setAlertMsg(w?.alert ? w.alert_message : null)
   }
 
-  // Terapkan mesin terpilih → auto-isi nomor mesin, suhu & durasi (titik tengah
-  // ambang). Di-set tanpa syarat agar saat ganti mesin data di bawah ikut terupdate.
+  // Terapkan mesin terpilih → auto-isi nomor mesin, suhu & durasi dari nilai standar
+  // mesin. Di-set tanpa syarat agar saat ganti mesin data di bawah ikut terupdate.
   function applyMachine(m: ScannedMachine) {
     setMachineInfo(m)
     setWasherMachineId(m.id)
     setMachineNo(m.code)
-    setTemperature(midpoint(m.min_temperature, m.max_temperature))
-    setDuration(midpoint(m.min_duration_minutes, m.max_duration_minutes))
+    setTemperature(toInput(m.temperature))
+    setDuration(toInput(m.duration_minutes))
   }
 
   // Pilih mesin washer dari dropdown.
@@ -260,6 +256,10 @@ export function CleaningTab({
     if (!active || saving) return
     if (!washReady) {
       setError("Lengkapi Nomor Mesin, Suhu, Waktu Mulai Cuci, Durasi, dan Jenis Deterjen.")
+      return
+    }
+    if (tempBelowStd || durationBelowStd) {
+      setError("Suhu / durasi di bawah standar mesin washer terpilih. Sesuaikan dulu.")
       return
     }
     setSaving(true)
@@ -373,6 +373,18 @@ export function CleaningTab({
   // Batch dibatalkan → modal read-only (form disembunyikan, hanya riwayat).
   const canceledActive = active ? isCanceled(active) : false
 
+  // Mesin terpilih dengan standar lengkap: utamakan entri dari daftar master (punya
+  // suhu/durasi standar), fallback ke info mesin tersimpan. Dipakai untuk deteksi
+  // suhu/durasi di bawah standar.
+  const activeMachine =
+    washerMachineId != null
+      ? machines.find((m) => m.id === washerMachineId) ?? machineInfo
+      : null
+  const tempBelowStd = activeMachine ? belowStandard(temperature, activeMachine.temperature) : false
+  const durationBelowStd = activeMachine
+    ? belowStandard(duration, activeMachine.duration_minutes)
+    : false
+
   // Field parameter pencucian yang wajib diisi sebelum Simpan.
   const washReady =
     machineNo.trim() !== "" &&
@@ -423,7 +435,7 @@ export function CleaningTab({
               {!washedActive && !canceledActive && (
                 <Button
                   onClick={saveWashing}
-                  disabled={saving || !washReady}
+                  disabled={saving || !washReady || tempBelowStd || durationBelowStd}
                   className="bg-[#075489] hover:bg-[#075489]/90 text-white"
                 >
                   {saving ? "Menyimpan..." : "Simpan"}
@@ -499,28 +511,18 @@ export function CleaningTab({
                   placeholder="Pilih mesin washer..."
                   searchPlaceholder="Cari kode / nama mesin..."
                 />
-                {machineInfo && (
+                {activeMachine && (
                   <div className="flex flex-wrap items-center gap-2 rounded-lg border border-[#075489]/30 bg-[#075489]/5 px-3 py-2 text-xs">
-                    <Badge variant="info">{machineInfo.code}</Badge>
-                    <span className="font-medium text-gray-800">{machineInfo.name}</span>
-                    {rangeText(machineInfo.min_temperature, machineInfo.max_temperature, "°C") && (
+                    <Badge variant="info">{activeMachine.code}</Badge>
+                    <span className="font-medium text-gray-800">{activeMachine.name}</span>
+                    {stdText(activeMachine.temperature, "°C") && (
                       <span className="text-gray-500">
-                        Suhu{" "}
-                        {rangeText(machineInfo.min_temperature, machineInfo.max_temperature, "°C")}
+                        Suhu standar {stdText(activeMachine.temperature, "°C")}
                       </span>
                     )}
-                    {rangeText(
-                      machineInfo.min_duration_minutes,
-                      machineInfo.max_duration_minutes,
-                      " mnt"
-                    ) && (
+                    {stdText(activeMachine.duration_minutes, " mnt") && (
                       <span className="text-gray-500">
-                        Durasi{" "}
-                        {rangeText(
-                          machineInfo.min_duration_minutes,
-                          machineInfo.max_duration_minutes,
-                          " mnt"
-                        )}
+                        Durasi standar {stdText(activeMachine.duration_minutes, " mnt")}
                       </span>
                     )}
                   </div>
@@ -554,7 +556,21 @@ export function CleaningTab({
                   onChange={(e) => setTemperature(e.target.value)}
                   placeholder="mis. 60"
                   disabled={washedActive}
+                  min={activeMachine?.temperature ?? undefined}
+                  error={tempBelowStd}
+                  aria-invalid={tempBelowStd}
                 />
+                {activeMachine &&
+                  stdText(activeMachine.temperature, "°C") &&
+                  (tempBelowStd ? (
+                    <p className="text-xs text-red-600">
+                      Di bawah standar mesin ({stdText(activeMachine.temperature, "°C")}).
+                    </p>
+                  ) : (
+                    <p className="text-xs text-gray-400">
+                      Standar mesin {stdText(activeMachine.temperature, "°C")} (minimum).
+                    </p>
+                  ))}
               </div>
               <div className="space-y-1.5">
                 <Label htmlFor="wash-time">
@@ -576,12 +592,25 @@ export function CleaningTab({
                 <Input
                   id="wash-duration"
                   type="number"
-                  min={0}
+                  min={activeMachine?.duration_minutes ?? 0}
                   value={duration}
                   onChange={(e) => setDuration(e.target.value)}
                   placeholder="mis. 20"
                   disabled={washedActive}
+                  error={durationBelowStd}
+                  aria-invalid={durationBelowStd}
                 />
+                {activeMachine &&
+                  stdText(activeMachine.duration_minutes, " mnt") &&
+                  (durationBelowStd ? (
+                    <p className="text-xs text-red-600">
+                      Di bawah standar mesin ({stdText(activeMachine.duration_minutes, " mnt")}).
+                    </p>
+                  ) : (
+                    <p className="text-xs text-gray-400">
+                      Standar mesin {stdText(activeMachine.duration_minutes, " mnt")} (minimum).
+                    </p>
+                  ))}
               </div>
               <div className="space-y-1.5 sm:col-span-2">
                 <Label htmlFor="wash-detergent">
