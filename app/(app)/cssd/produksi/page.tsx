@@ -6,8 +6,8 @@ import { Trash2, Package, Search, ZoomIn } from "lucide-react"
 import { Button } from "@/components/atoms/Button"
 import { Input } from "@/components/atoms/Input"
 import { Label } from "@/components/atoms/Label"
-import { Badge } from "@/components/atoms/Badge"
 import { Textarea } from "@/components/atoms/Textarea"
+import { Badge } from "@/components/atoms/Badge"
 import { SelectSearch } from "@/components/atoms/SelectSearch"
 import { Card } from "@/components/molecules/Card"
 import { Modal } from "@/components/molecules/Modal"
@@ -922,14 +922,12 @@ function ProduksiCssdPage() {
               id="prod-note"
               value={note}
               onChange={(e) => setNote(e.target.value)}
-              placeholder="mis. Produksi rutin pagi"
             />
           </div>
 
           {formError && <p className="mt-3 text-sm text-red-600">{formError}</p>}
 
-          <div className="mt-4 flex flex-col gap-3 border-t border-gray-100 pt-4 sm:flex-row sm:items-center sm:justify-between">
-            <span className="text-xs text-gray-400">Masuk tahap Cleaning</span>
+          <div className="mt-4 flex flex-col gap-3 border-t border-gray-100 pt-4 sm:flex-row sm:items-center sm:justify-end">
             <Button
               type="button"
               onClick={submit}

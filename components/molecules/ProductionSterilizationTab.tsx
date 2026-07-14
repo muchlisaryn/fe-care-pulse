@@ -7,6 +7,7 @@ import { Badge } from "@/components/atoms/Badge"
 import { Input } from "@/components/atoms/Input"
 import { Label } from "@/components/atoms/Label"
 import { Select } from "@/components/atoms/Select"
+import { SelectSearch } from "@/components/atoms/SelectSearch"
 import { Textarea } from "@/components/atoms/Textarea"
 import { Modal } from "@/components/molecules/Modal"
 import { ConfirmDialog } from "@/components/molecules/ConfirmDialog"
@@ -94,6 +95,24 @@ export function ProductionSterilizationTab({
   const [selected, setSelected] = useState<Set<number>>(new Set())
   const [batchOpen, setBatchOpen] = useState(false)
   const [form, setForm] = useState(emptyForm)
+  // Daftar mesin sterilisator aktif (master) untuk dropdown pilihan mesin.
+  const [machines, setMachines] = useState<{ id: number; code: string; name: string }[]>([])
+  const [machinesLoading, setMachinesLoading] = useState(false)
+
+  // Muat daftar mesin sterilisator aktif (master) untuk dropdown pilihan mesin.
+  // Dipanggil saat modal batch dibuka (openBatch), bukan via effect.
+  async function loadMachines() {
+    if (machines.length > 0 || machinesLoading) return
+    setMachinesLoading(true)
+    try {
+      const res = await api.get("/master/sterilizer-machines", { params: { status: "aktif" } })
+      setMachines(res.data?.data?.data ?? [])
+    } catch {
+      setMachines([])
+    } finally {
+      setMachinesLoading(false)
+    }
+  }
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [done, setDone] = useState<{ batch: string; count: number } | null>(null)
@@ -153,6 +172,7 @@ export function ProductionSterilizationTab({
       duration_minutes: preset?.duration_minutes ?? "",
     })
     setBatchOpen(true)
+    loadMachines()
   }
 
   function changeMethod(method: string) {
@@ -494,8 +514,15 @@ export function ProductionSterilizationTab({
 
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div className="space-y-1.5 sm:col-span-2">
-              <Label htmlFor="pstr-machine">Mesin Sterilisator *</Label>
-              <Input id="pstr-machine" value={form.machine} onChange={(e) => setForm((f) => ({ ...f, machine: e.target.value }))} placeholder="mis. Autoclave-01" />
+              <Label>Mesin Sterilisator *</Label>
+              <SelectSearch
+                options={machines.map((m) => ({ value: m.name, label: `${m.code} — ${m.name}` }))}
+                value={form.machine}
+                onChange={(v) => setForm((f) => ({ ...f, machine: v }))}
+                loading={machinesLoading}
+                placeholder="Pilih mesin sterilisator..."
+                searchPlaceholder="Cari kode / nama mesin..."
+              />
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="pstr-method">Metode</Label>

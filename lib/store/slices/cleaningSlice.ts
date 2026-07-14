@@ -53,6 +53,7 @@ export type CleaningOrder = {
   status: "pencucian" | "pengemasan"
   stage_status: "proses" | "selesai" | "batal" // 'selesai'/'batal' = riwayat cleaning
   borrowed_by: string | null
+  note: string | null // Catatan (opsional) dari tahap Mulai Produksi.
   room: { id: number; name: string } | null
   order_date: string | null
   processed_at: string | null

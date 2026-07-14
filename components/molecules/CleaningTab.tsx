@@ -942,6 +942,13 @@ function CleaningOrderCard({
                 </div>
               )}
 
+              {/* Catatan (opsional) dari tahap Mulai Produksi. */}
+              {order.note && (
+                <p className="mt-1.5 text-xs text-gray-500">
+                  <span className="font-medium text-gray-600">Catatan:</span> {order.note}
+                </p>
+              )}
+
             </div>
           </div>
         </button>
