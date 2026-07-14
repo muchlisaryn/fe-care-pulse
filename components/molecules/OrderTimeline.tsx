@@ -1,8 +1,18 @@
 "use client"
 
 import { useState } from "react"
-import { ChevronDown, ChevronUp } from "lucide-react"
+import { ChevronDown, ChevronUp, ListTree } from "lucide-react"
 import { Badge } from "@/components/atoms/Badge"
+import { Button } from "@/components/atoms/Button"
+import { Modal } from "@/components/molecules/Modal"
+
+// Rincian ringkas batch untuk tombol "Detail" pada event produksi/cleaning/steril:
+// cukup nomor batch + waktunya.
+export type TimelineDetail = {
+  kind: "produksi" | "cleaning" | "packaging" | "steril"
+  code: string
+  at?: string | null
+}
 
 // Satu peristiwa di timeline tracking order (dari endpoint scan / detail order).
 export type TimelineEvent = {
@@ -11,13 +21,14 @@ export type TimelineEvent = {
     // Siklus peminjaman
     | "dibuat" | "diterima" | "dipinjam" | "dikembalikan" | "dipindah" | "dibatalkan"
     // Pipeline CSSD (ditelusuri dari kode produksi): produksi → cleaning → steril → simpan rak
-    | "produksi" | "diproses" | "selesai_cuci" | "gagal_cuci"
+    | "produksi" | "diproses" | "selesai_cuci" | "gagal_cuci" | "packaging"
     | "disterilkan" | "steril" | "gagal_steril" | "disimpan" | "terdistribusi"
   room: string | null
   actor: string | null
   borrowed_by: string | null
   note: string | null
   created_at: string | null
+  detail?: TimelineDetail | null
 }
 
 function formatDateTime(value: string | null) {
@@ -33,6 +44,21 @@ function formatDateTime(value: string | null) {
   })
 }
 
+// Hari & tanggal lengkap: "Selasa, 14 Jul 2026, 09.34".
+function formatHariTanggal(value: string | null | undefined) {
+  if (!value) return "—"
+  const d = new Date(value)
+  if (Number.isNaN(d.getTime())) return value
+  return d.toLocaleString("id-ID", {
+    weekday: "long",
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  })
+}
+
 const TIMELINE_LABEL: Record<string, string> = {
   produksi: "Produksi",
   dibuat: "Order Dibuat",
@@ -40,6 +66,7 @@ const TIMELINE_LABEL: Record<string, string> = {
   diproses: "Diproses",
   selesai_cuci: "Selesai Cuci",
   gagal_cuci: "Gagal Cuci",
+  packaging: "Packaging",
   disterilkan: "Disterilkan",
   steril: "Steril / Siap Rilis",
   gagal_steril: "Gagal Steril",
@@ -57,6 +84,7 @@ const TIMELINE_VARIANT: Record<string, "info" | "success" | "danger" | "warning"
   diproses: "info",
   selesai_cuci: "success",
   gagal_cuci: "danger",
+  packaging: "info",
   disterilkan: "info",
   steril: "success",
   gagal_steril: "danger",
@@ -76,6 +104,7 @@ const TIMELINE_ACTOR_LABEL: Record<string, string> = {
   diterima: "Diterima",
   selesai_cuci: "Dicuci",
   gagal_cuci: "Dicuci",
+  packaging: "Dikemas",
   steril: "Divalidasi",
   gagal_steril: "Divalidasi",
   disterilkan: "Disterilkan",
@@ -92,6 +121,7 @@ const TIMELINE_DOT: Record<string, string> = {
   diproses: "bg-yellow-500",
   selesai_cuci: "bg-green-500",
   gagal_cuci: "bg-red-500",
+  packaging: "bg-teal-500",
   disterilkan: "bg-sky-500",
   steril: "bg-green-600",
   gagal_steril: "bg-red-500",
@@ -103,15 +133,25 @@ const TIMELINE_DOT: Record<string, string> = {
   dibatalkan: "bg-red-500",
 }
 
+// Label nomor batch per jenis tahap.
+const DETAIL_NOMOR_LABEL: Record<TimelineDetail["kind"], string> = {
+  produksi: "Nomor Produksi",
+  cleaning: "Nomor Cleaning",
+  packaging: "Nomor Packaging",
+  steril: "Nomor Sterilisasi",
+}
+
 // Satu baris event pada garis waktu (dot + garis penghubung + konten).
 function TimelineItem({
   ev,
   showConnector,
   padBottom,
+  onDetail,
 }: {
   ev: TimelineEvent
   showConnector: boolean
   padBottom: boolean
+  onDetail: (ev: TimelineEvent) => void
 }) {
   return (
     <li className="flex gap-3">
@@ -130,6 +170,15 @@ function TimelineItem({
             {TIMELINE_LABEL[ev.type] ?? ev.type}
           </Badge>
           {ev.room && <span className="text-sm text-gray-700">{ev.room}</span>}
+          {ev.detail && (
+            <button
+              type="button"
+              onClick={() => onDetail(ev)}
+              className="inline-flex items-center gap-1 rounded-md border border-[#075489]/30 px-2 py-0.5 text-xs font-medium text-[#075489] transition-colors hover:bg-[#075489]/10"
+            >
+              <ListTree className="h-3.5 w-3.5" /> Detail
+            </button>
+          )}
         </div>
         {ev.note && <p className="mt-0.5 text-xs text-gray-500">{ev.note}</p>}
         {/* Baris pelaku + waktu: "Disetujui Administrator · 22 Jun 2026, 13.37" */}
@@ -142,10 +191,31 @@ function TimelineItem({
   )
 }
 
+// Isi modal rincian batch: nomor batch + hari & tanggal.
+function DetailModalBody({ detail }: { detail: TimelineDetail }) {
+  return (
+    <div className="space-y-3">
+      <div>
+        <p className="text-[11px] font-semibold uppercase tracking-wide text-gray-400">
+          {DETAIL_NOMOR_LABEL[detail.kind]}
+        </p>
+        <p className="font-mono text-sm font-semibold text-[#075489]">{detail.code}</p>
+      </div>
+      <div>
+        <p className="text-[11px] font-semibold uppercase tracking-wide text-gray-400">
+          Hari &amp; Tanggal
+        </p>
+        <p className="text-sm text-gray-800">{formatHariTanggal(detail.at)}</p>
+      </div>
+    </div>
+  )
+}
+
 // Riwayat Peminjaman: daftar event tracking order (dibuat → diterima → dipinjam →
 // dipindah antar unit → dikembalikan / dibatalkan) dalam bentuk garis waktu vertikal.
 export function OrderTimeline({ events }: { events: TimelineEvent[] | undefined }) {
   const [expanded, setExpanded] = useState(false)
+  const [detailEv, setDetailEv] = useState<TimelineEvent | null>(null)
 
   if (!events || events.length === 0) return null
 
@@ -164,7 +234,7 @@ export function OrderTimeline({ events }: { events: TimelineEvent[] | undefined 
       {collapsed ? (
         <>
           <ol>
-            <TimelineItem ev={latest} showConnector={false} padBottom={false} />
+            <TimelineItem ev={latest} showConnector={false} padBottom={false} onDetail={setDetailEv} />
           </ol>
           <button
             type="button"
@@ -183,6 +253,7 @@ export function OrderTimeline({ events }: { events: TimelineEvent[] | undefined 
                 ev={ev}
                 showConnector={i < events.length - 1}
                 padBottom={i < events.length - 1}
+                onDetail={setDetailEv}
               />
             ))}
           </ol>
@@ -197,6 +268,24 @@ export function OrderTimeline({ events }: { events: TimelineEvent[] | undefined 
           )}
         </>
       )}
+
+      <Modal
+        open={detailEv !== null}
+        onClose={() => setDetailEv(null)}
+        title={
+          detailEv?.detail
+            ? `${TIMELINE_LABEL[detailEv.type] ?? "Detail"} — ${detailEv.detail.code}`
+            : "Detail"
+        }
+        size="sm"
+        footer={
+          <Button variant="outline" onClick={() => setDetailEv(null)}>
+            Tutup
+          </Button>
+        }
+      >
+        {detailEv?.detail && <DetailModalBody detail={detailEv.detail} />}
+      </Modal>
     </div>
   )
 }
