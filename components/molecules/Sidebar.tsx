@@ -26,7 +26,6 @@ import {
   type LucideIcon,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
-import { Footer } from "@/components/molecules/Footer"
 import { useAppSelector } from "@/lib/store/hooks"
 import type { AuthMenuGroup } from "@/lib/store/slices/authSlice"
 
@@ -392,8 +391,6 @@ export function Sidebar({ className, collapsed = false, onExpand, onClose }: Sid
           })}
         </div>
       </nav>
-
-      {!collapsed && <Footer />}
 
       {tooltip}
     </aside>
