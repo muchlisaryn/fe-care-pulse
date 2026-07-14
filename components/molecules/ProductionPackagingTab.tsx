@@ -29,6 +29,13 @@ type LabelEntry = {
   unitCode: string | null // untuk satuan
   instruments: { name: string; qty: number }[] // isi paket
   unitCodes: string[] // kode unit di dalam paket
+  productionItemId: number // id production_item (paket: item pertama di paket itu)
+}
+
+// Kode produksi yang dicetak/ditampilkan pada label: nomor batch + id production_item
+// digabung tanpa pemisah, mis. batch PRD26071403 + item 1 → PRD260714031.
+function labelProductionCode(batch: string, entry: LabelEntry) {
+  return `${batch}${entry.productionItemId}`
 }
 
 // Kelompokkan item label: instrumen paket digabung jadi satu label per paket
@@ -40,7 +47,7 @@ function groupLabelEntries(items: ProdSterilLabelItem[]): LabelEntry[] {
     if (it.source === "paket" && it.package_name) {
       let e = paketMap.get(it.package_name)
       if (!e) {
-        e = { kind: "paket", title: it.package_name, barcodeValue: it.package_name, unitCode: null, instruments: [], unitCodes: [] }
+        e = { kind: "paket", title: it.package_name, barcodeValue: it.package_name, unitCode: null, instruments: [], unitCodes: [], productionItemId: it.production_item_id }
         paketMap.set(it.package_name, e)
         entries.push(e)
       }
@@ -56,6 +63,7 @@ function groupLabelEntries(items: ProdSterilLabelItem[]): LabelEntry[] {
         unitCode: it.unit_code ?? null,
         instruments: [],
         unitCodes: it.unit_code ? [it.unit_code] : [],
+        productionItemId: it.production_item_id,
       })
     }
   }
@@ -377,7 +385,7 @@ export function ProductionPackagingTab({
       // Kartu yang dipilih; bila tak ada yang dipilih → semua.
       .filter((_, i) => selectedLabels.size === 0 || selectedLabels.has(i))
       .map((e) => ({
-        kode_produksi: label.batch,
+        kode_produksi: labelProductionCode(label.batch, e),
         nama_instrumen: e.title,
         petugas_pengemasan: label.packer ?? null,
         tanggal_steril: label.packaged_at,
@@ -771,6 +779,7 @@ export function ProductionPackagingTab({
               <div className="flex flex-wrap gap-3">
                 {labelEntries.map((e, i) => {
                   const picked = selectedLabels.has(i)
+                  const kodeProduksi = labelProductionCode(label.batch, e)
                   return (
                   <div
                     key={i}
@@ -791,11 +800,11 @@ export function ProductionPackagingTab({
                     >
                       {picked && <Check className="h-3 w-3" />}
                     </span>
-                    {/* Barcode berisi kode produksi (batch). */}
+                    {/* Barcode berisi kode produksi (batch + id production_item). */}
                     <div className="my-2 flex justify-center">
-                      <Barcode id={`prod-steril-label-${i}`} value={label.batch} height={44} moduleWidth={1.6} />
+                      <Barcode id={`prod-steril-label-${i}`} value={kodeProduksi} height={44} moduleWidth={1.6} />
                     </div>
-                    <div className="font-mono text-[11px] font-semibold text-gray-700">{label.batch}</div>
+                    <div className="font-mono text-[11px] font-semibold text-gray-700">{kodeProduksi}</div>
                     <div className="mt-1 text-sm font-semibold text-gray-900">{e.title}</div>
                     <table className="mt-2 w-full text-left text-[10px]">
                       <tbody>

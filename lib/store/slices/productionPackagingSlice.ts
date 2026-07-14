@@ -43,6 +43,7 @@ export type ProdPackagingBatch = {
 
 // Satu label sterilisasi (per unit) yang dicetak setelah packaging selesai.
 export type ProdSterilLabelItem = {
+  production_item_id: number // digabung dengan batch → kode produksi label (mis. PRD26071403 + 1)
   instrument_name: string
   unit_code: string | null
   source: "satuan" | "paket"

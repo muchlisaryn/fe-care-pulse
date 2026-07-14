@@ -95,6 +95,7 @@ function todayInput(): string {
 // Order + unit hasil scan untuk pengembalian.
 type ReturnUnit = {
   id: number
+  instrument_stock_id: number | null
   source: "satuan" | "paket"
   package_name: string | null
   is_returned: boolean
@@ -119,6 +120,12 @@ type ReturnOrder = {
   distributed_to?: string | null
   items: ReturnUnit[]
   timeline?: TimelineEvent[]
+  /**
+   * Unit yang diwakili kode yang dipindai (kode unit / label produksi: batch + id
+   * production_item). Dipakai untuk menyorot unit itu di modal. Kosong bila yang
+   * dipindai kode order/transaksi — kodenya mewakili seluruh order.
+   */
+  scanned_stock_ids?: number[]
 }
 
 function formatDate(value: string | null) {
@@ -303,6 +310,10 @@ function MonitoringCssd() {
   const [scanArmed, setScanArmed] = useState(false)
   const [scanLoading, setScanLoading] = useState(false)
   const scanBufferRef = useRef("")
+  // Kunci pemrosesan scan. State `scanLoading` baru terlihat pada render berikutnya,
+  // jadi Enter (suffix scanner) + auto-proses jeda ketik bisa lolos berbarengan dan
+  // menembak endpoint dua kali. Ref ini menutup celah itu: satu kode = satu proses.
+  const scanBusyRef = useRef(false)
   // Notifikasi sementara hasil scan (mis. no. transaksi tidak dikenal).
   const [scanNotice, setScanNotice] = useState<string | null>(null)
   // Tabel utama dikelompokkan per order (peminjam) → di dalamnya per paket / satuan.
@@ -371,6 +382,37 @@ function MonitoringCssd() {
   useEffect(() => {
     if (returnOpen) dispatch(fetchConditions())
   }, [returnOpen, dispatch])
+
+  // Begitu modal Pengembalian terbuka dari hasil pindaian, arahkan tampilan ke unit
+  // yang barusan dipindai (daftar unit bisa panjang). Dijalankan sebagai efek — bukan
+  // ref callback — supaya modal sudah benar-benar ter-layout saat posisi dihitung.
+  useEffect(() => {
+    if (!returnOpen || !returnOrder?.scanned_stock_ids?.length) return
+
+    const t = setTimeout(() => {
+      const node = document.querySelector<HTMLElement>('[data-scanned-unit="true"]')
+      if (!node) return
+
+      // Yang bergulir adalah body modal (kontainer overflow-y-auto), bukan halaman.
+      // Digeser sendiri agar unit berhenti di tengah — scrollIntoView biasa ikut
+      // menggeser halaman di belakang modal.
+      let box: HTMLElement | null = node.parentElement
+      while (box && !(box.scrollHeight > box.clientHeight && /auto|scroll/.test(getComputedStyle(box).overflowY))) {
+        box = box.parentElement
+      }
+      if (!box) {
+        node.scrollIntoView({ block: "center", behavior: "smooth" })
+        return
+      }
+      const offset = node.getBoundingClientRect().top - box.getBoundingClientRect().top
+      const center = box.scrollTop + offset - (box.clientHeight - node.offsetHeight) / 2
+      box.scrollTo({ top: Math.max(0, center), behavior: "smooth" })
+    }, 120) // beri jeda animasi buka modal sebelum posisi dihitung
+
+    return () => clearTimeout(t)
+    // Sekali per order — tidak diulang saat daftar unit dirender ulang (mis. saat
+    // kondisi masuk dipilih), supaya tampilan tidak melompat sendiri.
+  }, [returnOpen, returnOrder?.id])
 
   function openReturn() {
     setReturnOpen(true)
@@ -597,17 +639,20 @@ function MonitoringCssd() {
 
   // Hasil pindaian barcode transaksi: order masih dipinjam → buka modal
   // Pengembalian; sudah dikembalikan → buka modal Riwayat. Status lain / kode tidak
-  // dikenal → notifikasi, mode scan tetap aktif agar bisa pindai ulang.
+  // dikenal → notifikasi. Mode scan TIDAK dimatikan di sini — petugas biasanya
+  // memindai bungkus berturut-turut, jadi mode scan hanya padam bila dimatikan
+  // sendiri (tombol scan / Escape). Selama modal terbuka penangkapan ketikan
+  // ditangguhkan (lihat efek listener) supaya isian di dalam modal tidak tercuri.
   async function runScanReturn(raw: string) {
     const code = raw.trim()
-    if (!code || scanLoading) return
+    if (!code || scanBusyRef.current) return
+    scanBusyRef.current = true
     setScanNotice(null)
     setScanLoading(true)
     try {
       const res = await api.post("/master/orders/scan", { code })
       const order: ReturnOrder = res.data.data
       if (order.status === "dipinjam") {
-        setScanArmed(false)
         scanBufferRef.current = ""
         setSearchInput("")
         openReturn()
@@ -615,7 +660,6 @@ function MonitoringCssd() {
         setReturnDate(order.return_actual_date?.slice(0, 10) || todayInput())
         setReturnedBy(order.returned_by ?? order.borrowed_by ?? "")
       } else if (order.status === "dikembalikan") {
-        setScanArmed(false)
         scanBufferRef.current = ""
         setSearchInput("")
         setHistoryOpen(true)
@@ -632,9 +676,24 @@ function MonitoringCssd() {
       setSearchInput("")
       setScanNotice(x.response?.data?.message ?? `Kode "${code}" tidak dikenal.`)
     } finally {
+      scanBusyRef.current = false
       setScanLoading(false)
     }
   }
+
+  // Penangkapan ketikan scanner ditangguhkan selagi ada modal terbuka: di dalam modal
+  // petugas mengetik (nama pengembali, tanggal, dsb) dan ketikan itu tidak boleh
+  // tercuri jadi buffer scan. Mode scan sendiri tetap menyala — begitu modal ditutup,
+  // pindai lagi langsung jalan tanpa perlu mengaktifkan ulang.
+  const scanSuspended =
+    returnOpen ||
+    historyOpen ||
+    confirmReturnOpen ||
+    roomsModalOpen ||
+    detailRoom !== null ||
+    cancelTarget !== null ||
+    processTarget !== null
+  const scanActive = scanArmed && !scanSuspended
 
   // Notifikasi scan hilang sendiri setelah beberapa detik.
   useEffect(() => {
@@ -643,11 +702,11 @@ function MonitoringCssd() {
     return () => clearTimeout(t)
   }, [scanNotice])
 
-  // Tangkap ketikan barcode scanner secara GLOBAL selama mode scan aktif. Kolom
-  // pencarian sengaja dikunci (readOnly), jadi karakter ditangkap di sini lalu
-  // ditampilkan. Enter (suffix scanner) langsung memproses.
+  // Tangkap ketikan barcode scanner secara GLOBAL selama mode scan aktif (dan tidak
+  // ada modal terbuka). Kolom pencarian sengaja dikunci (readOnly), jadi karakter
+  // ditangkap di sini lalu ditampilkan. Enter (suffix scanner) langsung memproses.
   useEffect(() => {
-    if (!scanArmed) return
+    if (!scanActive) return
     function onKey(e: KeyboardEvent) {
       if (scanLoading) return
       if (e.key === "Escape") {
@@ -658,7 +717,12 @@ function MonitoringCssd() {
       }
       if (e.key === "Enter") {
         e.preventDefault()
-        runScanReturn(scanBufferRef.current)
+        // Kosongkan buffer/kolom lebih dulu → timer auto-proses (efek di bawah)
+        // ikut dibatalkan, jadi kode ini tidak diproses dua kali.
+        const code = scanBufferRef.current
+        scanBufferRef.current = ""
+        setSearchInput("")
+        runScanReturn(code)
         return
       }
       if (e.key === "Backspace") {
@@ -674,17 +738,19 @@ function MonitoringCssd() {
     document.addEventListener("keydown", onKey)
     return () => document.removeEventListener("keydown", onKey)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [scanArmed, scanLoading])
+  }, [scanActive, scanLoading])
 
-  // Scanner tanpa suffix Enter: proses otomatis saat aliran karakter berhenti ~1 detik.
+  // Scanner tanpa suffix Enter: kode dianggap lengkap begitu aliran karakter berhenti
+  // (scanner mengetik beruntun ~ms, jeda 250ms sudah pasti akhir kode) → langsung proses.
   useEffect(() => {
-    if (!scanArmed) return
+    if (!scanActive) return
     const code = searchInput.trim()
     if (!code) return
-    const t = setTimeout(() => runScanReturn(code), 1000)
+    // Bila sedang memproses, panggilan ini di-drop oleh scanBusyRef di runScanReturn.
+    const t = setTimeout(() => runScanReturn(code), 250)
     return () => clearTimeout(t)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [scanArmed, searchInput])
+  }, [scanActive, searchInput])
 
   // Hanya ruangan yang punya alat dipinjam, urut terbanyak.
   const roomSummary = useMemo(
@@ -1483,6 +1549,10 @@ function MonitoringCssd() {
                 }
                 const groups = [...groupMap.values()]
 
+                // Unit yang barcodenya barusan dipindai → disorot supaya petugas
+                // langsung tahu bungkus mana yang ada di tangannya.
+                const scanned = new Set(returnOrder.scanned_stock_ids ?? [])
+
                 const readonly = returnOrder.status === "dikembalikan"
                 const condIdByName = (n: string) => {
                   const c = conditions.find((x) => x.name === n)
@@ -1571,10 +1641,20 @@ function MonitoringCssd() {
 
                               {/* Baris unit: kode + nama, kondisi keluar, kondisi masuk */}
                               <div className="divide-y divide-gray-100">
-                                {g.units.map((u) => (
+                                {g.units.map((u) => {
+                                  const isScanned =
+                                    u.instrument_stock_id != null && scanned.has(u.instrument_stock_id)
+                                  return (
                                   <div
                                     key={u.id}
-                                    className="grid grid-cols-1 gap-2 px-3 py-2.5 text-sm transition-colors hover:bg-gray-50/60 sm:grid-cols-[minmax(0,1fr)_8rem_13rem] sm:items-center sm:gap-3"
+                                    // Penanda sasaran auto-scroll saat modal dibuka dari pindaian.
+                                    data-scanned-unit={isScanned || undefined}
+                                    className={
+                                      "grid grid-cols-1 gap-2 px-3 py-2.5 text-sm transition-colors sm:grid-cols-[minmax(0,1fr)_8rem_13rem] sm:items-center sm:gap-3 " +
+                                      (isScanned
+                                        ? "bg-amber-50 ring-1 ring-inset ring-amber-300"
+                                        : "hover:bg-gray-50/60")
+                                    }
                                   >
                                     <div className="flex min-w-0 items-center gap-2">
                                       <span className="shrink-0 rounded bg-[#4ba69d]/10 px-2 py-0.5 font-mono text-xs font-semibold text-[#4ba69d]">
@@ -1585,6 +1665,11 @@ function MonitoringCssd() {
                                           <span className="text-xs text-gray-400">—</span>
                                         )}
                                       </span>
+                                      {isScanned && (
+                                        <span className="shrink-0 rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-700">
+                                          Dipindai
+                                        </span>
+                                      )}
                                     </div>
 
                                     <div className="flex items-center gap-1.5 text-gray-700">
@@ -1641,7 +1726,8 @@ function MonitoringCssd() {
                                       </div>
                                     )}
                                   </div>
-                                ))}
+                                  )
+                                })}
                               </div>
                             </div>
                           )
