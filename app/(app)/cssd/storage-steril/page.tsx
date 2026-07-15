@@ -11,6 +11,7 @@ import {
   ChevronDown,
   ChevronRight,
   ZoomIn,
+  ScanLine,
   X,
 } from "lucide-react"
 import { Input } from "@/components/atoms/Input"
@@ -18,7 +19,6 @@ import { Button } from "@/components/atoms/Button"
 import { Badge } from "@/components/atoms/Badge"
 import { Label } from "@/components/atoms/Label"
 import { Select } from "@/components/atoms/Select"
-import { SelectSearch } from "@/components/atoms/SelectSearch"
 import { Card } from "@/components/molecules/Card"
 import { StatCard } from "@/components/molecules/StatCard"
 import { PageHeader } from "@/components/molecules/PageHeader"
@@ -44,6 +44,11 @@ type StoreUnitGroup = {
   source: "satuan" | "paket"
   packageName: string | null
   units: StorageIncomingUnit[]
+}
+
+// Judul grup pada modal simpan: paket → nama paket, satuan → nama instrumen.
+function groupTitle(g: StoreUnitGroup): string {
+  return (g.source === "paket" ? g.packageName : g.units[0]?.instrument) ?? "—"
 }
 
 function formatDate(value: string | null) {
@@ -103,7 +108,13 @@ export default function StorageSterilPage() {
   // Modal simpan ke rak.
   const [active, setActive] = useState<StorageIncomingOrder | null>(null)
   const [rackById, setRackById] = useState<Record<number, string>>({})
-  const [setAll, setSetAll] = useState("")
+  // Grup instrumen yang sedang dipilih — target dari scan rak berikutnya.
+  const [selectedKey, setSelectedKey] = useState<string | null>(null)
+  // Isi field scan label rak (diketik scanner gun), pesan bila kode tak dikenali,
+  // dan konfirmasi scan terakhir yang berhasil terpasang.
+  const [scanInput, setScanInput] = useState("")
+  const [scanError, setScanError] = useState<string | null>(null)
+  const [scanOk, setScanOk] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   // Foto instrumen yang sedang di-zoom (klik thumbnail) — null = tidak ada.
@@ -139,12 +150,6 @@ export default function StorageSterilPage() {
     }
   }
 
-  // Opsi untuk SelectSearch lokasi rak (value = nama rak, disimpan sebagai rack_code).
-  const rackSelectOptions = useMemo(
-    () => rackOptions.map((r) => ({ value: r.name, label: r.name })),
-    [rackOptions],
-  )
-
   function refresh() {
     dispatch(fetchStorageIncoming())
     dispatch(fetchProductionStorageIncoming())
@@ -156,7 +161,10 @@ export default function StorageSterilPage() {
     loadRackOptions()
     setActive(order)
     setError(null)
-    setSetAll("")
+    setSelectedKey(null)
+    setScanInput("")
+    setScanError(null)
+    setScanOk(null)
     const init: Record<number, string> = {}
     order.units.forEach((u) => {
       init[u.id] = u.rack_code ?? ""
@@ -164,15 +172,70 @@ export default function StorageSterilPage() {
     setRackById(init)
   }
 
-  function applyAll() {
-    if (!active || !setAll.trim()) return
-    setRackById((prev) => {
-      const next = { ...prev }
-      active.units.forEach((u) => {
-        if (!u.stored) next[u.id] = setAll.trim()
-      })
-      return next
-    })
+  // Unit modal dikelompokkan: paket (per package_name) jadi satu grup → satu rak.
+  // Satuan dengan JENIS instrumen yang sama juga digabung jadi satu grup → satu rak
+  // (karena akan disimpan di rak yang sama).
+  const unitGroups = useMemo<StoreUnitGroup[]>(() => {
+    if (!active) return []
+    const groups: StoreUnitGroup[] = []
+    const byKey = new Map<string, StoreUnitGroup>()
+    for (const u of active.units) {
+      // Paket → gabung per nama paket; satuan → gabung per jenis instrumen.
+      const key =
+        u.source === "paket"
+          ? `paket|${u.package_name ?? "Paket"}`
+          : `satuan|${u.instrument ?? `#${u.id}`}`
+      let g = byKey.get(key)
+      if (!g) {
+        g = {
+          key,
+          source: u.source,
+          packageName: u.source === "paket" ? u.package_name ?? "Paket" : null,
+          units: [],
+        }
+        byKey.set(key, g)
+        groups.push(g)
+      }
+      g.units.push(u)
+    }
+    return groups
+  }, [active])
+
+  // Nama instrumen yang sedang dipilih — target scan berikutnya.
+  const selectedTitle = useMemo(() => {
+    const g = unitGroups.find((x) => x.key === selectedKey)
+    return g ? groupTitle(g) : null
+  }, [unitGroups, selectedKey])
+
+  // Hasil scan label rak. Scanner gun (Putian U18-W) bekerja seperti keyboard:
+  // isi barcode "diketik" ke field lalu ditutup Enter → submit form ini. Alurnya:
+  // klik instrumen dulu, baru scan raknya — rak hanya masuk ke grup yang sedang
+  // dipilih. Label berisi NAMA rak persis seperti di Master Rak; pencocokan
+  // mengabaikan beda kapital & spasi berlebih. Diketik manual pun tetap jalan.
+  function handleScan(e: React.FormEvent) {
+    e.preventDefault()
+    const text = scanInput.trim()
+    if (!text) return
+    setScanInput("")
+
+    const group = unitGroups.find((g) => g.key === selectedKey)
+    if (!group) {
+      setScanOk(null)
+      setScanError("Klik dulu instrumen yang mau disimpan, baru scan raknya.")
+      return
+    }
+
+    const norm = (s: string) => s.trim().toLowerCase().replace(/\s+/g, " ")
+    const match = rackOptions.find((r) => norm(r.name) === norm(text))
+    if (!match) {
+      setScanOk(null)
+      setScanError(`Kode "${text}" tidak cocok dengan rak mana pun.`)
+      return
+    }
+
+    setScanError(null)
+    setGroupRack(group, match.name)
+    setScanOk(`${groupTitle(group)} → ${match.name}`)
   }
 
   // Set satu lokasi rak untuk semua unit (belum tersimpan) dalam satu grup/paket.
@@ -208,35 +271,6 @@ export default function StorageSterilPage() {
       setSaving(false)
     }
   }
-
-  // Unit modal dikelompokkan: paket (per package_name) jadi satu grup → satu rak.
-  // Satuan dengan JENIS instrumen yang sama juga digabung jadi satu grup → satu rak
-  // (karena akan disimpan di rak yang sama).
-  const unitGroups = useMemo<StoreUnitGroup[]>(() => {
-    if (!active) return []
-    const groups: StoreUnitGroup[] = []
-    const byKey = new Map<string, StoreUnitGroup>()
-    for (const u of active.units) {
-      // Paket → gabung per nama paket; satuan → gabung per jenis instrumen.
-      const key =
-        u.source === "paket"
-          ? `paket|${u.package_name ?? "Paket"}`
-          : `satuan|${u.instrument ?? `#${u.id}`}`
-      let g = byKey.get(key)
-      if (!g) {
-        g = {
-          key,
-          source: u.source,
-          packageName: u.source === "paket" ? u.package_name ?? "Paket" : null,
-          units: [],
-        }
-        byKey.set(key, g)
-        groups.push(g)
-      }
-      g.units.push(u)
-    }
-    return groups
-  }, [active])
 
   const q = search.trim().toLowerCase()
   const incomingFiltered = useMemo(() => {
@@ -611,23 +645,43 @@ export default function StorageSterilPage() {
       >
         {active && (
           <div className="space-y-4">
-            {/* Set rak untuk semua unit sekaligus */}
-            <div className="space-y-1.5 rounded-lg border border-gray-200 bg-gray-50 px-4 py-3">
-              <Label htmlFor="rack-all">Pilih Lokasi Rak untuk Semua Instrumen</Label>
-              <div className="flex gap-2">
-                <SelectSearch
-                  options={rackSelectOptions}
-                  value={setAll}
-                  onChange={setSetAll}
-                  loading={rackOptionsLoading}
-                  placeholder="— Pilih rak —"
-                  searchPlaceholder="Cari rak..."
-                  className="flex-1"
+            {/* Jalur tunggal pengisian rak: klik instrumen di bawah, lalu scan
+                label raknya. Field ini yang menangkap ketikan scanner gun —
+                fokus otomatis agar bisa langsung ditembak tanpa klik dulu. */}
+            <div className="space-y-2 rounded-lg border border-gray-200 bg-gray-50 px-4 py-3">
+              <Label htmlFor="rack-scan">Scan Label Rak</Label>
+              <p className="text-xs text-gray-500">
+                {selectedTitle ? (
+                  <>
+                    Instrumen terpilih: <span className="font-semibold text-gray-700">{selectedTitle}</span>.
+                    Sekarang tembak label raknya.
+                  </>
+                ) : (
+                  "Klik dulu instrumen di bawah, lalu tembak label raknya."
+                )}
+              </p>
+
+              <form onSubmit={handleScan} className="relative">
+                <ScanLine className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+                <Input
+                  id="rack-scan"
+                  autoFocus
+                  value={scanInput}
+                  onChange={(e) => setScanInput(e.target.value)}
+                  placeholder={
+                    selectedTitle ? "Tembak label rak dengan scanner..." : "Pilih instrumen dulu..."
+                  }
+                  className="pl-9"
                 />
-                <Button type="button" variant="outline" onClick={applyAll} disabled={!setAll.trim()}>
-                  Terapkan
-                </Button>
-              </div>
+              </form>
+
+              {scanError && <p className="text-xs text-red-600">{scanError}</p>}
+              {!scanError && scanOk && (
+                <p className="inline-flex items-center gap-1 text-xs font-medium text-green-700">
+                  <MapPin className="h-3 w-3" />
+                  <span className="font-semibold">{scanOk}</span> tersimpan.
+                </p>
+              )}
             </div>
 
             {/* Daftar unit + rak. Satu rak per grup: paket per nama paket,
@@ -639,19 +693,36 @@ export default function StorageSterilPage() {
                 const allStored = !firstUnstored
                 const groupRack = firstUnstored ? rackById[firstUnstored.id] ?? "" : g.units[0]?.rack_code ?? ""
                 const isPaket = g.source === "paket"
-                const title = isPaket ? g.packageName : g.units[0]?.instrument ?? "—"
+                const title = groupTitle(g)
                 // Paket → gambar SET (katalog); satuan → gambar instrumen. Fallback komponen pertama.
                 const photo = isPaket
                   ? g.units[0]?.package_image ?? g.units[0]?.image_url ?? null
                   : g.units[0]?.image_url ?? null
+                const selected = selectedKey === g.key
                 return (
-                  <div key={g.key} className="rounded-lg border border-gray-200 px-3 py-2.5">
+                  <div
+                    key={g.key}
+                    // Grup yang sudah tersimpan tidak bisa dipilih — raknya tak bisa diubah lagi.
+                    onClick={allStored ? undefined : () => setSelectedKey(g.key)}
+                    className={
+                      "rounded-lg border px-3 py-2.5 transition-colors " +
+                      (allStored
+                        ? "border-gray-200"
+                        : selected
+                          ? "cursor-pointer border-[#075489] bg-[#075489]/5 ring-1 ring-[#075489]"
+                          : "cursor-pointer border-gray-200 hover:border-[#075489]/40 hover:bg-gray-50")
+                    }
+                  >
                     <div className="flex flex-wrap items-center gap-2">
                       {/* Foto set/instrumen menggantikan ikon; klik untuk zoom. Fallback ke ikon bila tak ada foto. */}
                       {photo ? (
                         <button
                           type="button"
-                          onClick={() => setZoom({ url: photo, name: title ?? "Instrumen" })}
+                          onClick={(e) => {
+                            // Jangan ikut memilih grup — ini cuma memperbesar foto.
+                            e.stopPropagation()
+                            setZoom({ url: photo, name: title ?? "Instrumen" })
+                          }}
                           title="Klik untuk perbesar"
                           className="group relative h-7 w-7 shrink-0 cursor-zoom-in overflow-hidden rounded-md border border-gray-200"
                         >
@@ -671,8 +742,8 @@ export default function StorageSterilPage() {
                       <Badge variant={isPaket ? "info" : "default"}>{isPaket ? "Paket" : "Satuan"}</Badge>
                       <span className="text-sm font-medium text-gray-800">{title}</span>
                       <span className="text-xs text-gray-400">{g.units.length} unit</span>
-                      {/* Lokasi rak — sejajar judul di desktop; full-width di bawah pada mobile. */}
-                      <div className="ml-auto w-full sm:w-auto">
+                      {/* Lokasi rak — hanya terisi lewat scan, tidak bisa dipilih manual. */}
+                      <div className="ml-auto">
                         {allStored ? (
                           <Badge variant="success">
                             <span className="inline-flex items-center gap-1">
@@ -680,18 +751,17 @@ export default function StorageSterilPage() {
                               {groupRack || "Tersimpan"}
                             </span>
                           </Badge>
+                        ) : groupRack ? (
+                          <Badge variant="info">
+                            <span className="inline-flex items-center gap-1">
+                              <MapPin className="h-3 w-3" />
+                              {groupRack}
+                            </span>
+                          </Badge>
                         ) : (
-                          <div className="w-full sm:w-56">
-                            <SelectSearch
-                              options={rackSelectOptions}
-                              value={groupRack}
-                              onChange={(v) => setGroupRack(g, v)}
-                              loading={rackOptionsLoading}
-                              placeholder={isPaket ? "— Pilih rak paket —" : "— Pilih rak —"}
-                              searchPlaceholder="Cari rak..."
-                              triggerClassName="py-1.5 text-xs"
-                            />
-                          </div>
+                          <span className="text-xs text-gray-400">
+                            {selected ? "Scan raknya sekarang" : "Belum ada rak"}
+                          </span>
                         )}
                       </div>
                     </div>
@@ -705,7 +775,11 @@ export default function StorageSterilPage() {
                           {u.image_url && (
                             <button
                               type="button"
-                              onClick={() => setZoom({ url: u.image_url as string, name: u.instrument ?? u.code ?? "Instrumen" })}
+                              onClick={(e) => {
+                                // Jangan ikut memilih grup — ini cuma memperbesar foto.
+                                e.stopPropagation()
+                                setZoom({ url: u.image_url as string, name: u.instrument ?? u.code ?? "Instrumen" })
+                              }}
                               title="Klik untuk perbesar"
                               className="h-4 w-4 shrink-0 cursor-zoom-in overflow-hidden rounded-sm border border-gray-200"
                             >
