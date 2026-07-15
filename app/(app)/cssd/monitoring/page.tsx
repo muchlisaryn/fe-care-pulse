@@ -76,11 +76,11 @@ const incomingStatusVariant: Record<IncomingStatus, "warning" | "default"> = {
 }
 
 // Warna garis kiri kartu per tahap order — konsisten dengan tracking status:
-// Order Masuk=kuning-amber, Cleaning=kuning, Packaging=ungu (di CleaningTab),
-// Distribusi=biru, Dikembalikan=tanpa warna (netral), Dibatalkan=merah.
+// Order Masuk=tanpa warna (netral), Cleaning=kuning, Packaging=ungu (di CleaningTab),
+// Distribusi=tanpa warna (netral), Dikembalikan=tanpa warna (netral), Dibatalkan=merah.
 const STATUS_BORDER: Record<string, string> = {
-  diajukan: "border-l-amber-400",
-  dipinjam: "border-l-blue-500",
+  diajukan: "border-l-transparent",
+  dipinjam: "border-l-transparent",
   dikembalikan: "border-l-transparent",
   dibatalkan: "border-l-red-400",
 }

@@ -766,7 +766,7 @@ export function ProductionPackagingTab({
                 <Printer className="mr-1.5 h-4 w-4" />
                 {printing
                   ? "Mencetak..."
-                  : `Cetak Label${selectedLabels.size > 0 ? ` (${selectedLabels.size})` : " (Semua)"}`}
+                  : `Cetak Label${selectedLabels.size > 0 ? ` (${selectedLabels.size})` : ""}`}
               </Button>
             </div>
           </div>
@@ -840,7 +840,7 @@ export function ProductionPackagingTab({
                           <td className="py-0.5 font-medium text-gray-800">{formatDate(label.packaged_at)}</td>
                         </tr>
                         <tr>
-                          <td className="py-0.5 pr-2 text-gray-500">Tanggal Kadaluarsa</td>
+                          <td className="py-0.5 pr-2 text-gray-500">Tanggal Kadaluwarsa</td>
                           <td className="py-0.5 font-medium text-gray-800">{formatDate(label.expiry_date)}</td>
                         </tr>
                       </tbody>
