@@ -28,15 +28,6 @@ function nowLocalInput(): string {
   return d.toISOString().slice(0, 16)
 }
 
-// Tanggal lokal (YYYY-MM-DD) sekarang + `days` hari, untuk <input type="date">.
-function plusDaysDateInput(days: number): string {
-  const d = new Date()
-  d.setDate(d.getDate() + days)
-  d.setMinutes(d.getMinutes() - d.getTimezoneOffset())
-  return d.toISOString().slice(0, 10)
-}
-
-
 function errMsg(e: unknown): string {
   const x = e as { response?: { data?: { message?: string } } }
   return x.response?.data?.message ?? "Terjadi kesalahan."
@@ -74,7 +65,7 @@ const METHOD_DEFAULTS: Record<string, { temperature: string; duration_minutes: s
   plasma: { temperature: "50", duration_minutes: "47" },
   panas_kering: { temperature: "170", duration_minutes: "60" },
 }
-const emptyForm = { machine: "", method: "uap", cycle_number: "", temperature: "", duration_minutes: "", sterilized_at: "", expiry_date: "", note: "" }
+const emptyForm = { machine: "", method: "uap", cycle_number: "", temperature: "", duration_minutes: "", sterilized_at: "", note: "" }
 
 /**
  * Tab Sterilisasi pipeline PRODUKSI. Beberapa item "Siap Disterilkan" (satuan/paket)
@@ -166,8 +157,6 @@ export function ProductionSterilizationTab({
     setForm({
       ...emptyForm,
       sterilized_at: nowLocalInput(),
-      // Kedaluwarsa steril otomatis: 7 hari dari sekarang (bisa diubah operator).
-      expiry_date: plusDaysDateInput(7),
       temperature: preset?.temperature ?? "",
       duration_minutes: preset?.duration_minutes ?? "",
     })
@@ -198,7 +187,6 @@ export function ProductionSterilizationTab({
         temperature: num(form.temperature),
         duration_minutes: num(form.duration_minutes),
         sterilized_at: new Date(form.sterilized_at).toISOString(),
-        expiry_date: form.expiry_date || null,
         note: form.note.trim() || null,
       })
       setDone({ batch: res.data?.data?.code ?? "—", count: selectedReady.length })
@@ -551,11 +539,6 @@ export function ProductionSterilizationTab({
             <div className="space-y-1.5">
               <Label htmlFor="pstr-at">Waktu Sterilisasi *</Label>
               <Input id="pstr-at" type="datetime-local" value={form.sterilized_at} onChange={(e) => setForm((f) => ({ ...f, sterilized_at: e.target.value }))} />
-            </div>
-            <div className="space-y-1.5 sm:col-span-2">
-              <Label htmlFor="pstr-expiry">Tanggal Kedaluwarsa Steril</Label>
-              <Input id="pstr-expiry" type="date" min={form.sterilized_at ? form.sterilized_at.slice(0, 10) : undefined} value={form.expiry_date} onChange={(e) => setForm((f) => ({ ...f, expiry_date: e.target.value }))} />
-              <p className="text-xs text-gray-400">Default 7 hari dari sekarang — bisa diubah.</p>
             </div>
           </div>
 

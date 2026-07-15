@@ -19,6 +19,9 @@ export function getPrintServerUrl(): string {
 export type CssdLabelPayload = {
   kode_produksi: string
   nama_instrumen: string | null
+  // No. lot/batch indikator kimia internal. Print server harus mencetak field ini
+  // — bila belum mendukungnya, nilainya diabaikan & tak muncul di kertas.
+  no_lot: string | null
   petugas_pengemasan: string | null
   tanggal_steril: string | null
   tanggal_kadaluarsa: string | null

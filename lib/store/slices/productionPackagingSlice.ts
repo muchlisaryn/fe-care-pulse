@@ -35,7 +35,10 @@ export type ProdPackagingBatch = {
   completed_at: string | null
   operator: string | null
   chemical_indicator: string | null // = No. Lot indikator kimia
+  packaging_type_id: number | null // FK master jenis kemasan
+  packaging_type_label: string | null // nama jenis kemasan dari master
   packaged_at: string | null
+  expiry_date: string | null // tgl kedaluwarsa steril, dari masa simpan jenis kemasan
   units_count: number
   items: ProdPackagingItem[]
   units: ProdPackagingUnit[]
@@ -49,12 +52,21 @@ export type ProdSterilLabelItem = {
   package_name: string | null
 }
 
+// Satu pilihan jenis kemasan dari master — masa simpannya menentukan tgl
+// kedaluwarsa steril. `value` = id master jenis kemasan.
+export type PackagingType = {
+  value: number
+  label: string
+  shelf_life_days: number
+}
+
 // Payload label sterilisasi yang dikembalikan endpoint complete.
 export type ProdSterilLabel = {
   batch: string
   packaging_code: string
   set_name: string
   packer: string | null
+  packaging_type: string | null
   packaged_at: string
   expiry_date: string
   chemical_indicator: string | null

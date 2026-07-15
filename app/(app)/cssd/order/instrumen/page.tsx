@@ -628,7 +628,7 @@ export default function OrderInstrumenPage() {
 
   const columns: Column<Order>[] = [
     {
-      header: "Tanggal Pinjam",
+      header: "Tanggal dan Waktu Pinjam",
       cell: (row) => {
         const f = formatDateWithTime(row.order_date, row.order_time)
         return f ? <span className="text-sm text-gray-600">{f}</span> : dash
@@ -725,7 +725,6 @@ export default function OrderInstrumenPage() {
                 )}
                 <Input
                   id="order-search"
-                  placeholder="Kode order, peminjam, no. RM, nama pasien, ruangan..."
                   value={searchInput}
                   onChange={(e) => setSearchInput(e.target.value)}
                   className={"pl-9 " + (loading ? "cursor-not-allowed" : "")}

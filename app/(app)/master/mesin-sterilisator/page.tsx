@@ -28,7 +28,6 @@ const emptyForm = {
   location: "",
   temperature: "",
   duration_minutes: "",
-  sterile_shelf_life_days: "",
   status: "aktif",
   note: "",
 }
@@ -69,7 +68,6 @@ export default function MasterSterilizerMachinePage() {
       location: row.location ?? "",
       temperature: row.temperature ?? "",
       duration_minutes: row.duration_minutes?.toString() ?? "",
-      sterile_shelf_life_days: row.sterile_shelf_life_days?.toString() ?? "",
       status: row.status,
       note: row.note ?? "",
     })
@@ -87,7 +85,6 @@ export default function MasterSterilizerMachinePage() {
         location: form.location.trim() || null,
         temperature: num(form.temperature),
         duration_minutes: num(form.duration_minutes),
-        sterile_shelf_life_days: num(form.sterile_shelf_life_days),
         status: form.status,
         note: form.note.trim() || null,
       }
@@ -145,15 +142,6 @@ export default function MasterSterilizerMachinePage() {
     {
       header: "Durasi",
       cell: (row) => <span className="text-gray-700">{fmtValue(row.duration_minutes, " mnt")}</span>,
-      className: "w-28",
-    },
-    {
-      header: "Batas Steril",
-      cell: (row) => (
-        <span className="text-gray-700">
-          {row.sterile_shelf_life_days === null ? "—" : `${row.sterile_shelf_life_days} hari`}
-        </span>
-      ),
       className: "w-28",
     },
     {
@@ -293,20 +281,6 @@ export default function MasterSterilizerMachinePage() {
                 onChange={(e) => setForm((f) => ({ ...f, duration_minutes: e.target.value }))}
               />
             </div>
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="sm-shelf-life">Batas Steril (hari)</Label>
-            <Input
-              id="sm-shelf-life"
-              type="number"
-              min={1}
-              placeholder="Contoh: 30"
-              value={form.sterile_shelf_life_days}
-              onChange={(e) => setForm((f) => ({ ...f, sterile_shelf_life_days: e.target.value }))}
-            />
-            <p className="text-xs text-gray-400">
-              Masa simpan steril untuk alat yang disterilkan di mesin ini.
-            </p>
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="sm-status">Status</Label>

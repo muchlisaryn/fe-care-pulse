@@ -6,6 +6,7 @@ import { Button } from "@/components/atoms/Button"
 import { Badge } from "@/components/atoms/Badge"
 import { Input } from "@/components/atoms/Input"
 import { Label } from "@/components/atoms/Label"
+import { Select } from "@/components/atoms/Select"
 import { SelectSearch } from "@/components/atoms/SelectSearch"
 import { Barcode } from "@/components/atoms/Barcode"
 import { Modal } from "@/components/molecules/Modal"
@@ -13,6 +14,7 @@ import { useToast } from "@/components/molecules/ToastProvider"
 import api from "@/lib/axios"
 import { isEscposPrinter, printCssdLabels, type CssdLabelPayload } from "@/lib/printServer"
 import type {
+  PackagingType,
   ProdPackagingBatch,
   ProdPackagingUnit,
   ProdSterilLabel,
@@ -120,11 +122,19 @@ function paketBreakdown(batch: ProdPackagingBatch, packageName: string) {
   return [...map.values()]
 }
 
+/** Tgl kedaluwarsa steril bila dikemas hari ini dengan masa simpan `days`. */
+function expiryPreview(days: number) {
+  const d = new Date()
+  d.setDate(d.getDate() + days)
+  return d.toLocaleDateString("id-ID", { day: "2-digit", month: "short", year: "numeric" })
+}
+
 /**
  * Tab "Inspection & Packaging" pipeline Produksi. Petugas memindai barcode tiap
  * unit untuk memverifikasi komponen set (checklist digital), mencatat nomor lot
- * indikator kimia, lalu menyelesaikan → sistem mencetak Label Barcode Sterilisasi
- * (nama set, batch, expiry otomatis, ID petugas) & batch jadi "Siap Disterilkan".
+ * indikator kimia & memilih jenis kemasan (masa simpannya menentukan tgl
+ * kedaluwarsa steril), lalu menyelesaikan → sistem mencetak Label Barcode
+ * Sterilisasi & batch jadi "Siap Disterilkan".
  */
 export function ProductionPackagingTab({
   items,
@@ -140,6 +150,9 @@ export function ProductionPackagingTab({
   const [scanCode, setScanCode] = useState("")
   const [scanMsg, setScanMsg] = useState<{ type: "ok" | "err"; text: string } | null>(null)
   const [chemIndicator, setChemIndicator] = useState("")
+  // Jenis kemasan terpilih — masa simpannya menentukan tgl kedaluwarsa steril.
+  const [packagingType, setPackagingType] = useState("")
+  const [types, setTypes] = useState<PackagingType[]>([])
   const [finishing, setFinishing] = useState(false)
   const [error, setError] = useState<string | null>(null)
   // Label hasil (muncul setelah selesai) untuk dicetak.
@@ -241,7 +254,8 @@ export function ProductionPackagingTab({
   const total = active?.units.length ?? 0
   const checked = inspected.size
   const allInspected = total > 0 && checked >= total
-  const canFinish = allInspected && chemIndicator.trim().length > 0 && !finishing
+  const canFinish = allInspected && chemIndicator.trim().length > 0 && packagingType !== "" && !finishing
+  const selectedType = types.find((t) => String(t.value) === packagingType) ?? null
   // Kata kunci pencarian per unit (filter checklist): cocokkan kode unit / nama instrumen.
   const query = scanCode.trim().toLowerCase()
   // Query cocok dengan kode batch (PRD / PKG) → tampilkan seluruh unit.
@@ -264,7 +278,20 @@ export function ProductionPackagingTab({
     setScanCode("")
     setScanMsg(null)
     setChemIndicator("")
+    setPackagingType(batch.packaging_type_id != null ? String(batch.packaging_type_id) : "")
     setError(null)
+    loadTypes()
+  }
+
+  /** Muat pilihan jenis kemasan aktif (+ masa simpannya) dari master — sekali saja. */
+  async function loadTypes() {
+    if (types.length > 0) return
+    try {
+      const res = await api.get("/master/packaging-types/options")
+      setTypes((res.data?.data ?? []) as PackagingType[])
+    } catch (e) {
+      setError(errMsg(e))
+    }
   }
 
   function toggleInspect(id: number) {
@@ -319,6 +346,7 @@ export function ProductionPackagingTab({
     try {
       const res = await api.post(`/master/packaging/${active.id}/complete`, {
         chemical_indicator: chemIndicator.trim(),
+        packaging_type_id: Number(packagingType),
       })
       setLabelViewOnly(false)
       setLabel(res.data?.data?.label as ProdSterilLabel)
@@ -379,6 +407,7 @@ export function ProductionPackagingTab({
       .map((e) => ({
         kode_produksi: label.batch,
         nama_instrumen: e.title,
+        no_lot: label.chemical_indicator,
         petugas_pengemasan: label.packer ?? null,
         tanggal_steril: label.packaged_at,
         tanggal_kadaluarsa: label.expiry_date,
@@ -514,16 +543,10 @@ export function ProductionPackagingTab({
                   )}
                   <div className="mt-1 flex flex-wrap gap-x-4 gap-y-0.5 text-xs text-gray-500">
                     {done ? (
-                      <>
-                        <span>Dikemas: {formatDateTime(batch.packaged_at)}</span>
-                        {(batch.completed_by ?? batch.operator) && (
-                          <span>oleh {batch.completed_by ?? batch.operator}</span>
-                        )}
-                      </>
+                      <span>Dikemas: {formatDateTime(batch.packaged_at)}</span>
                     ) : (
                       <span>Selesai cleaning: {formatDateTime(batch.processed_at)}</span>
                     )}
-                    <span>{batch.units_count} unit</span>
                   </div>
                 </div>
               </div>
@@ -566,15 +589,8 @@ export function ProductionPackagingTab({
         size="lg"
         footer={
           <div className="flex w-full items-center justify-between gap-3">
-            {error ? (
-              <p className="text-sm text-red-600">{error}</p>
-            ) : (
-              <span className="text-xs text-gray-400">
-                Diperiksa {checked}/{total} unit
-                {!allInspected ? ` · kurang ${total - checked}` : ""}
-              </span>
-            )}
-            <div className="flex shrink-0 gap-2">
+            {error ? <p className="text-sm text-red-600">{error}</p> : null}
+            <div className="flex shrink-0 gap-2 ml-auto">
               <Button variant="outline" onClick={() => setActive(null)} disabled={finishing}>
                 Batal
               </Button>
@@ -703,9 +719,28 @@ export function ProductionPackagingTab({
                 onChange={(e) => setChemIndicator(e.target.value)}
                 placeholder="mis. CI-LOT-20260702"
               />
-              <p className="text-xs text-gray-400">
-                Nomor lot indikator kimia yang dimasukkan ke dalam kemasan.
-              </p>
+            </div>
+
+            {/* Jenis kemasan — masa simpannya menentukan tgl kedaluwarsa steril */}
+            <div className="space-y-1.5">
+              <Label htmlFor="pkg-type">Jenis Kemasan *</Label>
+              <Select
+                id="pkg-type"
+                value={packagingType}
+                onChange={(e) => setPackagingType(e.target.value)}
+              >
+                <option value="">Pilih jenis kemasan...</option>
+                {types.map((t) => (
+                  <option key={t.value} value={t.value}>
+                    {t.label} — {t.shelf_life_days} hari
+                  </option>
+                ))}
+              </Select>
+              {selectedType && (
+                <p className="text-xs text-gray-400">
+                  Kedaluwarsa steril: {expiryPreview(selectedType.shelf_life_days)}
+                </p>
+              )}
             </div>
           </div>
         )}
@@ -719,12 +754,7 @@ export function ProductionPackagingTab({
         size="lg"
         footer={
           <div className="flex w-full items-center justify-between gap-3">
-            {!selectedPrinterId ? (
-              <span className="text-xs text-amber-600">Pilih printer dulu untuk mencetak.</span>
-            ) : (
-              <span />
-            )}
-            <div className="flex shrink-0 gap-2">
+            <div className="flex shrink-0 gap-2 ml-auto">
               <Button variant="outline" onClick={closeLabel} disabled={printing}>
                 Tutup
               </Button>
@@ -762,11 +792,9 @@ export function ProductionPackagingTab({
             <div>
               <div className="mb-2 flex items-center justify-between gap-2">
                 <p className="text-xs font-semibold uppercase tracking-wide text-gray-400">View Label</p>
-                <p className="text-xs text-gray-400">
-                  {selectedLabels.size > 0
-                    ? `${selectedLabels.size} dipilih`
-                    : "Klik kartu untuk pilih — kosong = cetak semua"}
-                </p>
+                {selectedLabels.size > 0 && (
+                  <p className="text-xs text-gray-400">{selectedLabels.size} dipilih</p>
+                )}
               </div>
               <div className="flex flex-wrap gap-3">
                 {labelEntries.map((e, i) => {
@@ -799,6 +827,10 @@ export function ProductionPackagingTab({
                     <div className="mt-1 text-sm font-semibold text-gray-900">{e.title}</div>
                     <table className="mt-2 w-full text-left text-[10px]">
                       <tbody>
+                        <tr>
+                          <td className="py-0.5 pr-2 text-gray-500">No. Lot / Batch</td>
+                          <td className="py-0.5 font-medium text-gray-800">{label.chemical_indicator ?? "—"}</td>
+                        </tr>
                         <tr>
                           <td className="py-0.5 pr-2 text-gray-500">Petugas Pengemasan</td>
                           <td className="py-0.5 font-medium text-gray-800">{label.packer ?? "—"}</td>
@@ -866,6 +898,8 @@ export function ProductionPackagingTab({
               <Info label="Diproses oleh" value={historyBatch.processed_by} />
               <Info label="Dikemas oleh" value={historyBatch.completed_by ?? historyBatch.operator} />
               <Info label="Waktu Dikemas" value={formatDateTime(historyBatch.packaged_at)} />
+              <Info label="Jenis Kemasan" value={historyBatch.packaging_type_label} />
+              <Info label="Tgl Kedaluwarsa Steril" value={historyBatch.expiry_date} />
             </div>
 
             <div className="space-y-1.5">

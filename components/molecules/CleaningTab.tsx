@@ -423,12 +423,8 @@ export function CleaningTab({
               <span className="text-xs text-gray-400">Batch dibatalkan.</span>
             ) : washedActive ? (
               <span className="text-xs text-gray-400">Pencucian selesai.</span>
-            ) : (
-              <span className="text-xs text-gray-400">
-                Isi data pencucian, lalu Simpan. Tandai Selesai dari kartu untuk lanjut ke packaging.
-              </span>
-            )}
-            <div className="flex shrink-0 justify-end gap-2">
+            ) : null}
+            <div className="flex shrink-0 justify-end gap-2 sm:ml-auto">
               <Button variant="outline" onClick={() => setActive(null)}>
                 Tutup
               </Button>
@@ -560,17 +556,11 @@ export function CleaningTab({
                   error={tempBelowStd}
                   aria-invalid={tempBelowStd}
                 />
-                {activeMachine &&
-                  stdText(activeMachine.temperature, "°C") &&
-                  (tempBelowStd ? (
-                    <p className="text-xs text-red-600">
-                      Di bawah standar mesin ({stdText(activeMachine.temperature, "°C")}).
-                    </p>
-                  ) : (
-                    <p className="text-xs text-gray-400">
-                      Standar mesin {stdText(activeMachine.temperature, "°C")} (minimum).
-                    </p>
-                  ))}
+                {activeMachine && stdText(activeMachine.temperature, "°C") && tempBelowStd && (
+                  <p className="text-xs text-red-600">
+                    Di bawah standar mesin ({stdText(activeMachine.temperature, "°C")}).
+                  </p>
+                )}
               </div>
               <div className="space-y-1.5">
                 <Label htmlFor="wash-time">
@@ -583,7 +573,6 @@ export function CleaningTab({
                   onChange={(e) => setWashedAt(e.target.value)}
                   disabled={washedActive}
                 />
-                <p className="text-xs text-gray-400">Terisi otomatis jam saat ini — bisa diubah.</p>
               </div>
               <div className="space-y-1.5">
                 <Label htmlFor="wash-duration">
@@ -600,17 +589,11 @@ export function CleaningTab({
                   error={durationBelowStd}
                   aria-invalid={durationBelowStd}
                 />
-                {activeMachine &&
-                  stdText(activeMachine.duration_minutes, " mnt") &&
-                  (durationBelowStd ? (
-                    <p className="text-xs text-red-600">
-                      Di bawah standar mesin ({stdText(activeMachine.duration_minutes, " mnt")}).
-                    </p>
-                  ) : (
-                    <p className="text-xs text-gray-400">
-                      Standar mesin {stdText(activeMachine.duration_minutes, " mnt")} (minimum).
-                    </p>
-                  ))}
+                {activeMachine && stdText(activeMachine.duration_minutes, " mnt") && durationBelowStd && (
+                  <p className="text-xs text-red-600">
+                    Di bawah standar mesin ({stdText(activeMachine.duration_minutes, " mnt")}).
+                  </p>
+                )}
               </div>
               <div className="space-y-1.5 sm:col-span-2">
                 <Label htmlFor="wash-detergent">
@@ -949,6 +932,18 @@ function CleaningOrderCard({
                 </p>
               )}
 
+              {/* Tanggal mengikuti tahap batch — seperti kartu tab Packaging/Sterilisasi. */}
+              <div className="mt-1 flex flex-wrap gap-x-4 gap-y-0.5 text-xs text-gray-500">
+                {canceled ? (
+                  <span>Dibatalkan: {formatDateTime(order.washing?.canceled_at ?? null)}</span>
+                ) : washed ? (
+                  <span>Selesai cuci: {formatDateTime(order.washing?.completed_at ?? null)}</span>
+                ) : order.washing?.washed_at ? (
+                  <span>Mulai cuci: {formatDateTime(order.washing.washed_at)}</span>
+                ) : (
+                  <span>Selesai produksi: {formatDateTime(order.processed_at)}</span>
+                )}
+              </div>
             </div>
           </div>
         </button>

@@ -593,14 +593,8 @@ export default function StorageSterilPage() {
         size="lg"
         footer={
           <div className="flex w-full flex-col items-stretch gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
-            {error ? (
-              <p className="text-sm text-red-600">{error}</p>
-            ) : (
-              <span className="text-xs text-gray-400">
-                Pilih lokasi rak tiap instrumen. Bila semua tersimpan, order masuk gudang steril.
-              </span>
-            )}
-            <div className="flex shrink-0 justify-end gap-2">
+            {error ? <p className="text-sm text-red-600">{error}</p> : null}
+            <div className="flex shrink-0 justify-end gap-2 sm:ml-auto">
               <Button variant="outline" onClick={() => setActive(null)} disabled={saving}>
                 Batal
               </Button>

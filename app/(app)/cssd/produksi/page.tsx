@@ -1,7 +1,7 @@
 "use client"
 
 import { Suspense, useEffect, useMemo, useState } from "react"
-import { useRouter, useSearchParams } from "next/navigation"
+import { useSearchParams } from "next/navigation"
 import { Trash2, Package, Search, ZoomIn } from "lucide-react"
 import { Button } from "@/components/atoms/Button"
 import { Input } from "@/components/atoms/Input"
@@ -74,7 +74,6 @@ function defaultDateRange(): { from: string; to: string } {
 const PRODUKSI_TABS: ProduksiTab[] = ["produksi", "cleaning", "packaging", "sterilization"]
 
 function ProduksiCssdPage() {
-  const router = useRouter()
   const searchParams = useSearchParams()
   const dispatch = useAppDispatch()
   const toast = useToast()
@@ -312,8 +311,12 @@ function ProduksiCssdPage() {
     setCleanView("proses")
     setPkgView("pending")
     setSterView("proses")
-    // Catat tab aktif di URL: /cssd/produksi (form) atau /cssd/produksi?tab=cleaning
-    router.replace(next === "produksi" ? "/cssd/produksi" : `/cssd/produksi?tab=${next}`, { scroll: false })
+    // Catat tab aktif di URL: /cssd/produksi (form) atau /cssd/produksi?tab=cleaning.
+    // Pakai history API, BUKAN router.replace: ganti tab murni state klien, sedangkan
+    // router.replace memicu navigasi server (RSC round-trip + proxy) sehingga URL baru
+    // berubah setelah request itu selesai. history.replaceState memperbaruinya seketika
+    // tanpa menjalankan ulang server — cara yang memang dianjurkan Next.js untuk ini.
+    window.history.replaceState(null, '', next === 'produksi' ? '/cssd/produksi' : `/cssd/produksi?tab=${next}`)
   }
 
   // Pratinjau / zoom gambar instrumen/paket di daftar produksi.
@@ -535,7 +538,6 @@ function ProduksiCssdPage() {
                     id="pipeline-search"
                     value={searchInput}
                     onChange={(e) => setSearchInput(e.target.value)}
-                    placeholder="Cari nama/kode instrument..."
                     className="pl-9"
                   />
                 </div>

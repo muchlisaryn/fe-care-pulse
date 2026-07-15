@@ -8,7 +8,6 @@ export type WasherMachine = {
   location: string | null
   temperature: string | null
   duration_minutes: number | null
-  sterile_shelf_life_days: number | null
   status: "aktif" | "nonaktif"
   note: string | null
   created_at: string
