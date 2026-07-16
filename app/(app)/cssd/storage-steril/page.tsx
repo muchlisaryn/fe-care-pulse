@@ -124,6 +124,19 @@ export default function StorageSterilPage() {
   // Status muat pilihan rak (animasi loading dropdown) + penanda sudah dimuat.
   const [rackOptionsLoading, setRackOptionsLoading] = useState(false)
   const rackLoadedRef = useRef(false)
+  const scanRef = useRef<HTMLInputElement>(null)
+  const scanTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  useEffect(() => () => {
+    if (scanTimerRef.current) clearTimeout(scanTimerRef.current)
+  }, [])
+
+  // Klik kartu instrumen memindahkan fokus keyboard ke kartu itu, sedangkan
+  // scanner gun mengetik seperti keyboard — tanpa ini ketikan barcode jatuh ke
+  // luar field dan Enter-nya tidak men-submit form scan.
+  useEffect(() => {
+    if (selectedKey) scanRef.current?.focus()
+  }, [selectedKey])
 
   // Selalu segarkan saat halaman dibuka agar unit yang baru selesai disterilkan
   // langsung muncul (tanpa perlu refresh manual). Data cache tetap tampil seketika
@@ -162,6 +175,7 @@ export default function StorageSterilPage() {
     setActive(order)
     setError(null)
     setSelectedKey(null)
+    if (scanTimerRef.current) clearTimeout(scanTimerRef.current)
     setScanInput("")
     setScanError(null)
     setScanOk(null)
@@ -207,16 +221,13 @@ export default function StorageSterilPage() {
     return g ? groupTitle(g) : null
   }, [unitGroups, selectedKey])
 
-  // Hasil scan label rak. Scanner gun (Putian U18-W) bekerja seperti keyboard:
-  // isi barcode "diketik" ke field lalu ditutup Enter → submit form ini. Alurnya:
-  // klik instrumen dulu, baru scan raknya — rak hanya masuk ke grup yang sedang
-  // dipilih. Label berisi NAMA rak persis seperti di Master Rak; pencocokan
-  // mengabaikan beda kapital & spasi berlebih. Diketik manual pun tetap jalan.
-  function handleScan(e: React.FormEvent) {
-    e.preventDefault()
-    const text = scanInput.trim()
-    if (!text) return
-    setScanInput("")
+  // Pasang rak ke grup yang sedang dipilih. Alurnya: klik instrumen dulu, baru
+  // scan raknya — rak hanya masuk ke grup yang sedang dipilih. Label berisi NAMA
+  // rak persis seperti di Master Rak; pencocokan mengabaikan beda kapital &
+  // spasi berlebih. Diketik manual pun tetap jalan.
+  function applyScan(text: string) {
+    const code = text.trim()
+    if (!code) return
 
     const group = unitGroups.find((g) => g.key === selectedKey)
     if (!group) {
@@ -226,16 +237,35 @@ export default function StorageSterilPage() {
     }
 
     const norm = (s: string) => s.trim().toLowerCase().replace(/\s+/g, " ")
-    const match = rackOptions.find((r) => norm(r.name) === norm(text))
+    const match = rackOptions.find((r) => norm(r.name) === norm(code))
     if (!match) {
       setScanOk(null)
-      setScanError(`Kode "${text}" tidak cocok dengan rak mana pun.`)
+      setScanError(`Kode "${code}" tidak cocok dengan rak mana pun.`)
       return
     }
 
+    setScanInput("")
     setScanError(null)
     setGroupRack(group, match.name)
     setScanOk(`${groupTitle(group)} → ${match.name}`)
+  }
+
+  // Scanner gun bekerja seperti keyboard: isi barcode "diketik" ke field. Sebagian
+  // unit menutupnya dengan Enter (→ submit form), tapi ada juga yang mengirim Tab
+  // atau tanpa penutup sama sekali — maka cocokkan juga sesaat setelah ketikan
+  // berhenti, supaya rak tetap nempel tanpa bergantung pada Enter.
+  function handleScanInput(value: string) {
+    setScanInput(value)
+    setScanError(null)
+    if (scanTimerRef.current) clearTimeout(scanTimerRef.current)
+    if (!value.trim()) return
+    scanTimerRef.current = setTimeout(() => applyScan(value), 400)
+  }
+
+  function handleScan(e: React.FormEvent) {
+    e.preventDefault()
+    if (scanTimerRef.current) clearTimeout(scanTimerRef.current)
+    applyScan(scanInput)
   }
 
   // Set satu lokasi rak untuk semua unit (belum tersimpan) dalam satu grup/paket.
@@ -665,9 +695,10 @@ export default function StorageSterilPage() {
                 <ScanLine className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
                 <Input
                   id="rack-scan"
+                  ref={scanRef}
                   autoFocus
                   value={scanInput}
-                  onChange={(e) => setScanInput(e.target.value)}
+                  onChange={(e) => handleScanInput(e.target.value)}
                   placeholder={
                     selectedTitle ? "Tembak label rak dengan scanner..." : "Pilih instrumen dulu..."
                   }
