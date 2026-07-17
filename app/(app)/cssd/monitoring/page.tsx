@@ -107,6 +107,8 @@ type ReturnUnit = {
 type ReturnOrder = {
   id: number
   code: string
+  /** No. transaksi (INV...) — baru terisi saat order diproses CSSD. */
+  code_transaction: string | null
   status: string
   borrowed_by: string | null
   room: { id: number; name: string } | null
@@ -119,6 +121,12 @@ type ReturnOrder = {
   distributed_to?: string | null
   items: ReturnUnit[]
   timeline?: TimelineEvent[]
+}
+
+// Kode untuk judul modal: no. order + no. transaksi. INV baru terbit saat order
+// diproses CSSD, jadi bisa saja belum ada.
+function titleCodes(order: ReturnOrder) {
+  return order.code_transaction ? `${order.code} (${order.code_transaction})` : order.code
 }
 
 function formatDate(value: string | null) {
@@ -357,14 +365,6 @@ function MonitoringCssd() {
   const [returnUnitSearch, setReturnUnitSearch] = useState("")
   // Konfirmasi sebelum simpan: pengembalian tidak bisa diedit / dibatalkan.
   const [confirmReturnOpen, setConfirmReturnOpen] = useState(false)
-  // Kode yang diketik / dipindai di dalam modal Pengembalian saat belum ada order
-  // termuat. Barcode scanner mengetik kode lalu menekan Enter → form ter-submit.
-  const [returnLookupCode, setReturnLookupCode] = useState("")
-  // Deteksi input dari scanner: scanner "mengetik" jauh lebih cepat dari manusia
-  // (< 40 ms antar karakter). Bila terdeteksi, kode dicari otomatis tanpa menunggu
-  // tombol Cari — berguna untuk scanner yang tidak mengirim Enter di akhir.
-  const scanTypedFastRef = useRef(false)
-  const lastKeystrokeAtRef = useRef(0)
 
   // Muat daftar kondisi (pilihan kondisi masuk) hanya saat modal Pengembalian
   // dibuka — bukan saat halaman dimuat — agar tidak mem-fetch sebelum dibutuhkan.
@@ -380,45 +380,7 @@ function MonitoringCssd() {
     setReturnDate(todayInput())
     setReturnCondById({})
     setReturnUnitSearch("")
-    setReturnLookupCode("")
-    scanTypedFastRef.current = false
-    lastKeystrokeAtRef.current = 0
   }
-
-  // Perubahan isi input scan: tandai apakah kecepatan ketiknya khas scanner.
-  function handleReturnLookupChange(value: string) {
-    const now = Date.now()
-    const gap = now - lastKeystrokeAtRef.current
-    lastKeystrokeAtRef.current = now
-
-    if (value.length <= 1) {
-      // Karakter pertama (atau input dikosongkan) — belum bisa dinilai.
-      scanTypedFastRef.current = false
-    } else if (gap < 40) {
-      scanTypedFastRef.current = true // beruntun sangat cepat → mesin, bukan manusia
-    } else if (gap > 300) {
-      scanTypedFastRef.current = false // jeda panjang → diketik manual
-    }
-
-    setReturnLookupCode(value)
-  }
-
-  // Auto-cari saat kode datang dari scanner: begitu aliran karakter berhenti
-  // (~200 ms), langsung lookup. Ketikan manual tidak ikut ter-trigger — tetap
-  // perlu Enter / tombol Cari.
-  useEffect(() => {
-    if (!returnOpen || returnOrder || lookupLoading) return
-    if (!scanTypedFastRef.current) return
-    const code = returnLookupCode.trim()
-    if (code.length < 4) return
-
-    const t = setTimeout(() => {
-      scanTypedFastRef.current = false
-      runLookup(code)
-    }, 200)
-    return () => clearTimeout(t)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [returnLookupCode, returnOpen, returnOrder, lookupLoading])
 
   // Cari order dari kode (nomor order ORD-xxx atau kode unit alat).
   async function runLookup(raw: string) {
@@ -1290,7 +1252,7 @@ function MonitoringCssd() {
         )}
       </Modal>
 
-      {/* Pengembalian: scan nomor order / kode unit, lalu cek kondisi per unit */}
+      {/* Pengembalian: order dimuat otomatis dari baris yang dipilih, lalu cek kondisi per unit */}
       <Modal
         open={returnOpen}
         onClose={() => {
@@ -1335,57 +1297,20 @@ function MonitoringCssd() {
         })()}
       >
         <div className="space-y-5">
-          {/* Belum ada order termuat: pindai barcode atau ketik kodenya manual.
-              Scanner mengetik kode + Enter → form ini ter-submit seperti pencarian biasa. */}
+          {/* Order dimuat otomatis saat modal dibuka — tampilkan progres / penyebab gagalnya. */}
           {!returnOrder && (
-            <form
-              onSubmit={(e) => {
-                e.preventDefault()
-                runLookup(returnLookupCode)
-              }}
-              className="flex flex-col items-center rounded-xl border border-dashed border-gray-300 bg-gray-50/70 px-6 py-10 text-center"
-            >
-              <div className="flex h-14 w-14 items-center justify-center rounded-full bg-[#4ba69d]/10">
-                {lookupLoading ? (
+            <div className="flex flex-col items-center rounded-xl border border-dashed border-gray-300 bg-gray-50/70 px-6 py-10 text-center">
+              {lookupLoading ? (
+                <>
                   <Loader2 className="h-6 w-6 animate-spin text-[#4ba69d]" />
-                ) : (
-                  <ScanLine className="h-6 w-6 text-[#4ba69d]" />
-                )}
-              </div>
-
-              <p className="mt-4 text-sm font-semibold text-gray-800">
-                Pindai barcode kode produksi
-              </p>
-              <p className="mt-1.5 max-w-sm text-xs leading-relaxed text-gray-400">
-                Hasil scan langsung dicari otomatis. Bisa juga diketik manual lalu tekan Enter:
-                kode produksi (PRD…), No. order (ORD…), No. transaksi, atau kode unit alat.
-              </p>
-
-              <div className="mt-5 flex w-full max-w-sm gap-2">
-                <Input
-                  autoFocus
-                  value={returnLookupCode}
-                  onChange={(e) => handleReturnLookupChange(e.target.value)}
-                  placeholder="Scan / ketik kode..."
-                  autoComplete="off"
-                  disabled={lookupLoading}
-                  className="font-mono"
-                />
-                <Button
-                  type="submit"
-                  disabled={!returnLookupCode.trim() || lookupLoading}
-                  className="shrink-0 bg-[#075489] hover:bg-[#075489]/90 text-white"
-                >
-                  {lookupLoading ? "Mencari..." : "Cari"}
-                </Button>
-              </div>
-
-              {returnError && (
-                <p className="mt-4 w-full max-w-sm rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600">
-                  {returnError}
+                  <p className="mt-4 text-sm text-gray-500">Memuat data order...</p>
+                </>
+              ) : (
+                <p className="max-w-sm text-sm text-red-600">
+                  {returnError ?? "Data order tidak bisa dimuat. Tutup lalu coba lagi."}
                 </p>
               )}
-            </form>
+            </div>
           )}
 
           {returnOrder && (
@@ -1400,20 +1325,17 @@ function MonitoringCssd() {
                 </p>
               )}
 
-              {/* Ringkasan order + tombol scan order lain */}
+              {/* Ringkasan order: no. order + no. transaksi (INV) */}
               <section className="rounded-lg border border-gray-200 bg-gray-50">
-                <div className="flex items-center justify-between gap-3 border-b border-gray-200 px-4 py-2.5">
+                <div className="flex flex-wrap items-center gap-2 border-b border-gray-200 px-4 py-2.5">
                   <span className="font-mono text-xs font-semibold text-[#075489] bg-[#075489]/8 px-2 py-0.5 rounded">
                     {returnOrder.code}
                   </span>
-                  <button
-                    type="button"
-                    onClick={openReturn}
-                    className="flex items-center gap-1 text-xs font-medium text-gray-500 hover:text-[#075489]"
-                  >
-                    <ScanLine className="h-3.5 w-3.5" />
-                    Scan order lain
-                  </button>
+                  {returnOrder.code_transaction && (
+                    <span className="font-mono text-xs font-semibold text-[#4ba69d] bg-[#4ba69d]/10 px-2 py-0.5 rounded">
+                      {returnOrder.code_transaction}
+                    </span>
+                  )}
                 </div>
                 <div className="grid grid-cols-1 gap-4 px-4 py-3 sm:grid-cols-3">
                   <DetailField label="Ruangan / Unit" value={returnOrder.room?.name} />
@@ -1803,7 +1725,7 @@ function MonitoringCssd() {
       <Modal
         open={historyOpen}
         onClose={() => setHistoryOpen(false)}
-        title={historyOrder ? `Riwayat Pengembalian — ${historyOrder.code}` : "Riwayat Pengembalian"}
+        title={historyOrder ? `Riwayat Pengembalian : ${titleCodes(historyOrder)}` : "Riwayat Pengembalian"}
         size="lg"
         footer={
           <Button variant="outline" onClick={() => setHistoryOpen(false)}>
@@ -1819,6 +1741,7 @@ function MonitoringCssd() {
           <div className="space-y-4">
             <div className="grid grid-cols-1 gap-4 rounded-lg border border-gray-200 bg-gray-50 px-4 py-3 sm:grid-cols-2">
               <DetailField label="Nomor Order" value={historyOrder.code} />
+              <DetailField label="No. Transaksi" value={historyOrder.code_transaction} />
               <DetailField label="Ruangan / Unit" value={historyOrder.room?.name} />
               <DetailField label="Dipinjam Oleh" value={historyOrder.borrowed_by} />
               <DetailField

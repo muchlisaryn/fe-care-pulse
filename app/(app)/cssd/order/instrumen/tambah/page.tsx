@@ -158,7 +158,7 @@ export default function TambahOrderInstrumenPage() {
     .filter((i) => (i.available_sterile_count ?? 0) > 0)
     .map((i) => ({
       value: String(i.id),
-      label: `${i.code ? `${i.code} — ` : ""}${i.name} · steril ${i.available_sterile_count}`,
+      label: `${i.code ? `${i.code} (${i.name})` : i.name} Tersedia ${i.available_sterile_count}`,
     }))
 
   // Hanya paket yang seluruh komponennya bisa dipenuhi dari stok steril.
@@ -166,7 +166,9 @@ export default function TambahOrderInstrumenPage() {
     .filter((c) => (c.available_sterile_sets ?? 0) > 0)
     .map((c) => ({
       value: String(c.id),
-      label: `${c.code} — ${c.name} · steril ${c.available_sterile_sets} set`,
+      // Kode katalog paket praktis kembar dengan namanya (SET-PARTUS / SET PARTUS),
+      // jadi cukup nama saja — tidak seperti instrumen satuan yang kodenya berbeda.
+      label: `${c.name} Tersedia ${c.available_sterile_sets} Set`,
     }))
 
   // Stok steril yang tersedia untuk satu instrumen (satuan) / paket (set).
@@ -590,7 +592,7 @@ export default function TambahOrderInstrumenPage() {
                           {it.instrument?.name ?? `Instrumen #${it.instrument_id}`}
                         </span>
                         <span className="text-xs text-gray-500">
-                          {it.quantity} / paket
+                          tersedia {it.quantity}
                           {Number(newCatalogQty) > 1 && (
                             <span className="ml-2 font-semibold text-gray-700">= {total}</span>
                           )}
