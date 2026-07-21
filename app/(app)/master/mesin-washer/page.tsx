@@ -117,15 +117,6 @@ export default function MasterWasherMachinePage() {
 
   const columns: Column<WasherMachine>[] = [
     {
-      header: "Kode",
-      cell: (row) => (
-        <span className="font-mono text-xs font-semibold text-[#075489] bg-[#075489]/8 px-2 py-1 rounded">
-          {row.code}
-        </span>
-      ),
-      className: "w-28",
-    },
-    {
       header: "Nama Mesin",
       cell: (row) => (
         <div>

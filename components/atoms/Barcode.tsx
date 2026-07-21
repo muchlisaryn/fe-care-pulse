@@ -45,6 +45,19 @@ type BarcodeProps = {
   height?: number
   /** Lebar zona kosong (modul) di kiri & kanan agar mudah dipindai. */
   quietModules?: number
+  /**
+   * Lebarkan barcode mengikuti lebar wadahnya (tinggi tetap). Seluruh bar diskala
+   * dengan faktor yang sama sehingga perbandingan lebarnya utuh & tetap terpindai;
+   * `moduleWidth` hanya jadi penentu proporsi, bukan lebar akhir.
+   */
+  fluid?: boolean
+  /**
+   * Tampilkan teks kode di bawah bar. Dirender di sini (bukan oleh pemanggil) agar
+   * lebarnya persis mengikuti area BAR — teks yang dibentang selebar SVG akan
+   * tampak lebih panjang dari barcodenya karena SVG menyertakan quiet zone.
+   */
+  caption?: string
+  captionClassName?: string
   className?: string
 }
 
@@ -55,9 +68,12 @@ export function Barcode({
   moduleWidth = 2,
   height = 64,
   quietModules = 10,
+  fluid = false,
+  caption,
+  captionClassName,
   className,
 }: BarcodeProps) {
-  const { bars, width } = useMemo(() => {
+  const { bars, width, quiet } = useMemo(() => {
     const widths = buildCode128B(value)
     const out: { x: number; w: number }[] = []
     const quiet = quietModules * moduleWidth
@@ -67,16 +83,19 @@ export function Barcode({
       if (i % 2 === 0) out.push({ x, w: ww }) // indeks genap = bar (hitam)
       x += ww
     })
-    return { bars: out, width: x + quiet } // + zona kosong di kanan
+    return { bars: out, width: x + quiet, quiet } // + zona kosong di kanan
   }, [value, moduleWidth, quietModules])
 
-  return (
+  const svg = (
     <svg
       id={id}
-      className={className}
-      width={width}
+      className={fluid ? `block w-full ${className ?? ""}`.trim() : className}
+      width={fluid ? undefined : width}
       height={height}
       viewBox={`0 0 ${width} ${height}`}
+      // Mode fluid: lebar meregang penuh, tinggi tetap → skala x & y sengaja
+      // dilepas agar barcode tidak ikut memendek/meninggi.
+      preserveAspectRatio={fluid ? 'none' : undefined}
       xmlns="http://www.w3.org/2000/svg"
       shapeRendering="crispEdges"
     >
@@ -85,5 +104,31 @@ export function Barcode({
         <rect key={i} x={b.x} y={0} width={b.w} height={height} fill="#000000" />
       ))}
     </svg>
+  )
+
+  if (caption === undefined) {
+    return svg
+  }
+
+  // Padding kiri/kanan = porsi quiet zone terhadap lebar SVG, dalam persen supaya
+  // ikut menyesuaikan saat mode fluid meregangkan barcodenya. Hasilnya teks mulai
+  // & berakhir tepat di bar pertama dan terakhir.
+  const quietPercent = (quiet / width) * 100
+
+  return (
+    <div className={fluid ? 'w-full' : 'inline-block'}>
+      {svg}
+      <div
+        className={captionClassName}
+        style={{
+          paddingLeft: `${quietPercent}%`,
+          paddingRight: `${quietPercent}%`,
+          textAlign: 'justify',
+          textAlignLast: 'justify',
+        }}
+      >
+        {caption}
+      </div>
+    </div>
   )
 }

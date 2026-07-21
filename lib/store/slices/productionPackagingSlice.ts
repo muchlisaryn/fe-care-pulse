@@ -1,7 +1,9 @@
 import { createAsyncThunk, createSlice } from "@reduxjs/toolkit"
 import api from "@/lib/axios"
+import type { PipelineDateRange } from "./cleaningSlice"
 
-// Ringkasan isi batch (chip kartu): jenis + jumlah unit.
+// Ringkasan isi batch (chip kartu): jenis + jumlahnya. Untuk paket, `quantity`
+// adalah jumlah SET, bukan jumlah instrumen di dalamnya.
 export type ProdPackagingItem = {
   type: "satuan" | "paket"
   name: string
@@ -13,19 +15,33 @@ export type ProdPackagingUnit = {
   id: number
   source: "satuan" | "paket"
   package_name: string | null
+  // Set ke-berapa dalam batch (1, 2, ...). Unit dalam satu set berbagi nomor sama.
+  package_no: number | null
   instrument_stock_id: number | null
   code: string | null
+  // Nama instrumen dari snapshot production_item (label checklist inspeksi).
+  name: string | null
+  // Foto paket (unit paket) / foto instrumen (unit satuan) — snapshot dari produksi.
+  image_url: string | null
   instrument: { id: number; name: string; image_url?: string | null } | null
   status: string | null
   condition_out: { id: number; name: string } | null
 }
 
-// Batch pada tahap Inspection & Packaging (record PKG-NNN) pipeline produksi.
+// Batch pada tahap Inspection & Packaging pipeline produksi. Dua kemungkinan asal:
+// record `packaging` yang sudah dibuat (`started: true`), atau batch cleaning selesai
+// yang masih antre diinspeksi (`started: false`) — yang terakhir belum punya id/code
+// sampai endpoint `packaging/start` dipanggil.
 export type ProdPackagingBatch = {
-  id: number
-  code: string // PKG-NNN
-  code_transaction: string | null // PRD-NNN
+  id: number | null
+  code: string | null // PKG+ymd+urutan harian
+  code_transaction: string | null // PRD+ymd+urutan harian
   washing_code: string | null
+  // false = record packaging belum dibuat (masih antrean menunggu inspeksi).
+  started: boolean
+  // Ronde pengemasan batch cleaning yang sama: 1 = pertama, 2+ = pengemasan ulang
+  // (RPK) setelah ada unit yang gagal steril.
+  round: number
   status: "pengemasan"
   stage_status: "diproses" | "selesai" // 'selesai' = batch sudah dikemas, label bisa dilihat ulang
   borrowed_by: string | null
@@ -46,10 +62,17 @@ export type ProdPackagingBatch = {
 
 // Satu label sterilisasi (per unit) yang dicetak setelah packaging selesai.
 export type ProdSterilLabelItem = {
+  id: number | null // id packaging_item — null utk batch lama tanpa detail packaging_item
   instrument_name: string
   unit_code: string | null
   source: "satuan" | "paket"
   package_name: string | null
+  // Nomor set dalam batch produksi (production_item.package_no) — bagian akhir
+  // kode label. null untuk batch lama yang belum punya penomoran set.
+  package_no: number | null
+  // Nomor tersimpan di packaging_item: prefix + kode packaging + nomor set tanpa
+  // spasi. Inilah isi barcode yang terbaca saat dipindai.
+  barcode_no: string
 }
 
 // Satu pilihan jenis kemasan dari master — masa simpannya menentukan tgl
@@ -63,7 +86,10 @@ export type PackagingType = {
 // Payload label sterilisasi yang dikembalikan endpoint complete.
 export type ProdSterilLabel = {
   batch: string
-  packaging_code: string
+  packaging_code: string // gabungan prefix + angka, untuk keperluan tampilan
+  // Dipakai menyusun kode label: prefix & angka sengaja dipisah, tidak digabung.
+  packaging_prefix: string
+  packaging_number: string
   set_name: string
   packer: string | null
   packaging_type: string | null
@@ -82,12 +108,12 @@ type State = {
 const initialState: State = { items: [], loading: false, loaded: false }
 
 // Ambil seluruh halaman lalu gabungkan (selaras dengan slice pipeline lain).
-async function fetchAllPages<T>(url: string): Promise<T[]> {
+async function fetchAllPages<T>(url: string, range: PipelineDateRange = {}): Promise<T[]> {
   const collected: T[] = []
   let current = 1
   let last = 1
   do {
-    const res = await api.get(url, { params: { page: current } })
+    const res = await api.get(url, { params: { page: current, ...range } })
     const payload = res.data.data
     collected.push(...payload.data)
     last = payload.last_page
@@ -96,8 +122,9 @@ async function fetchAllPages<T>(url: string): Promise<T[]> {
   return collected
 }
 
-export const fetchProductionPackaging = createAsyncThunk("productionPackaging/fetch", () =>
-  fetchAllPages<ProdPackagingBatch>("/master/packaging"),
+export const fetchProductionPackaging = createAsyncThunk(
+  "productionPackaging/fetch",
+  (range: PipelineDateRange = {}) => fetchAllPages<ProdPackagingBatch>("/master/packaging", range),
 )
 
 const productionPackagingSlice = createSlice({

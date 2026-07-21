@@ -1,5 +1,6 @@
 import { createAsyncThunk, createSlice } from "@reduxjs/toolkit"
 import api from "@/lib/axios"
+import type { PipelineDateRange } from "./cleaningSlice"
 
 // Unit fisik yang akan / sedang disterilkan.
 export type ProdSterilizeUnit = {
@@ -10,6 +11,11 @@ export type ProdSterilizeUnit = {
   image_url?: string | null
   source: "satuan" | "paket"
   package_name: string | null
+  // Nomor set dalam batch produksi — jumlah nomor unik = jumlah SET paket.
+  package_no: number | null
+  // Nomor label fisik dari packaging_item. Baris pada kartu dikelompokkan per
+  // nomor ini: satu barcode = satu kemasan/label.
+  barcode_no: string | null
 }
 
 // Batch sterilisasi terbaru sebuah PKG (saat status "sterilisasi" = menunggu validasi).
@@ -45,7 +51,13 @@ export type ProdSterilizeOrder = {
   kind: "ready" | "batch"
   reprocess?: boolean // true = unit lepas hasil gagal steril yang antre re-proses
   stock_id?: number | null // instrument_stock_id (hanya untuk entri reprocess)
-  code: string // PKG-NNN (ready) / STR-NNN (batch)
+  code: string // kode PKG (ready) / STR (batch)
+  // Nomor label kemasan — identitas baris siap-steril, dipakai saat mencentang &
+  // dikirim sebagai `barcode_nos` waktu membuat batch. null untuk kartu batch STR.
+  barcode_no?: string | null
+  // Nama label: nama paket (unit paket) / nama instrumen (unit satuan), dari
+  // relasi production_item.
+  name?: string | null
   code_transaction: string | null // PRD-NNN (bisa gabungan)
   status: "selesai" | "sterilisasi"
   borrowed_by: string | null
@@ -64,12 +76,12 @@ type State = {
 
 const initialState: State = { items: [], loading: false, loaded: false }
 
-async function fetchAllPages<T>(url: string): Promise<T[]> {
+async function fetchAllPages<T>(url: string, range: PipelineDateRange = {}): Promise<T[]> {
   const collected: T[] = []
   let current = 1
   let last = 1
   do {
-    const res = await api.get(url, { params: { page: current } })
+    const res = await api.get(url, { params: { page: current, ...range } })
     const payload = res.data.data
     collected.push(...payload.data)
     last = payload.last_page
@@ -78,8 +90,10 @@ async function fetchAllPages<T>(url: string): Promise<T[]> {
   return collected
 }
 
-export const fetchProductionSterilize = createAsyncThunk("productionSterilize/fetch", () =>
-  fetchAllPages<ProdSterilizeOrder>("/master/sterilization-pipeline"),
+export const fetchProductionSterilize = createAsyncThunk(
+  "productionSterilize/fetch",
+  (range: PipelineDateRange = {}) =>
+    fetchAllPages<ProdSterilizeOrder>("/master/sterilization-pipeline", range),
 )
 
 const productionSterilizeSlice = createSlice({

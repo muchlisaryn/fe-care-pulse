@@ -37,6 +37,18 @@ function formatDateTime(value: string | null) {
   })
 }
 
+// Tanggal saja (tanpa jam) — dipakai untuk tanggal produksi di samping kode batch.
+function formatDate(value: string | null) {
+  if (!value) return "—"
+  const d = new Date(value)
+  if (Number.isNaN(d.getTime())) return value
+  return d.toLocaleDateString("id-ID", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+  })
+}
+
 // ISO → "YYYY-MM-DDTHH:mm" untuk <input type="datetime-local"> (waktu lokal).
 function toLocalInput(value: string | null): string {
   if (!value) return ""
@@ -56,12 +68,6 @@ export function isCanceled(order: CleaningOrder): boolean {
   return order.washing?.status === "batal"
 }
 
-// "Nama • waktu" untuk baris jejak pelaku; null bila belum ada.
-function actorLine(by: string | null | undefined, at: string | null | undefined): string | null {
-  if (!by && !at) return null
-  return [by ?? "—", at ? formatDateTime(at) : null].filter(Boolean).join(" • ")
-}
-
 // "Sudah diproses" = parameter pencucian sudah diisi & disimpan operator.
 // Catatan: backend membuat record washing kosong saat order diterima, jadi
 // keberadaan record saja belum berarti diproses — cek salah satu field terisi.
@@ -69,8 +75,7 @@ export function isWashingFilled(order: CleaningOrder): boolean {
   const w = order.washing
   return !!(
     w &&
-    (w.machine_no ||
-      w.operator ||
+    (w.operator ||
       w.temperature ||
       w.washed_at ||
       w.detergent_type ||
@@ -79,11 +84,10 @@ export function isWashingFilled(order: CleaningOrder): boolean {
   )
 }
 
-// Hasil scan barcode mesin washer (master washer_machines). Suhu & durasi standar
-// = batas minimum untuk deteksi kegagalan pencucian.
+// Mesin washer terpilih (master washer_machines) — dirujuk lewat id, tidak ada
+// kode/barcode. Suhu & durasi standar = batas minimum deteksi kegagalan pencucian.
 type ScannedMachine = {
   id: number
-  code: string
   name: string
   temperature: string | null
   duration_minutes: number | null
@@ -118,18 +122,21 @@ export function CleaningTab({
   items,
   onChanged,
   stage = "cleaning",
+  compact = false,
 }: {
   items: CleaningOrder[]
   onChanged: () => void
   // Tahap aktif — menentukan warna garis kiri kartu (kuning=cleaning, ungu=packaging).
   stage?: "cleaning" | "packaging"
+  // Kartu ringkas: rincian (isi instrumen, mesin, catatan) disembunyikan dari daftar
+  // dan hanya muncul saat kartu dibuka. Dipakai pada sub-tampilan History.
+  compact?: boolean
 }) {
   // Operator default = user yang sedang login (untuk auto-isi ID Operator).
   const currentUser = useAppSelector((s) => s.auth.name ?? s.auth.username ?? "")
   const toast = useToast()
 
   const [active, setActive] = useState<CleaningOrder | null>(null)
-  const [machineNo, setMachineNo] = useState("")
   const [operator, setOperator] = useState("")
   const [temperature, setTemperature] = useState("")
   const [washedAt, setWashedAt] = useState("")
@@ -193,7 +200,6 @@ export function CleaningTab({
     setFailMode(false)
     setFailReason("")
     const w = order.washing
-    setMachineNo(w?.machine_no ?? "")
     // Auto-isi dengan operator tersimpan; bila kosong pakai user yang login.
     setOperator(w?.operator || currentUser)
     setTemperature(w?.temperature ?? "")
@@ -216,12 +222,11 @@ export function CleaningTab({
     setAlertMsg(w?.alert ? w.alert_message : null)
   }
 
-  // Terapkan mesin terpilih → auto-isi nomor mesin, suhu & durasi dari nilai standar
-  // mesin. Di-set tanpa syarat agar saat ganti mesin data di bawah ikut terupdate.
+  // Terapkan mesin terpilih → auto-isi suhu & durasi dari nilai standar mesin.
+  // Di-set tanpa syarat agar saat ganti mesin data di bawah ikut terupdate.
   function applyMachine(m: ScannedMachine) {
     setMachineInfo(m)
     setWasherMachineId(m.id)
-    setMachineNo(m.code)
     setTemperature(toInput(m.temperature))
     setDuration(toInput(m.duration_minutes))
   }
@@ -241,7 +246,6 @@ export function CleaningTab({
   function washingPayload() {
     return {
       washer_machine_id: washerMachineId,
-      machine_no: machineNo.trim() || null,
       operator: operator.trim() || null,
       temperature: temperature.trim() || null,
       washed_at: washedAt ? new Date(washedAt).toISOString() : null,
@@ -255,7 +259,7 @@ export function CleaningTab({
   async function saveWashing() {
     if (!active || saving) return
     if (!washReady) {
-      setError("Lengkapi Nomor Mesin, Suhu, Waktu Mulai Cuci, Durasi, dan Jenis Deterjen.")
+      setError("Lengkapi Mesin Washer, Suhu, Waktu Mulai Cuci, Durasi, dan Jenis Deterjen.")
       return
     }
     if (tempBelowStd || durationBelowStd) {
@@ -387,7 +391,7 @@ export function CleaningTab({
 
   // Field parameter pencucian yang wajib diisi sebelum Simpan.
   const washReady =
-    machineNo.trim() !== "" &&
+    washerMachineId !== null &&
     temperature.trim() !== "" &&
     washedAt !== "" &&
     duration.trim() !== "" &&
@@ -401,6 +405,7 @@ export function CleaningTab({
             key={order.id}
             order={order}
             stage={stage}
+            compact={compact}
             onOpen={() => openWashing(order)}
             onComplete={() => openComplete(order)}
             onCancel={() => setCancelTarget(order)}
@@ -413,7 +418,7 @@ export function CleaningTab({
       <Modal
         open={active !== null}
         onClose={() => setActive(null)}
-        title={active ? `Catatan Pencucian — ${active.code}` : "Catatan Pencucian"}
+        title="Catatan Pencucian"
         size="lg"
         footer={
           <div className="flex w-full flex-col items-stretch gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
@@ -443,11 +448,6 @@ export function CleaningTab({
       >
         {active && (
           <div className="space-y-5">
-            <div className="grid grid-cols-1 gap-4 rounded-lg border border-gray-200 bg-gray-50 px-4 py-3 sm:grid-cols-2">
-              <Detail label="Peminjam / Unit" value={active.borrowed_by} />
-              <Detail label="Diproses" value={formatDateTime(active.processed_at)} />
-            </div>
-
             {canceledActive && (
               <div className="flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 px-4 py-3">
                 <XCircle className="mt-0.5 h-5 w-5 shrink-0 text-red-500" />
@@ -460,25 +460,7 @@ export function CleaningTab({
               </div>
             )}
 
-            {/* Jejak pelaku: siapa yang memproses, menyelesaikan, membatalkan + jamnya. */}
-            {(actorLine(active.washing?.started_by, active.washing?.started_at) ||
-              actorLine(active.washing?.completed_by, active.washing?.completed_at) ||
-              actorLine(active.washing?.canceled_by, active.washing?.canceled_at)) && (
-              <div className="space-y-2 rounded-lg border border-gray-200 px-4 py-3">
-                <p className="text-xs font-semibold uppercase tracking-wide text-gray-400">Riwayat Proses</p>
-                <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-                  <Detail label="Diproses oleh" value={actorLine(active.washing?.started_by, active.washing?.started_at)} />
-                  {active.washing?.completed_by && (
-                    <Detail label="Selesai oleh" value={actorLine(active.washing?.completed_by, active.washing?.completed_at)} />
-                  )}
-                  {active.washing?.canceled_by && (
-                    <Detail label="Dibatalkan oleh" value={actorLine(active.washing?.canceled_by, active.washing?.canceled_at)} />
-                  )}
-                </div>
-              </div>
-            )}
-
-            <InstrumentList order={active} collapsible defaultOpen={false} />
+            <InstrumentList order={active} collapsible />
 
             {alertMsg && (
               <div className="flex items-start gap-2 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3">
@@ -498,18 +480,19 @@ export function CleaningTab({
 
             {!washedActive && !canceledActive && (
               <div className="space-y-1.5">
-                <Label>Mesin Washer</Label>
+                <Label>
+                  Mesin Washer <span className="text-red-500">*</span>
+                </Label>
                 <SelectSearch
-                  options={machines.map((m) => ({ value: String(m.id), label: `${m.code} — ${m.name}` }))}
+                  options={machines.map((m) => ({ value: String(m.id), label: m.name }))}
                   value={washerMachineId ? String(washerMachineId) : ""}
                   onChange={selectMachine}
                   loading={machinesLoading}
                   placeholder="Pilih mesin washer..."
-                  searchPlaceholder="Cari kode / nama mesin..."
+                  searchPlaceholder="Cari nama mesin..."
                 />
                 {activeMachine && (
                   <div className="flex flex-wrap items-center gap-2 rounded-lg border border-[#075489]/30 bg-[#075489]/5 px-3 py-2 text-xs">
-                    <Badge variant="info">{activeMachine.code}</Badge>
                     <span className="font-medium text-gray-800">{activeMachine.name}</span>
                     {stdText(activeMachine.temperature, "°C") && (
                       <span className="text-gray-500">
@@ -526,21 +509,12 @@ export function CleaningTab({
               </div>
             )}
 
+            {/* Dua kolom rata: Suhu | Durasi (keduanya dibandingkan ke standar mesin),
+                lalu Waktu Mulai Cuci | Jenis Deterjen. Nomor Mesin dihapus — mesin
+                dirujuk lewat pilihan Mesin Washer di atas (washer_machine_id); ID
+                Operator juga disembunyikan, terisi otomatis dari user yang login. */}
             {!canceledActive && (
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-              <div className="space-y-1.5">
-                <Label htmlFor="wash-machine">
-                  Nomor Mesin <span className="text-red-500">*</span>
-                </Label>
-                <Input
-                  id="wash-machine"
-                  value={machineNo}
-                  readOnly
-                  placeholder="Otomatis dari mesin washer terpilih"
-                  className="cursor-not-allowed bg-gray-50"
-                />
-              </div>
-              {/* ID Operator disembunyikan — terisi otomatis dari user yang login. */}
+            <div className="grid grid-cols-1 items-start gap-4 sm:grid-cols-2">
               <div className="space-y-1.5">
                 <Label htmlFor="wash-temp">
                   Suhu (°C) <span className="text-red-500">*</span>
@@ -563,18 +537,6 @@ export function CleaningTab({
                 )}
               </div>
               <div className="space-y-1.5">
-                <Label htmlFor="wash-time">
-                  Waktu Mulai Cuci <span className="text-red-500">*</span>
-                </Label>
-                <Input
-                  id="wash-time"
-                  type="datetime-local"
-                  value={washedAt}
-                  onChange={(e) => setWashedAt(e.target.value)}
-                  disabled={washedActive}
-                />
-              </div>
-              <div className="space-y-1.5">
                 <Label htmlFor="wash-duration">
                   Durasi (menit) <span className="text-red-500">*</span>
                 </Label>
@@ -595,7 +557,19 @@ export function CleaningTab({
                   </p>
                 )}
               </div>
-              <div className="space-y-1.5 sm:col-span-2">
+              <div className="space-y-1.5">
+                <Label htmlFor="wash-time">
+                  Waktu Mulai Cuci <span className="text-red-500">*</span>
+                </Label>
+                <Input
+                  id="wash-time"
+                  type="datetime-local"
+                  value={washedAt}
+                  onChange={(e) => setWashedAt(e.target.value)}
+                  disabled={washedActive}
+                />
+              </div>
+              <div className="space-y-1.5">
                 <Label htmlFor="wash-detergent">
                   Jenis Deterjen / Enzimatis <span className="text-red-500">*</span>
                 </Label>
@@ -753,12 +727,114 @@ export function CleaningTab({
   )
 }
 
+// Label ringkas yang menyembunyikan kode unit sampai di-hover / difokus keyboard.
+// Dipakai baris paket (per instrumen penyusun) & baris satuan (pada jumlah unit).
+function CodesOnHover({
+  label,
+  codes,
+  align = "left",
+  className = "",
+}: {
+  label: string
+  codes: string[]
+  align?: "left" | "right"
+  className?: string
+}) {
+  return (
+    <span
+      tabIndex={0}
+      className={
+        "group relative cursor-default focus:outline-none focus-visible:ring-1 focus-visible:ring-[#075489] " +
+        className
+      }
+    >
+      {label}
+      {codes.length > 0 && (
+        <span
+          className={
+            "pointer-events-none absolute bottom-full z-20 mb-1 hidden w-max max-w-[220px] rounded-md bg-gray-900 px-2 py-1.5 text-left shadow-lg group-hover:block group-focus:block " +
+            (align === "right" ? "right-0" : "left-0")
+          }
+        >
+          <span className="flex flex-wrap gap-1">
+            {codes.map((c) => (
+              <span key={c} className="font-mono text-[10px] font-medium text-white">
+                {c}
+              </span>
+            ))}
+          </span>
+        </span>
+      )}
+    </span>
+  )
+}
+
+// Satu baris "Daftar Instrumen": satu instrumen satuan, atau satu paket beserta
+// rincian instrumen penyusunnya.
+type UnitGroup = {
+  kind: "satuan" | "paket"
+  name: string // nama instrumen (satuan) / nama paket (paket)
+  // Nomor set yang tergabung di baris ini — jumlahnya = kuantitas paket.
+  packageNos: Set<string>
+  image: string | null
+  units: CleaningUnit[]
+  // Hanya untuk paket: instrumen penyusun + jumlah unit + kode-kodenya.
+  breakdown: { name: string; codes: string[] }[]
+}
+
+// Satu baris per NAMA: unit `satuan` dikelompokkan per nama instrumen, unit `paket`
+// per nama paket — 2 set "SET PARTUS" melebur jadi satu baris, kuantitasnya dihitung
+// dari jumlah `package_no` berbeda (batch lama tanpa package_no dianggap satu set).
+// Semua nilai dari snapshot production_item (u.name / u.code / u.image_url).
+function groupUnits(units: CleaningUnit[]): UnitGroup[] {
+  const groups: UnitGroup[] = []
+  const index = new Map<string, UnitGroup>()
+
+  for (const u of units) {
+    const isPaket = u.source === "paket"
+    const name = (isPaket ? u.package_name : u.name) ?? "Instrumen"
+    const key = `${isPaket ? "paket" : "satuan"}|${name}`
+
+    // Satu kolom foto: sudah berisi foto paket / foto instrumen sesuai jenis baris.
+    const image = u.image_url ?? null
+
+    let g = index.get(key)
+    if (!g) {
+      g = {
+        kind: isPaket ? "paket" : "satuan",
+        name,
+        packageNos: new Set(),
+        image,
+        units: [],
+        breakdown: [],
+      }
+      index.set(key, g)
+      groups.push(g)
+    }
+    g.units.push(u)
+    g.image ??= image
+    if (isPaket) g.packageNos.add(String(u.package_no ?? ""))
+
+    if (isPaket) {
+      const itemName = u.name ?? "Instrumen"
+      let b = g.breakdown.find((x) => x.name === itemName)
+      if (!b) {
+        b = { name: itemName, codes: [] }
+        g.breakdown.push(b)
+      }
+      if (u.code) b.codes.push(u.code)
+    }
+  }
+
+  return groups
+}
+
 // Rincian isi sebuah paket dalam order: instrumen penyusun + jumlah unitnya.
 function paketBreakdown(order: CleaningOrder, packageName: string) {
   const map = new Map<string, { name: string; qty: number }>()
   for (const u of order.units ?? []) {
     if (u.source !== "paket" || u.package_name !== packageName) continue
-    const name = u.instrument?.name ?? "Instrumen"
+    const name = u.name ?? "Instrumen"
     const cur = map.get(name) ?? { name, qty: 0 }
     cur.qty += 1
     map.set(name, cur)
@@ -774,6 +850,7 @@ function CleaningOrderCard({
   onComplete,
   onCancel,
   completing,
+  compact = false,
 }: {
   order: CleaningOrder
   stage: "cleaning" | "packaging"
@@ -781,6 +858,9 @@ function CleaningOrderCard({
   onComplete: () => void
   onCancel: () => void
   completing: boolean
+  // Sembunyikan rincian dari kartu (dipakai di History) — tetap bisa dilihat
+  // dengan membuka kartunya.
+  compact?: boolean
 }) {
   const washed = isWashed(order)
   const canceled = isCanceled(order)
@@ -793,10 +873,10 @@ function CleaningOrderCard({
   // Gambar per instrumen/paket (dari unit) untuk thumbnail di chip.
   const imageByName: Record<string, string> = {}
   for (const u of order.units ?? []) {
-    const img = u.instrument?.image_url
-    if (!img) continue
-    if (u.instrument?.name && !imageByName[u.instrument.name]) imageByName[u.instrument.name] = img
-    if (u.package_name && !imageByName[u.package_name]) imageByName[u.package_name] = img
+    if (!u.image_url) continue
+    // Foto baris paket = foto paket; foto baris satuan = foto instrumen.
+    const key = u.source === "paket" ? u.package_name : u.name
+    if (key && !imageByName[key]) imageByName[key] = u.image_url
   }
   return (
     <div className="rounded-lg border border-gray-200">
@@ -808,29 +888,37 @@ function CleaningOrderCard({
         >
           <div className="flex min-w-0 items-start gap-2">
             <div className="min-w-0 flex-1">
-              {/* Baris atas: kode batch + mesin + status pencucian. */}
+              {/* Baris 1: status | kode produksi | tanggal produksi. */}
               <div className="flex flex-wrap items-center gap-2">
+                {washed ? (
+                  <Badge variant="success">Selesai Cuci</Badge>
+                ) : canceled ? (
+                  <Badge variant="default">Dibatalkan</Badge>
+                ) : order.washing?.status === "gagal" ? (
+                  <Badge variant="danger">Gagal Cuci</Badge>
+                ) : inProcess ? (
+                  <Badge variant="info">Diproses</Badge>
+                ) : (
+                  <Badge variant="warning">Belum Diproses</Badge>
+                )}
+                {!washed && !canceled && order.washing?.alert && (
+                  <Badge variant="warning">Cek Parameter</Badge>
+                )}
                 <span className="font-mono text-xs font-semibold text-[#075489] bg-[#075489]/8 px-2 py-0.5 rounded">
                   {order.code_transaction ?? order.code}
                 </span>
-                {order.washing?.machine_no && (
-                  <span className="text-xs text-gray-500">Mesin: {order.washing.machine_no}</span>
-                )}
-                {washed && <Badge variant="success">Selesai Cuci</Badge>}
-                {order.washing?.status === "batal" && <Badge variant="default">Dibatalkan</Badge>}
-                {!washed && order.washing?.status === "gagal" && (
-                  <Badge variant="danger">Gagal Cuci</Badge>
-                )}
-                {!washed && order.washing?.status !== "batal" && order.washing?.alert && (
-                  <Badge variant="warning">Cek Parameter</Badge>
+                {order.processed_at && (
+                  <span className="text-xs text-gray-500">{formatDate(order.processed_at)}</span>
                 )}
               </div>
 
-              {/* Nama paket / instrumen sebagai chip — paket bisa diklik utk lihat isi. */}
+              {/* Nama paket / instrumen sebagai chip — paket bisa diklik utk lihat isi.
+                  Pada kartu ringkas (History) chip tetap tampil, tapi tidak bisa diklik
+                  karena rincian isinya disembunyikan. */}
               {order.items?.length ? (
-                <div className="mt-1.5 flex flex-wrap items-center gap-1">
+                <div className="mt-2.5 flex flex-wrap items-center gap-1">
                   {order.items.slice(0, 4).map((it, i) => {
-                    const isPaket = it.type === "paket"
+                    const isPaket = it.type === "paket" && !compact
                     const open = openPaket === it.name
                     return (
                       <span
@@ -874,13 +962,24 @@ function CleaningOrderCard({
                   )}
                 </div>
               ) : (
-                <p className="mt-1 truncate text-sm font-semibold text-gray-900">
+                <p className="mt-2.5 truncate text-sm font-semibold text-gray-900">
                   {order.borrowed_by ?? "—"}
                 </p>
               )}
 
+              {/* Mesin cuci: nama mesin + tanggal & jam mulai cuci (di bawah nama instrumen). */}
+              {!compact && order.washing?.washer_machine?.name && (
+                <p className="mt-2.5 text-xs text-gray-500">
+                  Diproses mesin:{" "}
+                  <span className="font-medium text-gray-700">
+                    {order.washing.washer_machine.name}
+                  </span>
+                  {order.washing.washed_at && `, ${formatDateTime(order.washing.washed_at)}`}
+                </p>
+              )}
+
               {/* Rincian isi paket yang dipilih. */}
-              {openPaket && (
+              {!compact && openPaket && (
                 <div
                   onClick={(e) => e.stopPropagation()}
                   className="mt-1.5 rounded-md border border-gray-100 bg-gray-50 px-2 py-1.5"
@@ -926,24 +1025,19 @@ function CleaningOrderCard({
               )}
 
               {/* Catatan (opsional) dari tahap Mulai Produksi. */}
-              {order.note && (
+              {!compact && order.note && (
                 <p className="mt-1.5 text-xs text-gray-500">
                   <span className="font-medium text-gray-600">Catatan:</span> {order.note}
                 </p>
               )}
 
-              {/* Tanggal mengikuti tahap batch — seperti kartu tab Packaging/Sterilisasi. */}
-              <div className="mt-1 flex flex-wrap gap-x-4 gap-y-0.5 text-xs text-gray-500">
-                {canceled ? (
-                  <span>Dibatalkan: {formatDateTime(order.washing?.canceled_at ?? null)}</span>
-                ) : washed ? (
+              {/* Tanggal produksi tampil di samping kode & waktu cuci di baris mesin;
+                  di sini cukup tampilkan waktu selesai cuci saat batch sudah selesai. */}
+              {!canceled && washed && (
+                <div className="mt-1 flex flex-wrap gap-x-4 gap-y-0.5 text-xs text-gray-500">
                   <span>Selesai cuci: {formatDateTime(order.washing?.completed_at ?? null)}</span>
-                ) : order.washing?.washed_at ? (
-                  <span>Mulai cuci: {formatDateTime(order.washing.washed_at)}</span>
-                ) : (
-                  <span>Selesai produksi: {formatDateTime(order.processed_at)}</span>
-                )}
-              </div>
+                </div>
+              )}
             </div>
           </div>
         </button>
@@ -1029,17 +1123,12 @@ function InstrumentList({
   const [zoom, setZoom] = useState<{ url: string; name: string } | null>(null)
   const hasUnits = (order.units?.length ?? 0) > 0
 
-  // Kelompokkan unit fisik per instrumen agar ringkas (nama + gambar + daftar kode).
-  const grouped = hasUnits
-    ? Object.values(
-        order.units.reduce<Record<string, { name: string; image: string | null; units: CleaningUnit[] }>>((acc, u) => {
-          const name = u.instrument?.name ?? u.package_name ?? "Instrumen"
-          const key = String(u.instrument?.id ?? name)
-          ;(acc[key] ??= { name, image: u.instrument?.image_url ?? null, units: [] }).units.push(u)
-          return acc
-        }, {})
-      )
-    : []
+  // Kelompokkan unit fisik jadi baris daftar. Unit `satuan` dikelompokkan per nama
+  // instrumen; unit `paket` per NAMA PAKET, dengan rincian instrumen penyusunnya.
+  // Semua nama/kode/foto dibaca dari snapshot production_item (u.name, u.code,
+  // u.image_url), bukan relasi ke master, agar daftar batch lama tidak ikut berubah
+  // saat master diubah.
+  const grouped = hasUnits ? groupUnits(order.units) : []
 
   return (
     <div className="space-y-2">
@@ -1067,7 +1156,7 @@ function InstrumentList({
       {collapsible && !open ? null : hasUnits ? (
         <ul className="divide-y divide-gray-100 rounded-lg border border-gray-200">
           {grouped.map((g) => (
-            <li key={g.name} className="px-3 py-2">
+            <li key={`${g.kind}-${g.name}`} className="px-3 py-2">
               <div className="flex items-center justify-between gap-2">
                 <span className="flex min-w-0 items-center gap-2">
                   {g.image ? (
@@ -1087,20 +1176,35 @@ function InstrumentList({
                     <Package className="h-4 w-4 shrink-0 text-[#075489]" />
                   )}
                   <span className="truncate text-sm font-medium text-gray-800">{g.name}</span>
+                  {g.kind === "paket" && <Badge variant="info">Paket</Badge>}
                 </span>
-                <span className="shrink-0 text-xs text-gray-400">{g.units.length} unit</span>
+                {/* Kuantitas: satuan = jumlah unit, paket = jumlah SET (bukan jumlah
+                    instrumen di dalamnya). Pada satuan, kode unit muncul saat di-hover. */}
+                {g.kind === "satuan" ? (
+                  <CodesOnHover
+                    label={`×${g.units.length}`}
+                    codes={g.units.map((u) => u.code ?? `#${u.instrument_stock_id ?? u.id}`)}
+                    align="right"
+                    className="shrink-0 text-xs text-gray-400 underline decoration-dotted underline-offset-4"
+                  />
+                ) : (
+                  <span className="shrink-0 text-xs text-gray-400">×{g.packageNos.size}</span>
+                )}
               </div>
-              <div className="mt-1 flex flex-wrap gap-1.5">
-                {g.units.map((u) => (
-                  <span
-                    key={u.id}
-                    className="font-mono text-[11px] font-medium text-[#075489] bg-[#075489]/8 px-1.5 py-0.5 rounded"
-                    title={u.condition_out?.name ? `Kondisi: ${u.condition_out.name}` : undefined}
-                  >
-                    {u.code ?? `#${u.instrument_stock_id ?? u.id}`}
-                  </span>
-                ))}
-              </div>
+
+              {/* Isi paket: "Gunting (2)" — kode unitnya muncul saat di-hover. */}
+              {g.kind === "paket" && (
+                <div className="mt-1 flex flex-wrap gap-1.5">
+                  {g.breakdown.map((b) => (
+                    <CodesOnHover
+                      key={b.name}
+                      label={`${b.name} (${b.codes.length})`}
+                      codes={b.codes}
+                      className="rounded bg-gray-100 px-1.5 py-0.5 text-[11px] font-medium text-gray-700"
+                    />
+                  ))}
+                </div>
+              )}
             </li>
           ))}
         </ul>
@@ -1144,19 +1248,6 @@ function InstrumentList({
             <p className="text-sm font-medium text-white">{zoom.name}</p>
           </div>
         </div>
-      )}
-    </div>
-  )
-}
-
-function Detail({ label, value }: { label: string; value: string | null | undefined }) {
-  return (
-    <div className="space-y-1">
-      <p className="text-xs font-semibold uppercase tracking-wide text-gray-400">{label}</p>
-      {value ? (
-        <p className="text-sm text-gray-800">{value}</p>
-      ) : (
-        <span className="text-gray-400 text-xs">—</span>
       )}
     </div>
   )

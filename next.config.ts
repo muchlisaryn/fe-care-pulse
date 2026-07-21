@@ -16,6 +16,13 @@ const nextConfig: NextConfig = {
         source: "/api/:path*",
         destination: `${BACKEND_API_URL}/api/:path*`,
       },
+      // Berkas unggahan (gambar instrumen & katalog) juga dilayani backend. Backend
+      // mengirim path root-relatif `/uploads/...`, jadi browser memintanya ke port
+      // 3000 dan diteruskan ke sini — tak perlu buka port 8000 maupun menyetel APP_URL.
+      {
+        source: "/uploads/:path*",
+        destination: `${BACKEND_API_URL}/uploads/:path*`,
+      },
     ];
   },
 };
