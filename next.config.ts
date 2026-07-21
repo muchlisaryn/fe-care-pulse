@@ -7,7 +7,13 @@ const BACKEND_API_URL = (process.env.BACKEND_API_URL ?? "http://127.0.0.1:8000")
 const nextConfig: NextConfig = {
   // Izinkan akses dev server dari perangkat lain di LAN (mis. HP via IP).
   // Tanpa ini, Next 16 memblokir request cross-origin saat development.
-  allowedDevOrigins: ["10.20.20.218", "10.12.12.205", "10.12.12.174", "192.168.1.17"],
+  allowedDevOrigins: [
+    "10.20.20.218",
+    "10.12.12.205",
+    "10.12.12.192",
+    "10.12.12.174",
+    "192.168.1.17",
+  ],
   // Teruskan semua panggilan /api ke backend Laravel (server-side),
   // jadi browser cukup akses port 3000 — tak perlu buka port 8000 / atur CORS.
   async rewrites() {

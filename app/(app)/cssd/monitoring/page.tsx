@@ -1466,21 +1466,8 @@ function MonitoringCssd() {
                 </p>
               )}
 
-              {/* Ringkasan order + tombol scan order lain */}
+              {/* Ringkasan order */}
               <section className="rounded-lg border border-gray-200 bg-gray-50">
-                <div className="flex items-center justify-between gap-3 border-b border-gray-200 px-4 py-2.5">
-                  <span className="font-mono text-xs font-semibold text-[#075489] bg-[#075489]/8 px-2 py-0.5 rounded">
-                    {returnOrder.code}
-                  </span>
-                  <button
-                    type="button"
-                    onClick={openReturn}
-                    className="flex items-center gap-1 text-xs font-medium text-gray-500 hover:text-[#075489]"
-                  >
-                    <ScanLine className="h-3.5 w-3.5" />
-                    Scan order lain
-                  </button>
-                </div>
                 <div className="grid grid-cols-1 gap-4 px-4 py-3 sm:grid-cols-3">
                   <DetailField label="Ruangan / Unit" value={returnOrder.room?.name} />
                   <DetailField label="Dipinjam Oleh" value={returnOrder.borrowed_by} />
