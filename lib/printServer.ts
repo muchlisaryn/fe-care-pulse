@@ -15,17 +15,48 @@ export function getPrintServerUrl(): string {
   return `http://localhost${PRINT_SERVER_PATH}`
 }
 
-// Satu label sterilisasi CSSD sesuai kontrak POST /api/print-label.
+// Satu label sterilisasi CSSD sesuai kontrak POST /api/print-label (ESC/POS).
 export type CssdLabelPayload = {
+  // Isi barcode Code39 SEKALIGUS teks di bawahnya. Kita kirim `barcode_no` utuh
+  // (prefix+code+package_no tanpa spasi, mis. "PKG260721031") agar barcode yang
+  // dicetak IDENTIK dengan yang ditampilkan di halaman preview & cocok saat dipindai.
   kode_produksi: string
+  // Komponen mentah label — print server boleh menyusun layout sendiri dari sini.
+  // Sumber: `barcode_no` & `nama_instrumen` dari packaging_item, `prefix` &
+  // `code_packaging` dari tabel packaging, `packaging_no` dari production_item.package_no.
+  barcode_no?: string | null
+  prefix?: string | null
+  code_packaging?: string | null
+  packaging_no?: string | number | null
   nama_instrumen: string | null
+  // No. lot/batch indikator kimia internal. Print server harus mencetak field ini
+  // — bila belum mendukungnya, nilainya diabaikan & tak muncul di kertas.
+  no_lot: string | null
   petugas_pengemasan: string | null
   tanggal_steril: string | null
   tanggal_kadaluarsa: string | null
 }
 
-type PrintResponse = { status: "success" | "error"; message: string }
+// Bentuk respons print server. HTTP 200 TIDAK menjamin sukses — cek `status`
+// (doc: "200 Request diproses — cek status dalam body"). Saat gagal, `target`
+// berisi tujuan cetak (mis. "COM3") untuk memperjelas pesan.
+type PrintResponse = {
+  status: "success" | "error"
+  message: string
+  target?: string
+  config?: { printer?: string; connection?: string; target?: string; char_per_line?: number; auto_cut?: boolean; labels?: number }
+}
 type TestPrintResponse = PrintResponse & { printed?: string }
+
+// Ambil `message` bila status sukses; kalau tidak, lempar Error dengan pesan
+// (disertai target bila ada) supaya pemanggil tidak salah menganggapnya sukses.
+function unwrapPrintResponse(data: PrintResponse): string {
+  if (data.status !== "success") {
+    const target = data.target ?? data.config?.target
+    throw new Error(target ? `${data.message} (${target})` : data.message)
+  }
+  return data.message
+}
 
 // Endpoint /print-label khusus printer ESC/POS (struk termal, mis. Epson TM-T82X).
 export function isEscposPrinter(p: Printer): boolean {
@@ -69,9 +100,12 @@ export async function printCssdLabels(printer: Printer, labels: CssdLabelPayload
   try {
     const res = await axios.post<PrintResponse>(url, payload)
     console.log("[print-label] response", res.data)
-    return res.data.message
+    return unwrapPrintResponse(res.data)
   } catch (e) {
     console.error("[print-label] error", e)
+    // Error dari unwrap (status:"error" pada HTTP 200) sudah siap-tampil — jangan
+    // dibungkus ulang jadi pesan koneksi.
+    if (!axios.isAxiosError(e) && e instanceof Error) throw e
     throw toPrintError(e, url)
   }
 }
@@ -91,9 +125,11 @@ export async function testPrintPrinter(printer: Printer): Promise<string> {
   try {
     const res = await axios.post<TestPrintResponse>(url, payload)
     console.log("[test-print] response", res.data)
-    return res.data.printed ? `${res.data.message} (${res.data.printed})` : res.data.message
+    const message = unwrapPrintResponse(res.data)
+    return res.data.printed ? `${message} (${res.data.printed})` : message
   } catch (e) {
     console.error("[test-print] error", e)
+    if (!axios.isAxiosError(e) && e instanceof Error) throw e
     throw toPrintError(e, url)
   }
 }

@@ -145,6 +145,15 @@ const PROCESSED_STATUSES: OrderStatus[] = [
 ]
 const isProcessed = (status: OrderStatus) => PROCESSED_STATUSES.includes(status)
 
+// Kode untuk judul modal detail: no. order + no. invoice. Invoice baru terbit setelah
+// order diterima, jadi selama masih "diajukan" cukup no. order — sama seperti kolom
+// Kode di daftar.
+function detailTitleCodes(order: Order) {
+  const invoice = order.status !== "diajukan" ? order.code_transaction : null
+
+  return invoice ? `${order.code} (${invoice})` : order.code
+}
+
 function formatDate(value: string | null) {
   if (!value) return null
   const d = new Date(value)
@@ -628,7 +637,7 @@ export default function OrderInstrumenPage() {
 
   const columns: Column<Order>[] = [
     {
-      header: "Tanggal Pinjam",
+      header: "Tanggal dan Waktu Pinjam",
       cell: (row) => {
         const f = formatDateWithTime(row.order_date, row.order_time)
         return f ? <span className="text-sm text-gray-600">{f}</span> : dash
@@ -725,7 +734,6 @@ export default function OrderInstrumenPage() {
                 )}
                 <Input
                   id="order-search"
-                  placeholder="Kode order, peminjam, no. RM, nama pasien, ruangan..."
                   value={searchInput}
                   onChange={(e) => setSearchInput(e.target.value)}
                   className={"pl-9 " + (loading ? "cursor-not-allowed" : "")}
@@ -1204,7 +1212,7 @@ export default function OrderInstrumenPage() {
       <Modal
         open={detail !== null}
         onClose={() => setDetail(null)}
-        title={detail ? `Detail Order — ${detail.code}` : "Detail Order"}
+        title={detail ? `Detail Order : ${detailTitleCodes(detail)}` : "Detail Order"}
         size="lg"
         footer={
           <div className="flex w-full items-center justify-between gap-3">

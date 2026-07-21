@@ -6,8 +6,7 @@ export type WashingStatus = "dalam_proses" | "selesai" | "gagal" | "batal"
 export type WashingRecord = {
   id: number
   washer_machine_id: number | null
-  washer_machine: { id: number; code: string; name: string } | null
-  machine_no: string | null
+  washer_machine: { id: number; name: string } | null
   operator: string | null
   temperature: string | null
   washed_at: string | null
@@ -38,9 +37,16 @@ export type CleaningUnit = {
   id: number
   source: "satuan" | "paket"
   package_name: string | null
+  // Nomor satuan pesanan dalam batch (1, 2, ...): satu nomor per qty, baik satuan
+  // maupun paket. Unit dalam satu set berbagi nomor yang sama.
+  package_no: number | null
   instrument_stock_id: number | null
+  // Snapshot dari production_item — nama, kode & foto dibekukan saat batch
+  // dibuat, tidak ikut berubah bila master instrumen diubah/dihapus.
+  name: string | null
   code: string | null
-  instrument: { id: number; name: string; image_url?: string | null } | null
+  // Foto paket (unit paket) / foto instrumen (unit satuan) — satu kolom di DB.
+  image_url: string | null
   status: string | null
   condition_out: { id: number; name: string } | null
 }
@@ -80,13 +86,17 @@ const initialState: CleaningState = {
   dirty: false,
 }
 
+// Rentang tanggal yang disaring BACKEND. Pencarian teks sengaja tidak dikirim —
+// penyaringannya murni di frontend supaya instan tanpa request ulang.
+export type PipelineDateRange = { date_from?: string; date_to?: string }
+
 // Ambil seluruh halaman lalu gabungkan jadi satu array (selaras dengan slice monitoring).
-async function fetchAllPages<T>(url: string): Promise<T[]> {
+async function fetchAllPages<T>(url: string, range: PipelineDateRange = {}): Promise<T[]> {
   const collected: T[] = []
   let current = 1
   let last = 1
   do {
-    const res = await api.get(url, { params: { page: current } })
+    const res = await api.get(url, { params: { page: current, ...range } })
     const payload = res.data.data
     collected.push(...payload.data)
     last = payload.last_page
@@ -95,8 +105,8 @@ async function fetchAllPages<T>(url: string): Promise<T[]> {
   return collected
 }
 
-export const fetchCleaning = createAsyncThunk("cleaning/fetch", () =>
-  fetchAllPages<CleaningOrder>("/master/cleaning"),
+export const fetchCleaning = createAsyncThunk("cleaning/fetch", (range: PipelineDateRange = {}) =>
+  fetchAllPages<CleaningOrder>("/master/cleaning", range),
 )
 
 const cleaningSlice = createSlice({

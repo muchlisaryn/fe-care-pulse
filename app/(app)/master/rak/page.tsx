@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react"
 import { Search, Archive } from "lucide-react"
+import { Barcode } from "@/components/atoms/Barcode"
 import { Button } from "@/components/atoms/Button"
 import { Input } from "@/components/atoms/Input"
 import { Label } from "@/components/atoms/Label"
@@ -26,6 +27,22 @@ const emptyForm = {
   note: "",
 }
 
+// Code 128 set B hanya mengenal ASCII 32..126; karakter di luar itu diam-diam
+// dikodekan jadi spasi, sehingga hasil scan tak akan cocok dengan nama rak.
+function isCode128Safe(text: string): boolean {
+  return [...text].every((ch) => ch.charCodeAt(0) >= 32 && ch.charCodeAt(0) <= 126)
+}
+
+// Nama & keterangan rak adalah teks bebas, sementara label dicetak lewat
+// document.write — lolos-kan dulu agar karakter HTML tidak merusak halaman cetak.
+function escapeHtml(text: string): string {
+  return text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+}
+
 export default function MasterRakPage() {
   const dispatch = useAppDispatch()
   const { items, totalItems, totalPages, page, search, loading, loaded, dirty } = useAppSelector(
@@ -39,6 +56,8 @@ export default function MasterRakPage() {
   const [saving, setSaving] = useState(false)
   const [deleteTarget, setDeleteTarget] = useState<Rack | null>(null)
   const [deletingId, setDeletingId] = useState<number | null>(null)
+  // Rak yang labelnya sedang dipratinjau untuk dicetak.
+  const [labelTarget, setLabelTarget] = useState<Rack | null>(null)
 
   useEffect(() => {
     if (loaded && !dirty) return
@@ -92,6 +111,46 @@ export default function MasterRakPage() {
     } finally {
       setDeletingId(null)
     }
+  }
+
+  // Cetak label rak: barcode Code 128 berisi NAMA rak persis seperti di master —
+  // itu yang dicocokkan saat scan di halaman Storage Steril. Karena itu label
+  // wajib dicetak ulang bila nama rak diubah.
+  function handlePrintLabel() {
+    if (!labelTarget) return
+    const svg = document.getElementById("rak-label-barcode")
+    const barcode = svg ? new XMLSerializer().serializeToString(svg) : ""
+    const w = window.open("", "_blank", "width=480,height=360")
+    if (!w) return
+    w.document.write(`
+      <html>
+        <head>
+          <title>Label ${escapeHtml(labelTarget.name)}</title>
+          <style>
+            * { box-sizing: border-box; }
+            body { margin: 0; font-family: Arial, Helvetica, sans-serif; }
+            .label { border: 1px solid #000; padding: 12px 16px; width: 380px; }
+            .label .kind { font-size: 11px; font-weight: 600; letter-spacing: 1px; color: #111; }
+            .label .name { font-size: 22px; font-weight: 800; letter-spacing: .5px; text-transform: uppercase; color: #111; margin-top: 2px; }
+            .label .barcode { margin-top: 10px; }
+            .label .barcode svg { display: block; width: 100%; height: auto; }
+            .label .note { margin-top: 8px; font-size: 11px; color: #111; }
+            @media print { @page { margin: 8mm; } }
+          </style>
+        </head>
+        <body>
+          <div class="label">
+            <div class="kind">LOKASI RAK</div>
+            <div class="name">${escapeHtml(labelTarget.name)}</div>
+            <div class="barcode">${barcode}</div>
+            ${labelTarget.note ? `<div class="note">${escapeHtml(labelTarget.note)}</div>` : ""}
+          </div>
+        </body>
+      </html>
+    `)
+    w.document.close()
+    w.focus()
+    w.print()
   }
 
   const columns: Column<Rack>[] = [
@@ -153,6 +212,7 @@ export default function MasterRakPage() {
           <DataTable
             columns={columns}
             data={items}
+            extraActions={[{ label: "Cetak Label", onClick: (row) => setLabelTarget(row) }]}
             onEdit={openEdit}
             onDelete={(row) => setDeleteTarget(row)}
             isRowLoading={(row) => deletingId === row.id}
@@ -168,6 +228,52 @@ export default function MasterRakPage() {
           onPageChange={(p) => dispatch(setRackPage(p))}
         />
       </Card>
+
+      <Modal
+        open={labelTarget !== null}
+        onClose={() => setLabelTarget(null)}
+        title="Label Rak"
+        size="sm"
+        footer={
+          <>
+            <Button variant="outline" onClick={() => setLabelTarget(null)}>
+              Tutup
+            </Button>
+            <Button
+              onClick={handlePrintLabel}
+              className="bg-[#075489] hover:bg-[#075489]/90 text-white"
+            >
+              Cetak
+            </Button>
+          </>
+        }
+      >
+        {labelTarget && (
+          <div className="space-y-3">
+            <div className="rounded-lg border border-gray-200 px-4 py-3">
+              <p className="text-[11px] font-semibold tracking-wider text-gray-500">LOKASI RAK</p>
+              <p className="text-lg font-bold uppercase text-gray-900">{labelTarget.name}</p>
+              <Barcode
+                id="rak-label-barcode"
+                value={labelTarget.name}
+                height={56}
+                className="mt-2 h-auto w-full"
+              />
+              {labelTarget.note && <p className="mt-1 text-xs text-gray-500">{labelTarget.note}</p>}
+            </div>
+            {!isCode128Safe(labelTarget.name) && (
+              <p className="text-xs text-red-600">
+                Nama rak ini mengandung karakter yang tidak bisa dikodekan ke barcode, jadi hasil
+                scan tidak akan cocok. Pakai huruf, angka, dan spasi biasa saja.
+              </p>
+            )}
+            <p className="text-xs text-gray-500">
+              Tempel label ini di rak. Barcode-nya berisi nama rak, jadi bila nama rak diubah, label
+              wajib dicetak ulang.
+            </p>
+          </div>
+        )}
+      </Modal>
 
       <ConfirmDialog
         open={deleteTarget !== null}

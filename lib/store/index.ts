@@ -14,6 +14,7 @@ import sterilizationReducer from "./slices/sterilizationSlice"
 import bmhpReducer from "./slices/bmhpSlice"
 import washerMachineReducer from "./slices/washerMachineSlice"
 import sterilizerMachineReducer from "./slices/sterilizerMachineSlice"
+import packagingTypeReducer from "./slices/packagingTypeSlice"
 import rackReducer from "./slices/rackSlice"
 import printerReducer from "./slices/printerSlice"
 import notifReducer from "./slices/notifSlice"
@@ -46,6 +47,7 @@ export const store = configureStore({
     bmhps: bmhpReducer,
     washerMachines: washerMachineReducer,
     sterilizerMachines: sterilizerMachineReducer,
+    packagingTypes: packagingTypeReducer,
     racks: rackReducer,
     printers: printerReducer,
     notif: notifReducer,

@@ -1,21 +1,20 @@
 import { createAsyncThunk, createSlice, type PayloadAction } from "@reduxjs/toolkit"
 import api from "@/lib/axios"
 
-export type SterilizerMachine = {
+// Master jenis kemasan (tahap Packaging). `shelf_life_days` = masa simpan steril:
+// jenis yang dipilih operator saat Selesai Pengemasan menentukan tgl kedaluwarsa.
+export type PackagingTypeMaster = {
   id: number
   code: string
   name: string
-  location: string | null
-  temperature: string | null
-  duration_minutes: number | null
-  status: "aktif" | "nonaktif"
+  shelf_life_days: number
   note: string | null
   created_at: string
   updated_at: string
 }
 
-type SterilizerMachineState = {
-  items: SterilizerMachine[]
+type PackagingTypeState = {
+  items: PackagingTypeMaster[]
   totalItems: number
   totalPages: number
   page: number
@@ -25,7 +24,7 @@ type SterilizerMachineState = {
   dirty: boolean
 }
 
-const initialState: SterilizerMachineState = {
+const initialState: PackagingTypeState = {
   items: [],
   totalItems: 0,
   totalPages: 1,
@@ -36,41 +35,40 @@ const initialState: SterilizerMachineState = {
   dirty: false,
 }
 
-export const fetchSterilizerMachines = createAsyncThunk(
-  "sterilizerMachines/fetch",
+export const fetchPackagingTypes = createAsyncThunk(
+  "packagingTypes/fetch",
   async (_, { getState }) => {
-    const { page, search } = (getState() as { sterilizerMachines: SterilizerMachineState })
-      .sterilizerMachines
-    const res = await api.get("/master/sterilizer-machines", {
+    const { page, search } = (getState() as { packagingTypes: PackagingTypeState }).packagingTypes
+    const res = await api.get("/master/packaging-types", {
       params: { page, search: search || undefined },
     })
     return res.data.data
   }
 )
 
-const sterilizerMachineSlice = createSlice({
-  name: "sterilizerMachines",
+const packagingTypeSlice = createSlice({
+  name: "packagingTypes",
   initialState,
   reducers: {
-    setSterilizerMachineSearch(state, action: PayloadAction<string>) {
+    setPackagingTypeSearch(state, action: PayloadAction<string>) {
       state.search = action.payload
       state.page = 1
       state.loaded = false
     },
-    setSterilizerMachinePage(state, action: PayloadAction<number>) {
+    setPackagingTypePage(state, action: PayloadAction<number>) {
       state.page = action.payload
       state.loaded = false
     },
-    invalidateSterilizerMachines(state) {
+    invalidatePackagingTypes(state) {
       state.dirty = true
     },
   },
   extraReducers: (builder) => {
     builder
-      .addCase(fetchSterilizerMachines.pending, (state) => {
+      .addCase(fetchPackagingTypes.pending, (state) => {
         state.loading = true
       })
-      .addCase(fetchSterilizerMachines.fulfilled, (state, action) => {
+      .addCase(fetchPackagingTypes.fulfilled, (state, action) => {
         state.items = action.payload.data
         state.totalItems = action.payload.total
         state.totalPages = action.payload.last_page
@@ -78,15 +76,12 @@ const sterilizerMachineSlice = createSlice({
         state.loaded = true
         state.dirty = false
       })
-      .addCase(fetchSterilizerMachines.rejected, (state) => {
+      .addCase(fetchPackagingTypes.rejected, (state) => {
         state.loading = false
       })
   },
 })
 
-export const {
-  setSterilizerMachineSearch,
-  setSterilizerMachinePage,
-  invalidateSterilizerMachines,
-} = sterilizerMachineSlice.actions
-export default sterilizerMachineSlice.reducer
+export const { setPackagingTypeSearch, setPackagingTypePage, invalidatePackagingTypes } =
+  packagingTypeSlice.actions
+export default packagingTypeSlice.reducer

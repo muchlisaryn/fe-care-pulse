@@ -1,7 +1,7 @@
 "use client"
 
 import { useMemo, useState } from "react"
-import { FlaskConical, CheckCircle2, Layers, X, ChevronDown, ChevronRight, Check } from "lucide-react"
+import { FlaskConical, CheckCircle2, Layers, X, ChevronRight, Check, Search, ZoomIn } from "lucide-react"
 import { Button } from "@/components/atoms/Button"
 import { Badge } from "@/components/atoms/Badge"
 import { Input } from "@/components/atoms/Input"
@@ -22,20 +22,19 @@ function formatDateTime(value: string | null) {
   return d.toLocaleString("id-ID", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })
 }
 
+// Tanggal saja (tanpa jam) — dipakai di samping kode batch pada kartu.
+function formatDate(value: string | null) {
+  if (!value) return "—"
+  const d = new Date(value)
+  if (Number.isNaN(d.getTime())) return value
+  return d.toLocaleDateString("id-ID", { day: "2-digit", month: "short", year: "numeric" })
+}
+
 function nowLocalInput(): string {
   const d = new Date()
   d.setMinutes(d.getMinutes() - d.getTimezoneOffset())
   return d.toISOString().slice(0, 16)
 }
-
-// Tanggal lokal (YYYY-MM-DD) sekarang + `days` hari, untuk <input type="date">.
-function plusDaysDateInput(days: number): string {
-  const d = new Date()
-  d.setDate(d.getDate() + days)
-  d.setMinutes(d.getMinutes() - d.getTimezoneOffset())
-  return d.toISOString().slice(0, 10)
-}
-
 
 function errMsg(e: unknown): string {
   const x = e as { response?: { data?: { message?: string } } }
@@ -44,22 +43,52 @@ function errMsg(e: unknown): string {
 
 const NO_INSTRUMENT = "(Tanpa nama instrumen)"
 
-type UnitGroup = { instrument: string; image: string | null; source: ProdSterilizeUnit["source"] | null; units: ProdSterilizeUnit[] }
+type UnitGroup = {
+  key: string
+  title: string // nama paket (source paket) / nama instrumen (source satuan)
+  barcodeNo: string | null // nomor label fisik (packaging_item.barcode_no)
+  image: string | null
+  source: ProdSterilizeUnit["source"] | null
+  units: ProdSterilizeUnit[]
+}
 
+// Kelompokkan unit per LABEL FISIK, yaitu `barcode_no` dari packaging_item — satu
+// barcode = satu kemasan, jadi dua set bernama sama tetap jadi dua baris. Unit lama
+// yang belum punya barcode_no jatuh ke pengelompokan lama (nama paket / instrumen).
 function groupUnits(units: ProdSterilizeUnit[]): UnitGroup[] {
   const groups: UnitGroup[] = []
   const index = new Map<string, UnitGroup>()
   for (const u of units) {
-    const key = u.instrument ?? NO_INSTRUMENT
+    const isPaket = u.source === "paket"
+    const title = isPaket ? u.package_name ?? "Paket" : u.instrument ?? NO_INSTRUMENT
+    const key = u.barcode_no ? `barcode::${u.barcode_no}` : `${u.source}::${title}`
     let g = index.get(key)
     if (!g) {
-      g = { instrument: key, image: u.image_url ?? null, source: u.source, units: [] }
+      g = {
+        key,
+        title,
+        barcodeNo: u.barcode_no ?? null,
+        image: u.image_url ?? null,
+        source: u.source,
+        units: [],
+      }
       index.set(key, g)
       groups.push(g)
     }
+    if (!g.image && u.image_url) g.image = u.image_url
     g.units.push(u)
   }
   return groups
+}
+
+// Ringkas unit dalam satu grup jadi daftar "nama instrumen + jumlah unit".
+function instrumentCounts(units: ProdSterilizeUnit[]): { name: string; qty: number }[] {
+  const map = new Map<string, number>()
+  for (const u of units) {
+    const name = u.instrument ?? "Instrumen"
+    map.set(name, (map.get(name) ?? 0) + 1)
+  }
+  return [...map.entries()].map(([name, qty]) => ({ name, qty }))
 }
 
 const METHOD_OPTIONS = [
@@ -74,7 +103,7 @@ const METHOD_DEFAULTS: Record<string, { temperature: string; duration_minutes: s
   plasma: { temperature: "50", duration_minutes: "47" },
   panas_kering: { temperature: "170", duration_minutes: "60" },
 }
-const emptyForm = { machine: "", method: "uap", cycle_number: "", temperature: "", duration_minutes: "", sterilized_at: "", expiry_date: "", note: "" }
+const emptyForm = { machine: "", method: "uap", cycle_number: "", temperature: "", duration_minutes: "", sterilized_at: "", note: "" }
 
 /**
  * Tab Sterilisasi pipeline PRODUKSI. Beberapa item "Siap Disterilkan" (satuan/paket)
@@ -84,15 +113,24 @@ const emptyForm = { machine: "", method: "uap", cycle_number: "", temperature: "
 export function ProductionSterilizationTab({
   items,
   onChanged,
+  scannedCodes = [],
+  onScanRemove,
+  onScanClear,
 }: {
   items: ProdSterilizeOrder[]
   onChanged: () => void
+  // Label (barcode_no) yang tercentang lewat mode scan di kolom pencarian halaman.
+  // Digabung dengan centang manual di sini, jadi keduanya setara.
+  scannedCodes?: string[]
+  onScanRemove?: (code: string) => void
+  onScanClear?: () => void
 }) {
   const toast = useToast()
   const ready = useMemo(() => items.filter((o) => o.kind === "ready"), [items])
 
   // PKG id yang dicentang untuk digabung ke batch.
-  const [selected, setSelected] = useState<Set<number>>(new Set())
+  // Label kemasan (barcode_no) yang dicentang untuk digabung ke batch.
+  const [selected, setSelected] = useState<Set<string>>(new Set())
   const [batchOpen, setBatchOpen] = useState(false)
   const [form, setForm] = useState(emptyForm)
   // Daftar mesin sterilisator aktif (master) untuk dropdown pilihan mesin.
@@ -127,31 +165,38 @@ export function ProductionSterilizationTab({
   })
   const [vSaving, setVSaving] = useState(false)
   const [vError, setVError] = useState<string | null>(null)
+  // Kata kunci pencarian daftar "Hasil per Unit" (cocokkan nama instrumen / kode).
+  const [vSearch, setVSearch] = useState("")
   // Konfirmasi "Selesaikan Validasi" sebelum benar-benar menyimpan.
   const [confirmValidate, setConfirmValidate] = useState(false)
   // instrument_stock_id unit yang dicentang BERHASIL steril (sisanya = gagal → re-proses).
   const [passed, setPassed] = useState<Set<number>>(new Set())
 
   const [zoom, setZoom] = useState<{ url: string; name: string } | null>(null)
-  // Kartu yang daftar unitnya sedang ditampilkan.
-  const [openUnits, setOpenUnits] = useState<Set<string>>(new Set())
   // Batch riwayat yang detail sterilisasinya sedang ditampilkan di modal.
   const [detailOrder, setDetailOrder] = useState<ProdSterilizeOrder | null>(null)
 
-  const selectedReady = useMemo(() => ready.filter((o) => selected.has(o.id)), [ready, selected])
+  // Centang efektif = centang manual + label hasil scan. Digabung lewat turunan
+  // (bukan efek) supaya hasil scan langsung terlihat tanpa sinkronisasi state.
+  const selectedKeys = useMemo(
+    () => new Set<string>([...selected, ...scannedCodes]),
+    [selected, scannedCodes],
+  )
+  const selectedReady = useMemo(
+    () => ready.filter((o) => selectedKeys.has(o.barcode_no ?? String(o.id))),
+    [ready, selectedKeys],
+  )
   const selectedUnitCount = selectedReady.reduce((s, o) => s + o.unit_count, 0)
 
-  function toggleSelect(id: number) {
-    setSelected((prev) => {
-      const next = new Set(prev)
-      if (next.has(id)) next.delete(id)
-      else next.add(id)
-      return next
-    })
-  }
+  function toggleSelect(key: string) {
+    // Label yang tercentang dari hasil scan dilepas lewat pemiliknya (halaman),
+    // bukan disimpan ganda di sini.
+    if (scannedCodes.includes(key)) {
+      onScanRemove?.(key)
 
-  function toggleUnits(key: string) {
-    setOpenUnits((prev) => {
+      return
+    }
+    setSelected((prev) => {
       const next = new Set(prev)
       if (next.has(key)) next.delete(key)
       else next.add(key)
@@ -166,8 +211,6 @@ export function ProductionSterilizationTab({
     setForm({
       ...emptyForm,
       sterilized_at: nowLocalInput(),
-      // Kedaluwarsa steril otomatis: 7 hari dari sekarang (bisa diubah operator).
-      expiry_date: plusDaysDateInput(7),
       temperature: preset?.temperature ?? "",
       duration_minutes: preset?.duration_minutes ?? "",
     })
@@ -189,8 +232,8 @@ export function ProductionSterilizationTab({
     try {
       const num = (v: string) => (v.trim() === "" ? null : Number(v))
       const res = await api.post("/master/sterilization-pipeline/batch", {
-        // Tray PKG vs unit re-proses lepas dipisah ke dua field.
-        packaging_ids: selectedReady.filter((o) => !o.reprocess).map((o) => o.id),
+        // Label kemasan vs unit re-proses lepas dipisah ke dua field.
+        barcode_nos: selectedReady.filter((o) => !o.reprocess).map((o) => o.barcode_no),
         reproc_stock_ids: selectedReady.filter((o) => o.reprocess).map((o) => o.stock_id),
         machine: form.machine.trim(),
         method: form.method,
@@ -198,12 +241,12 @@ export function ProductionSterilizationTab({
         temperature: num(form.temperature),
         duration_minutes: num(form.duration_minutes),
         sterilized_at: new Date(form.sterilized_at).toISOString(),
-        expiry_date: form.expiry_date || null,
         note: form.note.trim() || null,
       })
       setDone({ batch: res.data?.data?.code ?? "—", count: selectedReady.length })
       setBatchOpen(false)
       setSelected(new Set())
+      onScanClear?.()
       onChanged()
       toast.success(res.data?.message ?? "Batch sterilisasi berhasil dibuat.")
     } catch (e) {
@@ -223,6 +266,7 @@ export function ProductionSterilizationTab({
   function openValidate(order: ProdSterilizeOrder) {
     setValidating(order)
     setVError(null)
+    setVSearch("")
     const b = order.sterilization
     setVForm({
       chemical_indicator: b?.chemical_indicator ?? "",
@@ -239,6 +283,21 @@ export function ProductionSterilizationTab({
       const next = new Set(prev)
       if (next.has(stockId)) next.delete(stockId)
       else next.add(stockId)
+      return next
+    })
+  }
+
+  // Paket divalidasi utuh (all-or-nothing): satu klik men-toggle SEMUA instrumen di
+  // dalamnya. Sterilisasi paket tidak bisa dicicil — sebagian gagal = seluruh paket
+  // masuk antre re-proses, jadi kalau dijadikan gagal beri notifikasi.
+  function togglePaketPassed(g: UnitGroup) {
+    const sids = g.units.map((u) => u.instrument_stock_id).filter((x): x is number => x != null)
+    if (sids.length === 0) return
+    const allPassed = sids.every((id) => passed.has(id))
+    setPassed((prev) => {
+      const next = new Set(prev)
+      if (allPassed) sids.forEach((id) => next.delete(id))
+      else sids.forEach((id) => next.add(id))
       return next
     })
   }
@@ -299,12 +358,12 @@ export function ProductionSterilizationTab({
       {ready.length > 0 && (
         <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
           <span className="text-xs text-gray-600">
-            {selected.size > 0 ? `${selected.size} item dipilih · ${selectedUnitCount} unit` : "Pilih item untuk digabung ke batch."}
+            {selectedKeys.size > 0 ? `${selectedKeys.size} item dipilih · ${selectedUnitCount} unit` : "Pilih item untuk digabung ke batch."}
           </span>
           <Button
             type="button"
             onClick={openBatch}
-            disabled={selected.size === 0}
+            disabled={selectedKeys.size === 0}
             className="w-full bg-[#075489] hover:bg-[#075489]/90 text-white sm:w-auto"
           >
             Buat Batch
@@ -315,22 +374,24 @@ export function ProductionSterilizationTab({
       <div className="space-y-2">
         {items.map((order) => {
           const inBatch = order.kind === "batch"
-          const key = `${order.kind}-${order.id}`
-          const checked = selected.has(order.id)
-          // Daftar unit default tertutup (baik batch maupun ready); klik untuk membuka.
-          const unitsOpen = openUnits.has(key)
-          const groups = groupUnits(order.units)
+          // Baris siap-steril diidentifikasi nomor labelnya (satu label = satu
+          // kemasan); entri re-proses lepas jatuh ke id sintetisnya.
+          const selectKey = order.barcode_no ?? String(order.id)
+          const key = inBatch ? `batch-${order.id}` : `ready-${selectKey}`
+          const checked = selectedKeys.has(selectKey)
           // Batch riwayat (sudah divalidasi) → tampilkan detail proses sterilisasinya.
           const ster = order.sterilization
           const isHistory = inBatch && ster != null && ster.status !== "diproses"
           return (
             <div
               key={key}
+              // Dipakai halaman untuk menggulir otomatis ke kartu hasil scan.
+              id={order.barcode_no ? `ster-label-${order.barcode_no}` : undefined}
               onClick={
                 isHistory
                   ? () => setDetailOrder(order)
                   : !inBatch
-                    ? () => toggleSelect(order.id)
+                    ? () => toggleSelect(selectKey)
                     : undefined
               }
               className={
@@ -358,17 +419,16 @@ export function ProductionSterilizationTab({
                     />
                   )}
                   <div className="min-w-0 flex-1">
+                    {/* Baris 1: nomor label kemasan (siap-steril) / kode batch STR. */}
                     <div className="flex flex-wrap items-center gap-2">
-                      {inBatch ? (
-                        <span className="text-sm font-semibold text-gray-900">Batch {order.code}</span>
-                      ) : (
-                        <span className="rounded bg-[#075489]/10 px-2 py-0.5 font-mono text-sm font-semibold text-[#075489]">
-                          {order.code}
-                        </span>
-                      )}
-                      {!inBatch && order.borrowed_by && (
-                        <span className="truncate text-sm font-medium text-gray-700">{order.borrowed_by}</span>
-                      )}
+                      <span className="rounded bg-[#075489]/10 px-2 py-0.5 font-mono text-sm font-semibold text-[#075489]">
+                        {order.barcode_no ?? order.code}
+                      </span>
+                      {/* Item siap-steril: waktu pengemasan selesai. Kartu batch STR
+                          memakai `processed_at` yang berisi waktu sterilisasinya. */}
+                      <span className="text-xs text-gray-500">
+                        {inBatch ? "Disterilkan" : "Selesai packaging"}: {formatDate(order.processed_at)}
+                      </span>
                       {inBatch &&
                         (order.sterilization?.status === "selesai" ? (
                           <Badge variant="success">Steril</Badge>
@@ -378,68 +438,13 @@ export function ProductionSterilizationTab({
                           <Badge variant="warning">Menunggu Validasi</Badge>
                         ))}
                     </div>
-                    <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-gray-500">
-                      <span className="inline-flex items-center gap-1">
-                        <Layers className="h-3.5 w-3.5 text-gray-400" />
-                        {order.unit_count} unit
-                      </span>
-                      {order.code_transaction && (
-                        <span className="font-mono text-gray-400">{order.code_transaction}</span>
-                      )}
-                      {inBatch && order.sterilization && <span>Mesin: {order.sterilization.machine ?? "—"}</span>}
-                    </div>
-                    {/* Riwayat → detail dibuka lewat modal saat kartu diklik. */}
-                    {!isHistory && (
-                      <>
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation()
-                            toggleUnits(key)
-                          }}
-                          className="mt-1.5 flex items-center gap-1 text-xs font-medium text-gray-400 hover:text-gray-600"
-                        >
-                          Unit Disterilkan ({order.unit_count})
-                          <ChevronDown className={"h-3.5 w-3.5 transition-transform " + (unitsOpen ? "rotate-180" : "")} />
-                        </button>
-                        {unitsOpen && (
-                          <div
-                            onClick={(e) => e.stopPropagation()}
-                            className="mt-1.5 divide-y divide-gray-100 rounded-lg border border-gray-200 bg-white"
-                          >
-                            {groups.map((g) => (
-                              <div key={g.instrument} className="px-3 py-2">
-                                <div className="flex items-center gap-2">
-                                  {g.image ? (
-                                    <button
-                                      type="button"
-                                      onClick={() => setZoom({ url: g.image as string, name: g.instrument })}
-                                      className="group relative h-7 w-7 shrink-0 cursor-zoom-in overflow-hidden rounded border border-gray-200"
-                                    >
-                                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                                      <img src={g.image} alt={g.instrument} className="h-full w-full object-cover" />
-                                    </button>
-                                  ) : (
-                                    <Layers className="h-4 w-4 shrink-0 text-[#075489]" />
-                                  )}
-                                  <span className="min-w-0 truncate text-sm font-medium text-gray-800">{g.instrument}</span>
-                                  <span className="ml-auto inline-flex shrink-0 items-center rounded-full bg-[#075489]/10 px-2 py-0.5 text-xs font-semibold text-[#075489]">
-                                    {g.units.length} unit
-                                  </span>
-                                </div>
-                                <div className="mt-1 flex flex-wrap gap-1.5">
-                                  {g.units.map((u) => (
-                                    <span key={u.id} className="rounded bg-[#075489]/10 px-1.5 py-0.5 font-mono text-[11px] font-semibold text-[#075489]">
-                                      {u.code ?? `#${u.id}`}
-                                    </span>
-                                  ))}
-                                </div>
-                              </div>
-                            ))}
-                          </div>
-                        )}
-                      </>
-                    )}
+
+                    {/* Baris 2: nama label — nama paket bila set, nama instrumen bila
+                        satuan (keduanya dari relasi production_item). Kartu batch STR
+                        yang belum punya `name` jatuh ke nama produksinya. */}
+                    <p className="mt-1 truncate text-sm font-medium text-gray-800">
+                      {order.name ?? order.borrowed_by ?? NO_INSTRUMENT}
+                    </p>
                   </div>
                 </div>
                 {inBatch && order.sterilization?.status === "diproses" && (
@@ -495,20 +500,43 @@ export function ProductionSterilizationTab({
               Item dalam batch ({selectedReady.length} item · {selectedUnitCount} unit)
             </p>
             <div className="flex flex-wrap gap-1.5">
-              {selectedReady.map((o) => (
-                <span key={o.id} className="inline-flex items-center gap-1.5 rounded-md bg-white py-0.5 pl-0.5 pr-1.5 text-xs text-gray-700 ring-1 ring-gray-200">
-                  {o.image_url ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img src={o.image_url} alt={o.borrowed_by ?? o.code} className="h-6 w-6 shrink-0 rounded object-cover" />
-                  ) : (
-                    <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded bg-gray-100 text-gray-400">
-                      <FlaskConical className="h-3.5 w-3.5" />
-                    </span>
-                  )}
-                  <span className="font-medium">{o.borrowed_by ?? o.code}</span>
-                  <span className="text-gray-400">· {o.unit_count} unit</span>
-                </span>
-              ))}
+              {selectedReady.map((o) => {
+                // Beberapa label bisa berasal dari PKG yang sama, jadi `id` TIDAK
+                // unik — identitas barisnya nomor label.
+                const label = o.barcode_no ?? String(o.id)
+                return (
+                  <span
+                    key={label}
+                    className="inline-flex items-center gap-1.5 rounded-md bg-white py-0.5 pl-0.5 pr-1.5 text-xs text-gray-700 ring-1 ring-gray-200"
+                  >
+                    {o.image_url ? (
+                      <button
+                        type="button"
+                        onClick={() => setZoom({ url: o.image_url as string, name: o.name ?? o.borrowed_by ?? o.code })}
+                        title="Klik untuk perbesar"
+                        className="group relative h-6 w-6 shrink-0 cursor-zoom-in overflow-hidden rounded border border-gray-200"
+                      >
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          src={o.image_url}
+                          alt={o.name ?? o.borrowed_by ?? o.code}
+                          className="h-full w-full object-cover transition-transform group-hover:scale-105"
+                        />
+                        <span className="absolute inset-0 flex items-center justify-center bg-black/0 text-white opacity-0 transition group-hover:bg-black/30 group-hover:opacity-100">
+                          <ZoomIn className="h-3 w-3" />
+                        </span>
+                      </button>
+                    ) : (
+                      <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded bg-gray-100 text-gray-400">
+                        <FlaskConical className="h-3.5 w-3.5" />
+                      </span>
+                    )}
+                    <span className="font-medium">{o.name ?? o.borrowed_by ?? o.code}</span>
+                    {o.barcode_no && <span className="font-mono text-gray-400">{o.barcode_no}</span>}
+                    <span className="text-gray-400">· {o.unit_count} unit</span>
+                  </span>
+                )
+              })}
             </div>
           </div>
 
@@ -551,11 +579,6 @@ export function ProductionSterilizationTab({
             <div className="space-y-1.5">
               <Label htmlFor="pstr-at">Waktu Sterilisasi *</Label>
               <Input id="pstr-at" type="datetime-local" value={form.sterilized_at} onChange={(e) => setForm((f) => ({ ...f, sterilized_at: e.target.value }))} />
-            </div>
-            <div className="space-y-1.5 sm:col-span-2">
-              <Label htmlFor="pstr-expiry">Tanggal Kedaluwarsa Steril</Label>
-              <Input id="pstr-expiry" type="date" min={form.sterilized_at ? form.sterilized_at.slice(0, 10) : undefined} value={form.expiry_date} onChange={(e) => setForm((f) => ({ ...f, expiry_date: e.target.value }))} />
-              <p className="text-xs text-gray-400">Default 7 hari dari sekarang — bisa diubah.</p>
             </div>
           </div>
 
@@ -628,36 +651,103 @@ export function ProductionSterilizationTab({
                   </button>
                 </div>
               </div>
+              {/* Cari unit berdasarkan nama instrumen / kode. */}
+              <div className="relative">
+                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[#075489]" />
+                <Input
+                  value={vSearch}
+                  onChange={(e) => setVSearch(e.target.value)}
+                  placeholder="Cari nama instrumen atau kode unit..."
+                  className="pl-9"
+                />
+              </div>
               <div className="max-h-64 divide-y divide-gray-100 overflow-y-auto rounded-lg border border-gray-200">
-                {validating.units.map((u) => {
-                  const sid = u.instrument_stock_id
-                  const ok = sid != null && passed.has(sid)
-                  return (
-                    <button
-                      key={u.id}
-                      type="button"
-                      disabled={sid == null}
-                      onClick={() => sid != null && togglePassed(sid)}
-                      className="flex w-full items-center gap-3 px-3 py-2 text-left hover:bg-gray-50 disabled:opacity-50"
-                    >
-                      <span
-                        className={
-                          "flex h-5 w-5 shrink-0 items-center justify-center rounded border " +
-                          (ok ? "border-green-600 bg-green-600 text-white" : "border-gray-300 bg-white")
-                        }
-                      >
-                        {ok && <Check className="h-3.5 w-3.5" />}
-                      </span>
-                      <span className="min-w-0 flex-1">
-                        <span className="block truncate text-sm font-medium text-gray-800">{u.instrument ?? "Instrumen"}</span>
-                        <span className="block font-mono text-[11px] text-gray-500">{u.code ?? `#${u.id}`}</span>
-                      </span>
-                      {ok && (
-                        <span className="shrink-0 text-xs font-semibold text-green-600">Berhasil</span>
-                      )}
-                    </button>
-                  )
-                })}
+                {(() => {
+                  const q = vSearch.trim().toLowerCase()
+                  const matchU = (u: ProdSterilizeUnit) =>
+                    !q ||
+                    (u.instrument ?? "").toLowerCase().includes(q) ||
+                    (u.code ?? "").toLowerCase().includes(q) ||
+                    (u.package_name ?? "").toLowerCase().includes(q)
+                  // Kelompokkan (satuan per instrumen, paket per nama paket), lalu saring per grup.
+                  const visibleGroups = groupUnits(validating.units)
+                    .map((g) => ({ g, shownUnits: g.units.filter(matchU) }))
+                    .filter((x) => x.shownUnits.length > 0)
+                  if (visibleGroups.length === 0) {
+                    return (
+                      <p className="px-3 py-4 text-center text-xs text-gray-400">
+                        Tidak ada unit yang cocok dengan &quot;{vSearch.trim()}&quot;.
+                      </p>
+                    )
+                  }
+                  return visibleGroups.map(({ g, shownUnits }) => {
+                    // PAKET → divalidasi utuh: satu toggle untuk seluruh instrumen.
+                    if (g.source === "paket") {
+                      const sids = g.units
+                        .map((u) => u.instrument_stock_id)
+                        .filter((x): x is number => x != null)
+                      const allPassed = sids.length > 0 && sids.every((id) => passed.has(id))
+                      return (
+                        <div key={g.key} className="px-3 py-2">
+                          <button
+                            type="button"
+                            disabled={sids.length === 0}
+                            onClick={() => togglePaketPassed(g)}
+                            className="flex w-full items-center gap-3 text-left disabled:opacity-50"
+                          >
+                            <span
+                              className={
+                                "flex h-5 w-5 shrink-0 items-center justify-center rounded border " +
+                                (allPassed ? "border-green-600 bg-green-600 text-white" : "border-gray-300 bg-white")
+                              }
+                            >
+                              {allPassed && <Check className="h-3.5 w-3.5" />}
+                            </span>
+                            <span className="min-w-0 flex-1">
+                              <span className="flex items-center gap-1.5">
+                                <span className="truncate text-sm font-medium text-gray-800">{g.title}</span>
+                                <Badge variant="info">Paket</Badge>
+                                <span className="shrink-0 text-[11px] text-gray-400">{g.units.length} unit</span>
+                              </span>
+                              <span className="mt-0.5 block truncate text-[11px] text-gray-500">
+                                {instrumentCounts(g.units).map((c) => `${c.name} (${c.qty})`).join(", ")}
+                              </span>
+                            </span>
+                            {allPassed && <span className="shrink-0 text-xs font-semibold text-green-600">Berhasil</span>}
+                          </button>
+                        </div>
+                      )
+                    }
+                    // SATUAN → centang per unit.
+                    return shownUnits.map((u) => {
+                      const sid = u.instrument_stock_id
+                      const ok = sid != null && passed.has(sid)
+                      return (
+                        <button
+                          key={u.id}
+                          type="button"
+                          disabled={sid == null}
+                          onClick={() => sid != null && togglePassed(sid)}
+                          className="flex w-full items-center gap-3 px-3 py-2 text-left hover:bg-gray-50 disabled:opacity-50"
+                        >
+                          <span
+                            className={
+                              "flex h-5 w-5 shrink-0 items-center justify-center rounded border " +
+                              (ok ? "border-green-600 bg-green-600 text-white" : "border-gray-300 bg-white")
+                            }
+                          >
+                            {ok && <Check className="h-3.5 w-3.5" />}
+                          </span>
+                          <span className="min-w-0 flex-1">
+                            <span className="block truncate text-sm font-medium text-gray-800">{u.instrument ?? "Instrumen"}</span>
+                            <span className="block font-mono text-[11px] text-gray-500">{u.code ?? `#${u.id}`}</span>
+                          </span>
+                          {ok && <span className="shrink-0 text-xs font-semibold text-green-600">Berhasil</span>}
+                        </button>
+                      )
+                    })
+                  })
+                })()}
               </div>
             </div>
 
@@ -706,6 +796,7 @@ export function ProductionSterilizationTab({
         title="Selesaikan Validasi"
         confirmLabel="Selesaikan"
         loadingLabel="Memproses..."
+        size="lg"
         description={
           validating ? (
             <span className="block space-y-3">
@@ -719,12 +810,27 @@ export function ProductionSterilizationTab({
               {vPassedUnits.length > 0 && (
                 <span className="block space-y-1 rounded-lg border border-green-100 bg-green-50 px-3 py-2">
                   <span className="block text-xs font-semibold uppercase tracking-wide text-green-600">
-                    Instrumen berhasil ({vPassedUnits.length}) — steril &amp; siap rilis
+                    Instrumen berhasil
                   </span>
-                  {vPassedUnits.map((u) => (
-                    <span key={u.id} className="flex items-center justify-between gap-2">
-                      <span className="truncate text-sm text-gray-700">{u.instrument ?? "Instrumen"}</span>
-                      <span className="shrink-0 font-mono text-xs text-gray-500">{u.code ?? `#${u.id}`}</span>
+                  {groupUnits(vPassedUnits).map((g) => (
+                    <span key={g.key} className="flex items-start justify-between gap-3">
+                      <span className="min-w-0 flex-1">
+                        <span className="flex items-center gap-1.5">
+                          <span className="truncate text-sm text-gray-700">{g.title}</span>
+                          {g.source === "paket" && <Badge variant="info">Paket</Badge>}
+                          {g.units.length > 1 && (
+                            <span className="shrink-0 text-[11px] text-gray-400">×{g.units.length}</span>
+                          )}
+                        </span>
+                        {g.source === "paket" && (
+                          <span className="mt-0.5 block truncate text-[11px] text-gray-500">
+                            {instrumentCounts(g.units).map((c) => `${c.name} (${c.qty})`).join(", ")}
+                          </span>
+                        )}
+                      </span>
+                      <span className="shrink-0 text-right font-mono text-[11px] text-gray-500">
+                        {g.barcodeNo ?? g.units.map((u) => u.code ?? `#${u.id}`).join(", ")}
+                      </span>
                     </span>
                   ))}
                 </span>
@@ -732,12 +838,27 @@ export function ProductionSterilizationTab({
               {vFailedUnits.length > 0 && (
                 <span className="block space-y-1 rounded-lg border border-red-100 bg-red-50 px-3 py-2">
                   <span className="block text-xs font-semibold uppercase tracking-wide text-red-500">
-                    Instrumen gagal ({vFailedUnits.length}) — masuk antrean re-proses
+                    Antrian gagal
                   </span>
-                  {vFailedUnits.map((u) => (
-                    <span key={u.id} className="flex items-center justify-between gap-2">
-                      <span className="truncate text-sm text-gray-700">{u.instrument ?? "Instrumen"}</span>
-                      <span className="shrink-0 font-mono text-xs text-gray-500">{u.code ?? `#${u.id}`}</span>
+                  {groupUnits(vFailedUnits).map((g) => (
+                    <span key={g.key} className="flex items-start justify-between gap-3">
+                      <span className="min-w-0 flex-1">
+                        <span className="flex items-center gap-1.5">
+                          <span className="truncate text-sm text-gray-700">{g.title}</span>
+                          {g.source === "paket" && <Badge variant="info">Paket</Badge>}
+                          {g.units.length > 1 && (
+                            <span className="shrink-0 text-[11px] text-gray-400">×{g.units.length}</span>
+                          )}
+                        </span>
+                        {g.source === "paket" && (
+                          <span className="mt-0.5 block truncate text-[11px] text-gray-500">
+                            {instrumentCounts(g.units).map((c) => `${c.name} (${c.qty})`).join(", ")}
+                          </span>
+                        )}
+                      </span>
+                      <span className="shrink-0 text-right font-mono text-[11px] text-gray-500">
+                        {g.barcodeNo ?? g.units.map((u) => u.code ?? `#${u.id}`).join(", ")}
+                      </span>
                     </span>
                   ))}
                 </span>
@@ -823,39 +944,64 @@ export function ProductionSterilizationTab({
               </div>
             </div>
 
-            <div className="space-y-1.5">
+            <div className="space-y-2.5">
               <Label>Unit Disterilkan ({detailOrder.unit_count})</Label>
-              <div className="divide-y divide-gray-100 rounded-lg border border-gray-200">
-                {groupUnits(detailOrder.units).map((g) => (
-                  <div key={g.instrument} className="px-3 py-2">
+              {/* Dipisah dulu per jenis: Paket & Satuan. Untuk paket, detail isinya
+                  muncul di bawah dan tetap dikelompokkan per barcode_no (label fisik). */}
+              {[
+                { kind: "paket" as const, label: "Paket", units: detailOrder.units.filter((u) => u.source === "paket") },
+                { kind: "satuan" as const, label: "Satuan", units: detailOrder.units.filter((u) => u.source !== "paket") },
+              ]
+                .filter((sec) => sec.units.length > 0)
+                .map((sec) => (
+                  <div key={sec.kind} className="space-y-1">
                     <div className="flex items-center gap-2">
-                      {g.image ? (
-                        <button
-                          type="button"
-                          onClick={() => setZoom({ url: g.image as string, name: g.instrument })}
-                          className="group relative h-7 w-7 shrink-0 cursor-zoom-in overflow-hidden rounded border border-gray-200"
-                        >
-                          {/* eslint-disable-next-line @next/next/no-img-element */}
-                          <img src={g.image} alt={g.instrument} className="h-full w-full object-cover" />
-                        </button>
-                      ) : (
-                        <Layers className="h-4 w-4 shrink-0 text-[#075489]" />
-                      )}
-                      <span className="min-w-0 truncate text-sm font-medium text-gray-800">{g.instrument}</span>
-                      <span className="ml-auto inline-flex shrink-0 items-center rounded-full bg-[#075489]/10 px-2 py-0.5 text-xs font-semibold text-[#075489]">
-                        {g.units.length} unit
+                      <span className="text-xs font-semibold uppercase tracking-wide text-gray-500">{sec.label}</span>
+                      <span className="inline-flex shrink-0 items-center rounded-full bg-gray-100 px-2 py-0.5 text-[11px] font-semibold text-gray-500">
+                        {groupUnits(sec.units).length}
                       </span>
                     </div>
-                    <div className="mt-1 flex flex-wrap gap-1.5">
-                      {g.units.map((u) => (
-                        <span key={u.id} className="rounded bg-[#075489]/10 px-1.5 py-0.5 font-mono text-[11px] font-semibold text-[#075489]">
-                          {u.code ?? `#${u.id}`}
-                        </span>
+                    <div className="divide-y divide-gray-100 rounded-lg border border-gray-200">
+                      {groupUnits(sec.units).map((g) => (
+                        <div key={g.key} className="px-3 py-2">
+                          <div className="flex items-center gap-2">
+                            {g.source === "paket" ? (
+                              <Layers className="h-4 w-4 shrink-0 text-[#4ba69d]" />
+                            ) : g.image ? (
+                              <button
+                                type="button"
+                                onClick={() => setZoom({ url: g.image as string, name: g.title })}
+                                className="group relative h-7 w-7 shrink-0 cursor-zoom-in overflow-hidden rounded border border-gray-200"
+                              >
+                                {/* eslint-disable-next-line @next/next/no-img-element */}
+                                <img src={g.image} alt={g.title} className="h-full w-full object-cover" />
+                              </button>
+                            ) : (
+                              <Layers className="h-4 w-4 shrink-0 text-[#075489]" />
+                            )}
+                            <span className="min-w-0 truncate text-sm font-medium text-gray-800">{g.title}</span>
+                            {g.barcodeNo && (
+                              <span className="shrink-0 font-mono text-[11px] text-gray-500">{g.barcodeNo}</span>
+                            )}
+                            <span className="ml-auto inline-flex shrink-0 items-center rounded-full bg-[#075489]/10 px-2 py-0.5 text-xs font-semibold text-[#075489]">
+                              {g.units.length} unit
+                            </span>
+                          </div>
+                          {/* Detail isi paket (rincian instrumen per barcode). */}
+                          {g.source === "paket" && (
+                            <div className="mt-1 flex flex-wrap gap-1.5 pl-6">
+                              {instrumentCounts(g.units).map((c) => (
+                                <span key={c.name} className="rounded bg-[#075489]/10 px-1.5 py-0.5 text-[11px] font-semibold text-[#075489]">
+                                  {c.name} ({c.qty})
+                                </span>
+                              ))}
+                            </div>
+                          )}
+                        </div>
                       ))}
                     </div>
                   </div>
                 ))}
-              </div>
             </div>
           </div>
         )}

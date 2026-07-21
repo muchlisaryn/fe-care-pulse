@@ -826,7 +826,7 @@ function SetManager() {
                 />
               </div>
               <div className="space-y-1.5">
-                <Label htmlFor="lbl-exp">Tanggal Kadaluarsa</Label>
+                <Label htmlFor="lbl-exp">Tanggal Kadaluwarsa</Label>
                 <Input
                   id="lbl-exp"
                   type="date"

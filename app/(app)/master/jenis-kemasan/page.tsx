@@ -1,13 +1,11 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { Search, WashingMachine } from "lucide-react"
+import { Search, Package } from "lucide-react"
 import { Button } from "@/components/atoms/Button"
 import { Input } from "@/components/atoms/Input"
 import { Label } from "@/components/atoms/Label"
-import { Select } from "@/components/atoms/Select"
 import { Textarea } from "@/components/atoms/Textarea"
-import { Badge } from "@/components/atoms/Badge"
 import { Card } from "@/components/molecules/Card"
 import { DataTable, type Column } from "@/components/molecules/DataTable"
 import { Modal } from "@/components/molecules/Modal"
@@ -15,27 +13,24 @@ import { ConfirmDialog } from "@/components/molecules/ConfirmDialog"
 import { Pagination } from "@/components/molecules/Pagination"
 import { useAppDispatch, useAppSelector } from "@/lib/store/hooks"
 import {
-  fetchSterilizerMachines,
-  setSterilizerMachineSearch,
-  setSterilizerMachinePage,
-  invalidateSterilizerMachines,
-  type SterilizerMachine,
-} from "@/lib/store/slices/sterilizerMachineSlice"
+  fetchPackagingTypes,
+  setPackagingTypeSearch,
+  setPackagingTypePage,
+  invalidatePackagingTypes,
+  type PackagingTypeMaster,
+} from "@/lib/store/slices/packagingTypeSlice"
 import api from "@/lib/axios"
 
 const emptyForm = {
   name: "",
-  location: "",
-  temperature: "",
-  duration_minutes: "",
-  status: "aktif",
+  shelf_life_days: "",
   note: "",
 }
 
-export default function MasterSterilizerMachinePage() {
+export default function MasterPackagingTypePage() {
   const dispatch = useAppDispatch()
   const { items, totalItems, totalPages, page, search, loading, loaded, dirty } = useAppSelector(
-    (s) => s.sterilizerMachines
+    (s) => s.packagingTypes
   )
 
   const [searchInput, setSearchInput] = useState(search)
@@ -43,17 +38,17 @@ export default function MasterSterilizerMachinePage() {
   const [form, setForm] = useState(emptyForm)
   const [editId, setEditId] = useState<number | null>(null)
   const [saving, setSaving] = useState(false)
-  const [deleteTarget, setDeleteTarget] = useState<SterilizerMachine | null>(null)
+  const [deleteTarget, setDeleteTarget] = useState<PackagingTypeMaster | null>(null)
   const [deletingId, setDeletingId] = useState<number | null>(null)
 
   useEffect(() => {
     if (loaded && !dirty) return
-    dispatch(fetchSterilizerMachines())
+    dispatch(fetchPackagingTypes())
   }, [loaded, dirty, dispatch])
 
   function handleSearch(e: React.FormEvent) {
     e.preventDefault()
-    dispatch(setSterilizerMachineSearch(searchInput))
+    dispatch(setPackagingTypeSearch(searchInput))
   }
 
   function openTambah() {
@@ -62,38 +57,33 @@ export default function MasterSterilizerMachinePage() {
     setModal("tambah")
   }
 
-  function openEdit(row: SterilizerMachine) {
+  function openEdit(row: PackagingTypeMaster) {
     setForm({
       name: row.name,
-      location: row.location ?? "",
-      temperature: row.temperature ?? "",
-      duration_minutes: row.duration_minutes?.toString() ?? "",
-      status: row.status,
+      shelf_life_days: row.shelf_life_days.toString(),
       note: row.note ?? "",
     })
     setEditId(row.id)
     setModal("edit")
   }
 
+  const canSave = form.name.trim().length > 0 && Number(form.shelf_life_days) >= 1
+
   async function handleSave() {
-    if (!form.name.trim()) return
+    if (!canSave) return
     setSaving(true)
     try {
-      const num = (v: string) => (v.trim() === "" ? null : Number(v))
       const payload = {
         name: form.name.trim(),
-        location: form.location.trim() || null,
-        temperature: num(form.temperature),
-        duration_minutes: num(form.duration_minutes),
-        status: form.status,
+        shelf_life_days: Number(form.shelf_life_days),
         note: form.note.trim() || null,
       }
       if (modal === "tambah") {
-        await api.post("/master/sterilizer-machines", payload)
+        await api.post("/master/packaging-types", payload)
       } else if (modal === "edit" && editId !== null) {
-        await api.put(`/master/sterilizer-machines/${editId}`, payload)
+        await api.put(`/master/packaging-types/${editId}`, payload)
       }
-      dispatch(invalidateSterilizerMachines())
+      dispatch(invalidatePackagingTypes())
       setModal(null)
     } finally {
       setSaving(false)
@@ -104,18 +94,15 @@ export default function MasterSterilizerMachinePage() {
     if (!deleteTarget || deletingId !== null) return
     setDeletingId(deleteTarget.id)
     try {
-      await api.delete(`/master/sterilizer-machines/${deleteTarget.id}`)
-      dispatch(invalidateSterilizerMachines())
+      await api.delete(`/master/packaging-types/${deleteTarget.id}`)
+      dispatch(invalidatePackagingTypes())
       setDeleteTarget(null)
     } finally {
       setDeletingId(null)
     }
   }
 
-  const fmtValue = (v: string | number | null, suffix: string) =>
-    v === null || v === "" ? "—" : `${Number(v)}${suffix}`
-
-  const columns: Column<SterilizerMachine>[] = [
+  const columns: Column<PackagingTypeMaster>[] = [
     {
       header: "Kode",
       cell: (row) => (
@@ -126,30 +113,18 @@ export default function MasterSterilizerMachinePage() {
       className: "w-28",
     },
     {
-      header: "Nama Mesin",
+      header: "Jenis Kemasan",
       cell: (row) => (
         <div>
           <span className="font-medium text-gray-900">{row.name}</span>
-          {row.location ? <p className="text-xs text-gray-400 mt-0.5">{row.location}</p> : null}
+          {row.note ? <p className="text-xs text-gray-400 mt-0.5">{row.note}</p> : null}
         </div>
       ),
     },
     {
-      header: "Suhu",
-      cell: (row) => <span className="text-gray-700">{fmtValue(row.temperature, "°C")}</span>,
-      className: "w-28",
-    },
-    {
-      header: "Durasi",
-      cell: (row) => <span className="text-gray-700">{fmtValue(row.duration_minutes, " mnt")}</span>,
-      className: "w-28",
-    },
-    {
-      header: "Status",
-      cell: (row) => (
-        <Badge variant={row.status === "aktif" ? "success" : "default"}>{row.status}</Badge>
-      ),
-      className: "w-24",
+      header: "Kadaluwarsa",
+      cell: (row) => <span className="text-gray-700">{row.shelf_life_days} hari</span>,
+      className: "w-40",
     },
   ]
 
@@ -158,17 +133,18 @@ export default function MasterSterilizerMachinePage() {
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-center gap-3">
           <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-[#075489]/8 text-[#075489]">
-            <WashingMachine className="h-6 w-6" />
+            <Package className="h-6 w-6" />
           </div>
           <div>
-            <h1 className="text-2xl font-bold text-gray-900">Master Mesin Sterilisator</h1>
+            <h1 className="text-2xl font-bold text-gray-900">Master Packaging</h1>
             <p className="text-sm text-gray-500 mt-0.5">
-              Kelola mesin sterilisator (autoclave) & parameter standar sterilisasi
+              Kelola jenis kemasan & masa simpan sterilnya — menentukan tanggal kedaluwarsa saat
+              pengemasan
             </p>
           </div>
         </div>
         <Button onClick={openTambah} className="bg-[#075489] hover:bg-[#075489]/90 text-white">
-          + Tambah Mesin
+          + Tambah Jenis Kemasan
         </Button>
       </div>
 
@@ -178,7 +154,7 @@ export default function MasterSterilizerMachinePage() {
             <div className="relative flex-1">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 pointer-events-none" />
               <Input
-                placeholder="Cari nama / kode / lokasi mesin..."
+                placeholder="Cari nama / kode jenis kemasan..."
                 value={searchInput}
                 onChange={(e) => setSearchInput(e.target.value)}
                 className="pl-9"
@@ -199,7 +175,7 @@ export default function MasterSterilizerMachinePage() {
             onEdit={openEdit}
             onDelete={(row) => setDeleteTarget(row)}
             isRowLoading={(row) => deletingId === row.id}
-            emptyMessage="Belum ada mesin sterilisator."
+            emptyMessage="Belum ada jenis kemasan."
           />
         )}
 
@@ -208,7 +184,7 @@ export default function MasterSterilizerMachinePage() {
           totalPages={totalPages}
           totalItems={totalItems}
           itemsPerPage={20}
-          onPageChange={(p) => dispatch(setSterilizerMachinePage(p))}
+          onPageChange={(p) => dispatch(setPackagingTypePage(p))}
         />
       </Card>
 
@@ -222,7 +198,7 @@ export default function MasterSterilizerMachinePage() {
       <Modal
         open={modal !== null}
         onClose={() => setModal(null)}
-        title={modal === "tambah" ? "Tambah Mesin Sterilisator" : "Edit Mesin Sterilisator"}
+        title={modal === "tambah" ? "Tambah Jenis Kemasan" : "Edit Jenis Kemasan"}
         size="sm"
         footer={
           <>
@@ -231,7 +207,7 @@ export default function MasterSterilizerMachinePage() {
             </Button>
             <Button
               onClick={handleSave}
-              disabled={saving || !form.name.trim()}
+              disabled={saving || !canSave}
               className="bg-[#075489] hover:bg-[#075489]/90 text-white"
             >
               {saving ? "Menyimpan..." : "Simpan"}
@@ -241,62 +217,33 @@ export default function MasterSterilizerMachinePage() {
       >
         <div className="space-y-4">
           <div className="space-y-1.5">
-            <Label htmlFor="sm-name">Nama Mesin</Label>
+            <Label htmlFor="pt-name">Jenis Kemasan</Label>
             <Input
-              id="sm-name"
-              placeholder="Contoh: Autoclave 1"
+              id="pt-name"
+              placeholder="Contoh: Pouch Plastik"
               value={form.name}
               onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
             />
           </div>
           <div className="space-y-1.5">
-            <Label htmlFor="sm-location">Lokasi</Label>
+            <Label htmlFor="pt-shelf-life">Kadaluwarsa (hari)</Label>
             <Input
-              id="sm-location"
-              placeholder="Contoh: Ruang Sterilisasi"
-              value={form.location}
-              onChange={(e) => setForm((f) => ({ ...f, location: e.target.value }))}
+              id="pt-shelf-life"
+              type="number"
+              min={1}
+              placeholder="Contoh: 30"
+              value={form.shelf_life_days}
+              onChange={(e) => setForm((f) => ({ ...f, shelf_life_days: e.target.value }))}
             />
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-1.5">
-              <Label htmlFor="sm-temp">Suhu Standar (°C)</Label>
-              <Input
-                id="sm-temp"
-                type="number"
-                step="0.01"
-                placeholder="134"
-                value={form.temperature}
-                onChange={(e) => setForm((f) => ({ ...f, temperature: e.target.value }))}
-              />
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="sm-dur">Durasi Standar (mnt)</Label>
-              <Input
-                id="sm-dur"
-                type="number"
-                min={0}
-                placeholder="30"
-                value={form.duration_minutes}
-                onChange={(e) => setForm((f) => ({ ...f, duration_minutes: e.target.value }))}
-              />
-            </div>
+            <p className="text-xs text-gray-400">
+              Tanggal kedaluwarsa batch = tanggal kemas + masa simpan ini. Mengubahnya tidak
+              menggeser tanggal batch yang sudah terlanjur dikemas.
+            </p>
           </div>
           <div className="space-y-1.5">
-            <Label htmlFor="sm-status">Status</Label>
-            <Select
-              id="sm-status"
-              value={form.status}
-              onChange={(e) => setForm((f) => ({ ...f, status: e.target.value }))}
-            >
-              <option value="aktif">Aktif</option>
-              <option value="nonaktif">Nonaktif</option>
-            </Select>
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="sm-note">Keterangan</Label>
+            <Label htmlFor="pt-note">Keterangan</Label>
             <Textarea
-              id="sm-note"
+              id="pt-note"
               placeholder="Opsional"
               value={form.note}
               onChange={(e) => setForm((f) => ({ ...f, note: e.target.value }))}

@@ -16,7 +16,6 @@ import {
 import { Input } from "@/components/atoms/Input"
 import { Button } from "@/components/atoms/Button"
 import { Badge } from "@/components/atoms/Badge"
-import { Label } from "@/components/atoms/Label"
 import { Select } from "@/components/atoms/Select"
 import { SelectSearch } from "@/components/atoms/SelectSearch"
 import { Card } from "@/components/molecules/Card"
@@ -44,6 +43,11 @@ type StoreUnitGroup = {
   source: "satuan" | "paket"
   packageName: string | null
   units: StorageIncomingUnit[]
+}
+
+// Judul grup pada modal simpan: paket → nama paket, satuan → nama instrumen.
+function groupTitle(g: StoreUnitGroup): string {
+  return (g.source === "paket" ? g.packageName : g.units[0]?.instrument) ?? "—"
 }
 
 function formatDate(value: string | null) {
@@ -103,7 +107,8 @@ export default function StorageSterilPage() {
   // Modal simpan ke rak.
   const [active, setActive] = useState<StorageIncomingOrder | null>(null)
   const [rackById, setRackById] = useState<Record<number, string>>({})
-  const [setAll, setSetAll] = useState("")
+  // Rak yang dipilih untuk SEMUA grup sekaligus (per batch).
+  const [bulkRack, setBulkRack] = useState("")
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   // Foto instrumen yang sedang di-zoom (klik thumbnail) — null = tidak ada.
@@ -139,12 +144,6 @@ export default function StorageSterilPage() {
     }
   }
 
-  // Opsi untuk SelectSearch lokasi rak (value = nama rak, disimpan sebagai rack_code).
-  const rackSelectOptions = useMemo(
-    () => rackOptions.map((r) => ({ value: r.name, label: r.name })),
-    [rackOptions],
-  )
-
   function refresh() {
     dispatch(fetchStorageIncoming())
     dispatch(fetchProductionStorageIncoming())
@@ -156,57 +155,12 @@ export default function StorageSterilPage() {
     loadRackOptions()
     setActive(order)
     setError(null)
-    setSetAll("")
+    setBulkRack("")
     const init: Record<number, string> = {}
     order.units.forEach((u) => {
       init[u.id] = u.rack_code ?? ""
     })
     setRackById(init)
-  }
-
-  function applyAll() {
-    if (!active || !setAll.trim()) return
-    setRackById((prev) => {
-      const next = { ...prev }
-      active.units.forEach((u) => {
-        if (!u.stored) next[u.id] = setAll.trim()
-      })
-      return next
-    })
-  }
-
-  // Set satu lokasi rak untuk semua unit (belum tersimpan) dalam satu grup/paket.
-  function setGroupRack(group: StoreUnitGroup, value: string) {
-    setRackById((prev) => {
-      const next = { ...prev }
-      group.units.forEach((u) => {
-        if (!u.stored) next[u.id] = value
-      })
-      return next
-    })
-  }
-
-  async function saveStorage() {
-    if (!active || saving) return
-    const items = active.units
-      .filter((u) => !u.stored && (rackById[u.id] ?? "").trim())
-      .map((u) => ({ instrument_stock_id: u.id, rack_code: rackById[u.id].trim() }))
-    if (items.length === 0) {
-      setError("Isi lokasi rak minimal satu unit yang belum tersimpan.")
-      return
-    }
-    setSaving(true)
-    setError(null)
-    try {
-      await api.post(active.store_url ?? `/master/orders/${active.id}/store`, { items })
-      setActive(null)
-      dispatch(invalidateStorage())
-      refresh()
-    } catch (e) {
-      setError(errMsg(e))
-    } finally {
-      setSaving(false)
-    }
   }
 
   // Unit modal dikelompokkan: paket (per package_name) jadi satu grup → satu rak.
@@ -237,6 +191,52 @@ export default function StorageSterilPage() {
     }
     return groups
   }, [active])
+
+  // Set satu lokasi rak untuk semua unit (belum tersimpan) dalam satu grup/paket.
+  function setGroupRack(group: StoreUnitGroup, value: string) {
+    setRackById((prev) => {
+      const next = { ...prev }
+      group.units.forEach((u) => {
+        if (!u.stored) next[u.id] = value
+      })
+      return next
+    })
+  }
+
+  // Set satu lokasi rak untuk SELURUH batch sekaligus (semua unit belum tersimpan).
+  function setAllRack(value: string) {
+    setBulkRack(value)
+    setRackById((prev) => {
+      const next = { ...prev }
+      active?.units.forEach((u) => {
+        if (!u.stored) next[u.id] = value
+      })
+      return next
+    })
+  }
+
+  async function saveStorage() {
+    if (!active || saving) return
+    const items = active.units
+      .filter((u) => !u.stored && (rackById[u.id] ?? "").trim())
+      .map((u) => ({ instrument_stock_id: u.id, rack_code: rackById[u.id].trim() }))
+    if (items.length === 0) {
+      setError("Isi lokasi rak minimal satu unit yang belum tersimpan.")
+      return
+    }
+    setSaving(true)
+    setError(null)
+    try {
+      await api.post(active.store_url ?? `/master/orders/${active.id}/store`, { items })
+      setActive(null)
+      dispatch(invalidateStorage())
+      refresh()
+    } catch (e) {
+      setError(errMsg(e))
+    } finally {
+      setSaving(false)
+    }
+  }
 
   const q = search.trim().toLowerCase()
   const incomingFiltered = useMemo(() => {
@@ -593,14 +593,8 @@ export default function StorageSterilPage() {
         size="lg"
         footer={
           <div className="flex w-full flex-col items-stretch gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
-            {error ? (
-              <p className="text-sm text-red-600">{error}</p>
-            ) : (
-              <span className="text-xs text-gray-400">
-                Pilih lokasi rak tiap instrumen. Bila semua tersimpan, order masuk gudang steril.
-              </span>
-            )}
-            <div className="flex shrink-0 justify-end gap-2">
+            {error ? <p className="text-sm text-red-600">{error}</p> : null}
+            <div className="flex shrink-0 justify-end gap-2 sm:ml-auto">
               <Button variant="outline" onClick={() => setActive(null)} disabled={saving}>
                 Batal
               </Button>
@@ -617,24 +611,27 @@ export default function StorageSterilPage() {
       >
         {active && (
           <div className="space-y-4">
-            {/* Set rak untuk semua unit sekaligus */}
-            <div className="space-y-1.5 rounded-lg border border-gray-200 bg-gray-50 px-4 py-3">
-              <Label htmlFor="rack-all">Pilih Lokasi Rak untuk Semua Instrumen</Label>
-              <div className="flex gap-2">
-                <SelectSearch
-                  options={rackSelectOptions}
-                  value={setAll}
-                  onChange={setSetAll}
-                  loading={rackOptionsLoading}
-                  placeholder="— Pilih rak —"
-                  searchPlaceholder="Cari rak..."
-                  className="flex-1"
-                />
-                <Button type="button" variant="outline" onClick={applyAll} disabled={!setAll.trim()}>
-                  Terapkan
-                </Button>
+            {/* Pengisian rak lewat PILIHAN (dropdown) — tidak lagi via scan. Bisa
+                sekaligus se-batch (di sini) atau per paket/instrumen (di daftar). */}
+            {active.units.some((u) => !u.stored) && (
+              <div className="flex flex-col gap-2 rounded-lg border border-gray-200 bg-gray-50 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+                <div className="min-w-0">
+                  <p className="text-sm font-medium text-gray-800">Pilih Rak untuk semua paket</p>
+                  <p className="text-xs text-gray-500">
+                    Pilih satu rak untuk seluruh item di batch ini sekaligus — tetap bisa diubah per paket/instrumen di bawah.
+                  </p>
+                </div>
+                <div className="w-full sm:w-52">
+                  <SelectSearch
+                    options={rackOptions.map((r) => ({ value: r.name, label: r.name }))}
+                    value={bulkRack}
+                    onChange={(value) => setAllRack(value)}
+                    loading={rackOptionsLoading}
+                    placeholder="Pilih rak untuk semua..."
+                  />
+                </div>
               </div>
-            </div>
+            )}
 
             {/* Daftar unit + rak. Satu rak per grup: paket per nama paket,
                 satuan per jenis instrumen (unit sejenis disimpan di rak yang sama). */}
@@ -645,19 +642,33 @@ export default function StorageSterilPage() {
                 const allStored = !firstUnstored
                 const groupRack = firstUnstored ? rackById[firstUnstored.id] ?? "" : g.units[0]?.rack_code ?? ""
                 const isPaket = g.source === "paket"
-                const title = isPaket ? g.packageName : g.units[0]?.instrument ?? "—"
+                const title = groupTitle(g)
                 // Paket → gambar SET (katalog); satuan → gambar instrumen. Fallback komponen pertama.
                 const photo = isPaket
                   ? g.units[0]?.package_image ?? g.units[0]?.image_url ?? null
                   : g.units[0]?.image_url ?? null
                 return (
-                  <div key={g.key} className="rounded-lg border border-gray-200 px-3 py-2.5">
+                  <div
+                    key={g.key}
+                    className={
+                      "rounded-lg border px-3 py-2.5 transition-colors " +
+                      (allStored
+                        ? "border-gray-200"
+                        : groupRack
+                          ? "border-[#075489]/40 bg-[#075489]/5"
+                          : "border-gray-200")
+                    }
+                  >
                     <div className="flex flex-wrap items-center gap-2">
                       {/* Foto set/instrumen menggantikan ikon; klik untuk zoom. Fallback ke ikon bila tak ada foto. */}
                       {photo ? (
                         <button
                           type="button"
-                          onClick={() => setZoom({ url: photo, name: title ?? "Instrumen" })}
+                          onClick={(e) => {
+                            // Jangan ikut memilih grup — ini cuma memperbesar foto.
+                            e.stopPropagation()
+                            setZoom({ url: photo, name: title ?? "Instrumen" })
+                          }}
                           title="Klik untuk perbesar"
                           className="group relative h-7 w-7 shrink-0 cursor-zoom-in overflow-hidden rounded-md border border-gray-200"
                         >
@@ -674,33 +685,36 @@ export default function StorageSterilPage() {
                       ) : (
                         <Boxes className="h-4 w-4 shrink-0 text-[#075489]" />
                       )}
-                      <Badge variant={isPaket ? "info" : "default"}>{isPaket ? "Paket" : "Satuan"}</Badge>
+                      {/* Hanya paket yang diberi badge; satuan langsung tampil nama instrumennya. */}
+                      {isPaket && <Badge variant="info">Paket</Badge>}
                       <span className="text-sm font-medium text-gray-800">{title}</span>
                       <span className="text-xs text-gray-400">{g.units.length} unit</span>
-                      {/* Lokasi rak — sejajar judul di desktop; full-width di bawah pada mobile. */}
-                      <div className="ml-auto w-full sm:w-auto">
+                      {/* Lokasi rak dipilih dari dropdown (Master Rak). Grup yang sudah
+                          tersimpan raknya tak bisa diubah lagi. */}
+                      <div className="ml-auto w-full sm:w-52">
                         {allStored ? (
-                          <Badge variant="success">
-                            <span className="inline-flex items-center gap-1">
-                              <MapPin className="h-3 w-3" />
-                              {groupRack || "Tersimpan"}
-                            </span>
-                          </Badge>
-                        ) : (
-                          <div className="w-full sm:w-56">
-                            <SelectSearch
-                              options={rackSelectOptions}
-                              value={groupRack}
-                              onChange={(v) => setGroupRack(g, v)}
-                              loading={rackOptionsLoading}
-                              placeholder={isPaket ? "— Pilih rak paket —" : "— Pilih rak —"}
-                              searchPlaceholder="Cari rak..."
-                              triggerClassName="py-1.5 text-xs"
-                            />
+                          <div className="flex sm:justify-end">
+                            <Badge variant="success">
+                              <span className="inline-flex items-center gap-1">
+                                <MapPin className="h-3 w-3" />
+                                {groupRack || "Tersimpan"}
+                              </span>
+                            </Badge>
                           </div>
+                        ) : (
+                          <SelectSearch
+                            options={rackOptions.map((r) => ({ value: r.name, label: r.name }))}
+                            value={groupRack}
+                            onChange={(value) => setGroupRack(g, value)}
+                            loading={rackOptionsLoading}
+                            placeholder="Pilih rak..."
+                          />
                         )}
                       </div>
                     </div>
+                    {/* Kode unit hanya untuk paket (rincian isi set). Satuan cukup
+                        nama instrumennya di header — tanpa kode. */}
+                    {isPaket && (
                     <div className="mt-2 flex flex-wrap gap-1.5">
                       {g.units.map((u) => (
                         <span
@@ -711,7 +725,11 @@ export default function StorageSterilPage() {
                           {u.image_url && (
                             <button
                               type="button"
-                              onClick={() => setZoom({ url: u.image_url as string, name: u.instrument ?? u.code ?? "Instrumen" })}
+                              onClick={(e) => {
+                                // Jangan ikut memilih grup — ini cuma memperbesar foto.
+                                e.stopPropagation()
+                                setZoom({ url: u.image_url as string, name: u.instrument ?? u.code ?? "Instrumen" })
+                              }}
                               title="Klik untuk perbesar"
                               className="h-4 w-4 shrink-0 cursor-zoom-in overflow-hidden rounded-sm border border-gray-200"
                             >
@@ -723,6 +741,7 @@ export default function StorageSterilPage() {
                         </span>
                       ))}
                     </div>
+                    )}
                   </div>
                 )
               })}

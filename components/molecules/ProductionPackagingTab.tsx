@@ -1,11 +1,12 @@
 "use client"
 
 import { useEffect, useMemo, useRef, useState } from "react"
-import { Package, Check, Circle, Printer, Search, ZoomIn, X, ChevronDown, ChevronRight } from "lucide-react"
+import { Package, Check, Printer, Search, ZoomIn, X, ChevronRight } from "lucide-react"
 import { Button } from "@/components/atoms/Button"
 import { Badge } from "@/components/atoms/Badge"
 import { Input } from "@/components/atoms/Input"
 import { Label } from "@/components/atoms/Label"
+import { Select } from "@/components/atoms/Select"
 import { SelectSearch } from "@/components/atoms/SelectSearch"
 import { Barcode } from "@/components/atoms/Barcode"
 import { Modal } from "@/components/molecules/Modal"
@@ -13,6 +14,7 @@ import { useToast } from "@/components/molecules/ToastProvider"
 import api from "@/lib/axios"
 import { isEscposPrinter, printCssdLabels, type CssdLabelPayload } from "@/lib/printServer"
 import type {
+  PackagingType,
   ProdPackagingBatch,
   ProdPackagingUnit,
   ProdSterilLabel,
@@ -20,7 +22,7 @@ import type {
 } from "@/lib/store/slices/productionPackagingSlice"
 import type { Printer as PrinterConfig } from "@/lib/store/slices/printerSlice"
 
-// Satu label fisik: SATU per paket (berisi daftar instrumen di dalamnya) atau
+// Satu label fisik: SATU per set paket (berisi daftar instrumen di dalamnya) atau
 // SATU per unit untuk instrumen satuan.
 type LabelEntry = {
   kind: "satuan" | "paket"
@@ -29,26 +31,50 @@ type LabelEntry = {
   unitCode: string | null // untuk satuan
   instruments: { name: string; qty: number }[] // isi paket
   unitCodes: string[] // kode unit di dalam paket
-  productionItemId: number // id production_item (paket: item pertama di paket itu)
+  packagingItemId: number | null // id packaging_item (paket: id item pertama)
+  labelCode: string // teks yang DITAMPILKAN: tiga segmen berspasi, "PKG 26050201 1"
+  barcodeNo: string // isi barcode saat DIPINDAI: packaging_item.barcode_no, tanpa spasi
+  packageNo: number | null // nomor set (production_item.package_no) — segmen kanan kode
 }
 
-// Kode produksi yang dicetak/ditampilkan pada label: nomor batch + id production_item
-// digabung tanpa pemisah, mis. batch PRD26071403 + item 1 → PRD260714031.
-function labelProductionCode(batch: string, entry: LabelEntry) {
-  return `${batch}${entry.productionItemId}`
+// Kode yang dicetak & di-barcode pada satu label, disusun dari TIGA segmen yang
+// dipisah spasi: prefix (PKG/RPK), nomor packaging (ymd + urutan harian), lalu
+// nomor set dari production_item.package_no — mis. "PKG 26050201 1". Prefix
+// sengaja tidak dilebur ke nomor packaging. Batch lama tanpa penomoran set hanya
+// memakai dua segmen pertama.
+function buildLabelCode(prefix: string, packagingNumber: string, packageNo: number | null) {
+  return [prefix, packagingNumber, packageNo].filter((part) => part !== null && part !== "").join(" ")
 }
 
-// Kelompokkan item label: instrumen paket digabung jadi satu label per paket
-// (berdasar package_name); instrumen satuan tetap satu label per unit.
-function groupLabelEntries(items: ProdSterilLabelItem[]): LabelEntry[] {
+// Kelompokkan item label: instrumen paket digabung jadi satu label per SET FISIK
+// (package_name + package_no) — dua set bernama sama dapat labelnya masing-masing;
+// instrumen satuan tetap satu label per unit. `prefix` + `packagingNumber` dipakai
+// menyusun labelCode tiap entry.
+function groupLabelEntries(
+  items: ProdSterilLabelItem[],
+  prefix: string,
+  packagingNumber: string,
+): LabelEntry[] {
   const entries: LabelEntry[] = []
   const paketMap = new Map<string, LabelEntry>()
   for (const it of items) {
     if (it.source === "paket" && it.package_name) {
-      let e = paketMap.get(it.package_name)
+      const key = `${it.package_name}|${it.package_no ?? ""}`
+      let e = paketMap.get(key)
       if (!e) {
-        e = { kind: "paket", title: it.package_name, barcodeValue: it.package_name, unitCode: null, instruments: [], unitCodes: [], productionItemId: it.production_item_id }
-        paketMap.set(it.package_name, e)
+        e = {
+          kind: "paket",
+          title: it.package_name,
+          barcodeValue: it.package_name,
+          unitCode: null,
+          instruments: [],
+          unitCodes: [],
+          packagingItemId: it.id,
+          labelCode: buildLabelCode(prefix, packagingNumber, it.package_no),
+          barcodeNo: it.barcode_no,
+          packageNo: it.package_no,
+        }
+        paketMap.set(key, e)
         entries.push(e)
       }
       const found = e.instruments.find((x) => x.name === it.instrument_name)
@@ -63,7 +89,10 @@ function groupLabelEntries(items: ProdSterilLabelItem[]): LabelEntry[] {
         unitCode: it.unit_code ?? null,
         instruments: [],
         unitCodes: it.unit_code ? [it.unit_code] : [],
-        productionItemId: it.production_item_id,
+        packagingItemId: it.id,
+        labelCode: buildLabelCode(prefix, packagingNumber, it.package_no),
+        barcodeNo: it.barcode_no,
+        packageNo: it.package_no,
       })
     }
   }
@@ -97,42 +126,70 @@ function errMsg(e: unknown): string {
 
 type UnitGroup = { key: string; name: string; image: string | null; units: ProdPackagingUnit[] }
 
+// Unit `paket` dikelompokkan per SET FISIK — kombinasi nama paket + `package_no`
+// dari production_item — sehingga 2 set bernama sama jadi 2 grup terpisah, bukan
+// melebur. Unit `satuan` tetap dikelompokkan per instrumen. Batch lama tanpa
+// package_no (null) melebur jadi satu grup seperti perilaku sebelumnya.
 function groupUnits(units: ProdPackagingUnit[]): UnitGroup[] {
   const groups: UnitGroup[] = []
   const index = new Map<string, UnitGroup>()
   for (const u of units) {
-    const name = u.instrument?.name ?? u.package_name ?? "Instrumen"
-    const key = String(u.instrument?.id ?? name)
+    const isPaket = u.source === "paket"
+    const name = isPaket
+      ? u.package_name ?? "Paket"
+      : u.instrument?.name ?? u.package_name ?? "Instrumen"
+    // Baris paket pakai foto paket (snapshot), baris satuan foto instrumennya.
+    const image = isPaket ? u.image_url : u.instrument?.image_url ?? u.image_url
+    const key = isPaket
+      ? `paket|${name}|${u.package_no ?? ""}`
+      : `satuan|${u.instrument?.id ?? name}`
     let g = index.get(key)
     if (!g) {
-      g = { key, name, image: u.instrument?.image_url ?? null, units: [] }
+      g = { key, name, image: image ?? null, units: [] }
       index.set(key, g)
       groups.push(g)
     }
     g.units.push(u)
+    g.image ??= image ?? null
   }
   return groups
 }
 
-// Rincian isi sebuah paket dalam batch: instrumen penyusun + jumlah unit + gambar.
-function paketBreakdown(batch: ProdPackagingBatch, packageName: string) {
-  const map = new Map<string, { name: string; qty: number; image: string | null }>()
-  for (const u of batch.units) {
-    if (u.source !== "paket" || u.package_name !== packageName) continue
-    const name = u.instrument?.name ?? "Instrumen"
-    const cur = map.get(name) ?? { name, qty: 0, image: null }
-    cur.qty += 1
-    if (!cur.image && u.instrument?.image_url) cur.image = u.instrument.image_url
-    map.set(name, cur)
+// Unit cocok dengan kata kunci pencarian: kode unit (hasil scan barcode — kodenya
+// tidak lagi ditampilkan, tapi tetap bisa dicari) atau nama instrumennya.
+function unitHit(u: ProdPackagingUnit, query: string): boolean {
+  return (
+    (u.code ?? "").toLowerCase().includes(query) ||
+    (u.name ?? u.instrument?.name ?? "").toLowerCase().includes(query)
+  )
+}
+
+// Foto per nama paket / instrumen (dari unit batch) untuk thumbnail chip kartu.
+// Baris paket memakai foto paket, baris satuan memakai foto instrumennya.
+function imagesByName(batch: ProdPackagingBatch): Record<string, string> {
+  const map: Record<string, string> = {}
+  for (const u of batch.units ?? []) {
+    const image = u.image_url ?? u.instrument?.image_url
+    if (!image) continue
+    const key = u.source === "paket" ? u.package_name : u.instrument?.name ?? null
+    if (key && !map[key]) map[key] = image
   }
-  return [...map.values()]
+  return map
+}
+
+/** Tgl kedaluwarsa steril bila dikemas hari ini dengan masa simpan `days`. */
+function expiryPreview(days: number) {
+  const d = new Date()
+  d.setDate(d.getDate() + days)
+  return d.toLocaleDateString("id-ID", { day: "2-digit", month: "short", year: "numeric" })
 }
 
 /**
  * Tab "Inspection & Packaging" pipeline Produksi. Petugas memindai barcode tiap
  * unit untuk memverifikasi komponen set (checklist digital), mencatat nomor lot
- * indikator kimia, lalu menyelesaikan → sistem mencetak Label Barcode Sterilisasi
- * (nama set, batch, expiry otomatis, ID petugas) & batch jadi "Siap Disterilkan".
+ * indikator kimia & memilih jenis kemasan (masa simpannya menentukan tgl
+ * kedaluwarsa steril), lalu menyelesaikan → sistem mencetak Label Barcode
+ * Sterilisasi & batch jadi "Siap Disterilkan".
  */
 export function ProductionPackagingTab({
   items,
@@ -148,6 +205,9 @@ export function ProductionPackagingTab({
   const [scanCode, setScanCode] = useState("")
   const [scanMsg, setScanMsg] = useState<{ type: "ok" | "err"; text: string } | null>(null)
   const [chemIndicator, setChemIndicator] = useState("")
+  // Jenis kemasan terpilih — masa simpannya menentukan tgl kedaluwarsa steril.
+  const [packagingType, setPackagingType] = useState("")
+  const [types, setTypes] = useState<PackagingType[]>([])
   const [finishing, setFinishing] = useState(false)
   const [error, setError] = useState<string | null>(null)
   // Label hasil (muncul setelah selesai) untuk dicetak.
@@ -157,8 +217,6 @@ export function ProductionPackagingTab({
   const [labelViewOnly, setLabelViewOnly] = useState(false)
   // Foto instrumen yang sedang di-zoom (klik thumbnail) — null = tidak ada.
   const [zoom, setZoom] = useState<{ url: string; name: string } | null>(null)
-  // Paket yang isinya sedang ditampilkan di kartu (key `${batch.id}::${namaPaket}`).
-  const [openPaket, setOpenPaket] = useState<string | null>(null)
   // Batch yang labelnya sedang diambil ulang (untuk state loading tombol "Lihat Label").
   const [labelLoadingId, setLabelLoadingId] = useState<number | null>(null)
   // Pesan error saat mengambil ulang label (di luar modal inspeksi).
@@ -249,7 +307,8 @@ export function ProductionPackagingTab({
   const total = active?.units.length ?? 0
   const checked = inspected.size
   const allInspected = total > 0 && checked >= total
-  const canFinish = allInspected && chemIndicator.trim().length > 0 && !finishing
+  const canFinish = allInspected && chemIndicator.trim().length > 0 && packagingType !== "" && !finishing
+  const selectedType = types.find((t) => String(t.value) === packagingType) ?? null
   // Kata kunci pencarian per unit (filter checklist): cocokkan kode unit / nama instrumen.
   const query = scanCode.trim().toLowerCase()
   // Query cocok dengan kode batch (PRD / PKG) → tampilkan seluruh unit.
@@ -260,19 +319,33 @@ export function ProductionPackagingTab({
   const noMatch =
     query.length > 0 &&
     !batchHit &&
-    !groups.some(
-      (g) =>
-        g.name.toLowerCase().includes(query) ||
-        g.units.some((u) => (u.code ?? "").toLowerCase().includes(query)),
-    )
+    !groups.some((g) => g.name.toLowerCase().includes(query) || g.units.some((u) => unitHit(u, query)))
 
+  /**
+   * Buka modal inspeksi. Tidak ada penulisan ke server di sini — batch antrean
+   * (`started: false`) baru dibuatkan record packaging + packaging_item saat
+   * "Selesai & Cetak Label" ditekan (lihat `finish`).
+   */
   function open(batch: ProdPackagingBatch) {
     setActive(batch)
     setInspected(new Set())
     setScanCode("")
     setScanMsg(null)
     setChemIndicator("")
+    setPackagingType(batch.packaging_type_id != null ? String(batch.packaging_type_id) : "")
     setError(null)
+    loadTypes()
+  }
+
+  /** Muat pilihan jenis kemasan aktif (+ masa simpannya) dari master — sekali saja. */
+  async function loadTypes() {
+    if (types.length > 0) return
+    try {
+      const res = await api.get("/master/packaging-types/options")
+      setTypes((res.data?.data ?? []) as PackagingType[])
+    } catch (e) {
+      setError(errMsg(e))
+    }
   }
 
   function toggleInspect(id: number) {
@@ -324,10 +397,21 @@ export function ProductionPackagingTab({
     if (!active || !canFinish) return
     setFinishing(true)
     setError(null)
+    const payload = {
+      chemical_indicator: chemIndicator.trim(),
+      packaging_type_id: Number(packagingType),
+    }
     try {
-      const res = await api.post(`/master/packaging/${active.id}/complete`, {
-        chemical_indicator: chemIndicator.trim(),
-      })
+      // Batch antrean: record packaging + packaging_item dibuat sekarang (satu
+      // request). Batch yang recordnya sudah ada (mis. pengemasan ulang RPK)
+      // cukup ditandai selesai.
+      const res =
+        active.started && active.id != null
+          ? await api.post(`/master/packaging/${active.id}/complete`, payload)
+          : await api.post("/master/packaging/complete", {
+              washing_code: active.washing_code,
+              ...payload,
+            })
       setLabelViewOnly(false)
       setLabel(res.data?.data?.label as ProdSterilLabel)
       setActive(null)
@@ -354,6 +438,8 @@ export function ProductionPackagingTab({
   // sama. Data label tetap tersimpan di server, jadi bisa dilihat/dicetak kapan saja
   // meski modal sebelumnya sudah ditutup.
   async function viewLabel(batch: ProdPackagingBatch) {
+    // Label baru ada setelah batch dikemas, jadi id-nya pasti terisi.
+    if (batch.id == null) return
     setListError(null)
     setLabelLoadingId(batch.id)
     try {
@@ -375,7 +461,7 @@ export function ProductionPackagingTab({
   // dari Master Printer lewat printerPayload() — halaman ini tidak menimpanya.
   async function printLabel() {
     if (!label || !selectedPrinterId || printing) return
-    const entries = groupLabelEntries(label.items)
+    const entries = groupLabelEntries(label.items, label.packaging_prefix, label.packaging_number)
     if (entries.length === 0) return
 
     const selectedPrinter = printers.find((p) => String(p.id) === selectedPrinterId)
@@ -385,8 +471,17 @@ export function ProductionPackagingTab({
       // Kartu yang dipilih; bila tak ada yang dipilih → semua.
       .filter((_, i) => selectedLabels.size === 0 || selectedLabels.has(i))
       .map((e) => ({
-        kode_produksi: labelProductionCode(label.batch, e),
+        // `kode_produksi` = isi barcode SEKALIGUS teks di bawahnya. Dikirim versi
+        // TANPA SPASI (packaging_item.barcode_no, mis. "PKG260721031") supaya barcode
+        // yang tercetak identik dengan preview & cocok saat dipindai.
+        kode_produksi: e.barcodeNo,
+        // Komponen mentah label — print server boleh menyusun layout sendiri.
+        barcode_no: e.barcodeNo,
+        prefix: label.packaging_prefix,
+        code_packaging: label.packaging_number,
+        packaging_no: e.packageNo,
         nama_instrumen: e.title,
+        no_lot: label.chemical_indicator,
         petugas_pengemasan: label.packer ?? null,
         tanggal_steril: label.packaged_at,
         tanggal_kadaluarsa: label.expiry_date,
@@ -404,7 +499,7 @@ export function ProductionPackagingTab({
   }
 
   // Label yang ditampilkan: satu per paket / satu per unit satuan.
-  const labelEntries = label ? groupLabelEntries(label.items) : []
+  const labelEntries = label ? groupLabelEntries(label.items, label.packaging_prefix, label.packaging_number) : []
 
   return (
     <>
@@ -414,9 +509,14 @@ export function ProductionPackagingTab({
       <div className="space-y-2">
         {items.map((batch) => {
           const done = batch.stage_status === "selesai"
+          const imageByName = imagesByName(batch)
           return (
           <div
-            key={batch.id}
+            // Satu washing bisa punya beberapa ronde packaging (PKG lalu RPK saat
+            // ada unit gagal steril), jadi washing_code sendiri TIDAK unik. Batch
+            // yang sudah punya record dikunci id-nya; batch antrean belum punya
+            // record sama sekali sehingga washing_code-nya pasti tunggal.
+            key={batch.id != null ? `pkg-${batch.id}` : `queue-${batch.washing_code}`}
             onClick={done ? () => setHistoryBatch(batch) : undefined}
             className={
               "rounded-lg border border-gray-200" +
@@ -426,51 +526,38 @@ export function ProductionPackagingTab({
             <div className="flex items-start justify-between gap-2 px-3 py-2.5">
               <div className="flex min-w-0 items-start gap-2">
                 <div className="min-w-0">
+                  {/* Baris 1: status | kode produksi. */}
                   <div className="flex flex-wrap items-center gap-2">
-                    <span className="font-mono text-xs font-semibold text-[#075489] bg-[#075489]/8 px-2 py-0.5 rounded">
-                      {batch.code_transaction ?? batch.code}
-                    </span>
                     {done ? (
                       <Badge variant="success">Sudah Dikemas</Badge>
                     ) : (
                       <Badge variant="warning">Perlu Inspeksi</Badge>
                     )}
+                    <span className="font-mono text-xs font-semibold text-[#075489] bg-[#075489]/8 px-2 py-0.5 rounded">
+                      {batch.code_transaction ?? batch.code ?? batch.washing_code}
+                    </span>
                   </div>
                   {batch.items?.length ? (
-                    <div className="mt-1.5 flex flex-wrap items-center gap-1">
-                      {batch.items.slice(0, 4).map((it, i) => {
-                        const isPaket = it.type === "paket"
-                        const key = `${batch.id}::${it.name}`
-                        const open = openPaket === key
-                        if (!isPaket) {
-                          return (
-                            <span
-                              key={`${it.name}-${i}`}
-                              className="inline-flex max-w-[180px] items-center gap-1 rounded-md bg-gray-50 px-1.5 py-0.5 text-xs text-gray-700 ring-1 ring-gray-200"
-                            >
-                              <span className="truncate font-medium">{it.name}</span>
-                              <span className="shrink-0 text-gray-400">×{it.quantity}</span>
-                            </span>
-                          )
-                        }
-                        return (
-                          <button
-                            key={`${it.name}-${i}`}
-                            type="button"
-                            onClick={() => setOpenPaket(open ? null : key)}
-                            title="Lihat isi set"
-                            className={
-                              "inline-flex max-w-[200px] items-center gap-1 rounded-md px-1.5 py-0.5 text-xs ring-1 transition-colors " +
-                              (open
-                                ? "bg-[#075489]/10 text-[#075489] ring-[#075489]/30"
-                                : "bg-gray-50 text-gray-700 ring-gray-200 hover:bg-gray-100")
-                            }
-                          >
-                            <span className="truncate font-medium">{it.name}</span>
-                            <ChevronDown className={"h-3 w-3 shrink-0 transition-transform " + (open ? "rotate-180" : "")} />
-                          </button>
-                        )
-                      })}
+                    <div className="mt-2.5 flex flex-wrap items-center gap-1">
+                      {batch.items.slice(0, 4).map((it, i) => (
+                        <span
+                          key={`${it.name}-${i}`}
+                          title={`${it.name} ×${it.quantity}`}
+                          className="inline-flex max-w-[200px] items-center gap-1 rounded-md bg-gray-50 px-1.5 py-0.5 text-xs text-gray-700 ring-1 ring-gray-200"
+                        >
+                          {imageByName[it.name] && (
+                            // eslint-disable-next-line @next/next/no-img-element
+                            <img
+                              src={imageByName[it.name]}
+                              alt={it.name}
+                              className="h-5 w-5 shrink-0 rounded object-cover"
+                            />
+                          )}
+                          <span className="truncate font-medium">{it.name}</span>
+                          {/* Paket: jumlah SET, bukan jumlah instrumen di dalamnya. */}
+                          <span className="shrink-0 text-gray-400">×{it.quantity}</span>
+                        </span>
+                      ))}
                       {batch.items.length > 4 && (
                         <span className="rounded-md bg-[#075489]/8 px-1.5 py-0.5 text-xs font-medium text-[#075489]">
                           +{batch.items.length - 4} lainnya
@@ -479,59 +566,12 @@ export function ProductionPackagingTab({
                     </div>
                   ) : null}
 
-                  {/* Rincian isi paket yang dipilih (instrumen penyusun × jumlah). */}
-                  {openPaket?.startsWith(`${batch.id}::`) && (
-                    <div className="mt-1.5 rounded-md border border-gray-100 bg-gray-50 px-2 py-1.5">
-                      <p className="mb-1 text-[11px] font-semibold text-gray-500">
-                        Isi {openPaket.split("::")[1]}:
-                      </p>
-                      <div className="flex flex-wrap gap-1.5">
-                        {paketBreakdown(batch, openPaket.split("::")[1]).map((p) => (
-                          <span
-                            key={p.name}
-                            className="inline-flex items-center gap-1.5 rounded-md bg-white py-1 pl-1 pr-2 text-[11px] text-gray-600 ring-1 ring-gray-200"
-                          >
-                            {p.image ? (
-                              <button
-                                type="button"
-                                onClick={() => setZoom({ url: p.image as string, name: p.name })}
-                                title="Klik untuk perbesar"
-                                className="group relative h-7 w-7 shrink-0 cursor-zoom-in overflow-hidden rounded-md border border-gray-200"
-                              >
-                                {/* eslint-disable-next-line @next/next/no-img-element */}
-                                <img
-                                  src={p.image}
-                                  alt={p.name}
-                                  className="h-full w-full object-cover transition-transform group-hover:scale-105"
-                                />
-                                <span className="absolute inset-0 flex items-center justify-center bg-black/0 text-white opacity-0 transition group-hover:bg-black/30 group-hover:opacity-100">
-                                  <ZoomIn className="h-3 w-3" />
-                                </span>
-                              </button>
-                            ) : (
-                              <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-[#075489]/8">
-                                <Package className="h-3.5 w-3.5 text-[#075489]" />
-                              </span>
-                            )}
-                            <span className="font-medium text-gray-800">{p.name}</span>
-                            <span className="text-gray-400">×{p.qty}</span>
-                          </span>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                  <div className="mt-1 flex flex-wrap gap-x-4 gap-y-0.5 text-xs text-gray-500">
+                  <div className="mt-2.5 flex flex-wrap gap-x-4 gap-y-0.5 text-xs text-gray-500">
                     {done ? (
-                      <>
-                        <span>Dikemas: {formatDateTime(batch.packaged_at)}</span>
-                        {(batch.completed_by ?? batch.operator) && (
-                          <span>oleh {batch.completed_by ?? batch.operator}</span>
-                        )}
-                      </>
+                      <span>Dikemas: {formatDateTime(batch.packaged_at)}</span>
                     ) : (
                       <span>Selesai cleaning: {formatDateTime(batch.processed_at)}</span>
                     )}
-                    <span>{batch.units_count} unit</span>
                   </div>
                 </div>
               </div>
@@ -574,15 +614,8 @@ export function ProductionPackagingTab({
         size="lg"
         footer={
           <div className="flex w-full items-center justify-between gap-3">
-            {error ? (
-              <p className="text-sm text-red-600">{error}</p>
-            ) : (
-              <span className="text-xs text-gray-400">
-                Diperiksa {checked}/{total} unit
-                {!allInspected ? ` · kurang ${total - checked}` : ""}
-              </span>
-            )}
-            <div className="flex shrink-0 gap-2">
+            {error ? <p className="text-sm text-red-600">{error}</p> : null}
+            <div className="flex shrink-0 gap-2 ml-auto">
               <Button variant="outline" onClick={() => setActive(null)} disabled={finishing}>
                 Batal
               </Button>
@@ -599,37 +632,38 @@ export function ProductionPackagingTab({
       >
         {active && (
           <div className="space-y-5">
-            {/* Cari / scan per unit — memfilter checklist saat mengetik. */}
-            <div className="space-y-1.5">
-              <Label htmlFor="pkg-scan">Cari Kode Unit/Instrument</Label>
-              <div className="relative">
-                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[#075489]" />
-                <Input
-                  id="pkg-scan"
-                  value={scanCode}
-                  onChange={(e) => setScanCode(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") {
-                      e.preventDefault()
-                      handleScan()
-                    }
-                  }}
-                  placeholder=""
-                  className="pl-9"
-                />
-              </div>
-              {scanMsg && (
-                <p className={"text-xs " + (scanMsg.type === "ok" ? "text-green-600" : "text-red-600")}>
-                  {scanMsg.text}
-                </p>
-              )}
-            </div>
-
-            {/* Checklist komponen set */}
-            <div>
-              <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-400">
+            {/* Checklist komponen: pencarian + daftar unit dijadikan satu section
+                agar tidak membingungkan (cari & centang menyatu). */}
+            <div className="space-y-3 rounded-lg border border-gray-200 p-3">
+              <p className="text-xs font-semibold uppercase tracking-wide text-gray-400">
                 Checklist Komponen ({checked}/{total})
               </p>
+
+              {/* Cari / scan per unit — memfilter checklist saat mengetik. */}
+              <div className="space-y-1.5">
+                <div className="relative">
+                  <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[#075489]" />
+                  <Input
+                    id="pkg-scan"
+                    value={scanCode}
+                    onChange={(e) => setScanCode(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault()
+                        handleScan()
+                      }
+                    }}
+                    placeholder="Cari kode unit atau instrumen..."
+                    className="pl-9"
+                  />
+                </div>
+                {scanMsg && (
+                  <p className={"text-xs " + (scanMsg.type === "ok" ? "text-green-600" : "text-red-600")}>
+                    {scanMsg.text}
+                  </p>
+                )}
+              </div>
+
               <div className="divide-y divide-gray-200 overflow-hidden rounded-lg border border-gray-200 bg-white">
                 {groups.map((g) => {
                   // Filter chip per unit sesuai kata kunci; sembunyikan grup tanpa hasil.
@@ -637,13 +671,13 @@ export function ProductionPackagingTab({
                   const shown =
                     !query || batchHit || nameHit
                       ? g.units
-                      : g.units.filter((u) => (u.code ?? "").toLowerCase().includes(query))
+                      : g.units.filter((u) => unitHit(u, query))
                   if (shown.length === 0) return null
                   const checkedInGroup = g.units.filter(
                     (u) => u.instrument_stock_id != null && inspected.has(u.instrument_stock_id),
                   ).length
                   return (
-                    <div key={g.name} className="px-3 py-2.5">
+                    <div key={g.key} className="px-3 py-2.5">
                       <div className="flex items-center gap-2">
                         {g.image ? (
                           <button
@@ -670,23 +704,46 @@ export function ProductionPackagingTab({
                           {checkedInGroup}/{g.units.length}
                         </span>
                       </div>
-                      <div className="mt-1.5 flex flex-wrap gap-1.5">
+                      {/* Checklist unit: satu baris penuh per instrumen (urut ke bawah)
+                          dengan target sentuh besar agar mudah dicentang di tablet. */}
+                      <div className="mt-2 flex flex-col gap-1.5">
                         {shown.map((u) => {
                           const on = u.instrument_stock_id != null && inspected.has(u.instrument_stock_id)
                           return (
                             <button
                               key={u.id}
                               type="button"
+                              aria-pressed={on}
                               onClick={() => u.instrument_stock_id != null && toggleInspect(u.instrument_stock_id)}
                               className={
-                                "inline-flex items-center gap-1 rounded-md px-2 py-1 font-mono text-[11px] font-semibold ring-1 transition-colors " +
+                                "flex min-h-[52px] w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left ring-1 transition-colors " +
                                 (on
-                                  ? "bg-green-50 text-green-700 ring-green-300"
-                                  : "bg-gray-50 text-gray-500 ring-gray-200 hover:bg-gray-100")
+                                  ? "bg-green-50 text-green-800 ring-green-300"
+                                  : "bg-white text-gray-700 ring-gray-200 hover:bg-gray-50 active:bg-gray-100")
                               }
                             >
-                              {on ? <Check className="h-3 w-3" /> : <Circle className="h-3 w-3" />}
-                              {u.code ?? `#${u.instrument_stock_id ?? u.id}`}
+                              <span
+                                className={
+                                  "flex h-7 w-7 shrink-0 items-center justify-center rounded-md ring-1 " +
+                                  (on
+                                    ? "bg-green-600 text-white ring-green-600"
+                                    : "bg-white text-transparent ring-gray-300")
+                                }
+                              >
+                                <Check className="h-4 w-4" />
+                              </span>
+                              <span className="min-w-0 flex-1 truncate text-sm font-medium sm:text-base">
+                                {u.name ?? u.instrument?.name ?? "Instrumen"}
+                              </span>
+                              {/* Kode unit — pembeda dua instrumen sejenis dalam satu set. */}
+                              <span
+                                className={
+                                  "shrink-0 rounded px-1.5 py-0.5 font-mono text-[11px] font-semibold sm:text-xs " +
+                                  (on ? "bg-green-100 text-green-700" : "bg-gray-100 text-gray-500")
+                                }
+                              >
+                                {u.code ?? `#${u.instrument_stock_id ?? u.id}`}
+                              </span>
                             </button>
                           )
                         })}
@@ -711,9 +768,28 @@ export function ProductionPackagingTab({
                 onChange={(e) => setChemIndicator(e.target.value)}
                 placeholder="mis. CI-LOT-20260702"
               />
-              <p className="text-xs text-gray-400">
-                Nomor lot indikator kimia yang dimasukkan ke dalam kemasan.
-              </p>
+            </div>
+
+            {/* Jenis kemasan — masa simpannya menentukan tgl kedaluwarsa steril */}
+            <div className="space-y-1.5">
+              <Label htmlFor="pkg-type">Jenis Kemasan *</Label>
+              <Select
+                id="pkg-type"
+                value={packagingType}
+                onChange={(e) => setPackagingType(e.target.value)}
+              >
+                <option value="">Pilih jenis kemasan...</option>
+                {types.map((t) => (
+                  <option key={t.value} value={t.value}>
+                    {t.label} — {t.shelf_life_days} hari
+                  </option>
+                ))}
+              </Select>
+              {selectedType && (
+                <p className="text-xs text-gray-400">
+                  Kedaluwarsa steril: {expiryPreview(selectedType.shelf_life_days)}
+                </p>
+              )}
             </div>
           </div>
         )}
@@ -727,12 +803,7 @@ export function ProductionPackagingTab({
         size="lg"
         footer={
           <div className="flex w-full items-center justify-between gap-3">
-            {!selectedPrinterId ? (
-              <span className="text-xs text-amber-600">Pilih printer dulu untuk mencetak.</span>
-            ) : (
-              <span />
-            )}
-            <div className="flex shrink-0 gap-2">
+            <div className="flex shrink-0 gap-2 ml-auto">
               <Button variant="outline" onClick={closeLabel} disabled={printing}>
                 Tutup
               </Button>
@@ -744,7 +815,7 @@ export function ProductionPackagingTab({
                 <Printer className="mr-1.5 h-4 w-4" />
                 {printing
                   ? "Mencetak..."
-                  : `Cetak Label${selectedLabels.size > 0 ? ` (${selectedLabels.size})` : " (Semua)"}`}
+                  : `Cetak Label${selectedLabels.size > 0 ? ` (${selectedLabels.size})` : ""}`}
               </Button>
             </div>
           </div>
@@ -770,16 +841,13 @@ export function ProductionPackagingTab({
             <div>
               <div className="mb-2 flex items-center justify-between gap-2">
                 <p className="text-xs font-semibold uppercase tracking-wide text-gray-400">View Label</p>
-                <p className="text-xs text-gray-400">
-                  {selectedLabels.size > 0
-                    ? `${selectedLabels.size} dipilih`
-                    : "Klik kartu untuk pilih — kosong = cetak semua"}
-                </p>
+                {selectedLabels.size > 0 && (
+                  <p className="text-xs text-gray-400">{selectedLabels.size} dipilih</p>
+                )}
               </div>
               <div className="flex flex-wrap gap-3">
                 {labelEntries.map((e, i) => {
                   const picked = selectedLabels.has(i)
-                  const kodeProduksi = labelProductionCode(label.batch, e)
                   return (
                   <div
                     key={i}
@@ -791,23 +859,41 @@ export function ProductionPackagingTab({
                         : "border-gray-200 hover:border-[#075489]/40")
                     }
                   >
-                    {/* Penanda pilih */}
-                    <span
-                      className={
-                        "absolute right-2 top-2 flex h-4 w-4 items-center justify-center rounded border " +
-                        (picked ? "border-[#075489] bg-[#075489] text-white" : "border-gray-300 bg-white")
-                      }
-                    >
-                      {picked && <Check className="h-3 w-3" />}
-                    </span>
-                    {/* Barcode berisi kode produksi (batch + id production_item). */}
-                    <div className="my-2 flex justify-center">
-                      <Barcode id={`prod-steril-label-${i}`} value={kodeProduksi} height={44} moduleWidth={1.6} />
+                    {/* Penanda pilih — di baris sendiri (bukan absolute) supaya tidak
+                        menutupi barcode yang kini selebar kartu. */}
+                    <div className="mb-1 flex justify-end">
+                      <span
+                        className={
+                          "flex h-4 w-4 items-center justify-center rounded border " +
+                          (picked ? "border-[#075489] bg-[#075489] text-white" : "border-gray-300 bg-white")
+                        }
+                      >
+                        {picked && <Check className="h-3 w-3" />}
+                      </span>
                     </div>
-                    <div className="font-mono text-[11px] font-semibold text-gray-700">{kodeProduksi}</div>
+                    {/* Barcode selebar kartu; kodenya dirender oleh atom Barcode
+                        supaya lebarnya persis mengikuti area bar (di luar quiet zone). */}
+                    <div>
+                      <Barcode
+                        id={`prod-steril-label-${i}`}
+                        // Yang di-encode = barcode_no (tanpa spasi) agar hasil scan
+                        // cocok persis dengan kolom packaging_item.barcode_no;
+                        // teks di bawahnya tetap versi berspasi agar mudah dibaca.
+                        value={e.barcodeNo}
+                        height={44}
+                        moduleWidth={1.6}
+                        fluid
+                        caption={e.labelCode}
+                        captionClassName="font-mono text-[11px] font-semibold leading-tight text-gray-700"
+                      />
+                    </div>
                     <div className="mt-1 text-sm font-semibold text-gray-900">{e.title}</div>
                     <table className="mt-2 w-full text-left text-[10px]">
                       <tbody>
+                        <tr>
+                          <td className="py-0.5 pr-2 text-gray-500">No. Lot / Batch</td>
+                          <td className="py-0.5 font-medium text-gray-800">{label.chemical_indicator ?? "—"}</td>
+                        </tr>
                         <tr>
                           <td className="py-0.5 pr-2 text-gray-500">Petugas Pengemasan</td>
                           <td className="py-0.5 font-medium text-gray-800">{label.packer ?? "—"}</td>
@@ -817,7 +903,7 @@ export function ProductionPackagingTab({
                           <td className="py-0.5 font-medium text-gray-800">{formatDate(label.packaged_at)}</td>
                         </tr>
                         <tr>
-                          <td className="py-0.5 pr-2 text-gray-500">Tanggal Kadaluarsa</td>
+                          <td className="py-0.5 pr-2 text-gray-500">Tanggal Kadaluwarsa</td>
                           <td className="py-0.5 font-medium text-gray-800">{formatDate(label.expiry_date)}</td>
                         </tr>
                       </tbody>
@@ -860,44 +946,92 @@ export function ProductionPackagingTab({
           <div className="space-y-5">
             <div className="flex flex-wrap items-center gap-2">
               <Badge variant="success">Sudah Dikemas</Badge>
-              {historyBatch.code_transaction && (
-                <span className="text-xs text-gray-500">{historyBatch.code_transaction}</span>
-              )}
-              {historyBatch.washing_code && (
-                <span className="text-xs text-gray-500">{historyBatch.washing_code}</span>
-              )}
             </div>
 
             <div className="grid grid-cols-2 gap-x-4 gap-y-3 rounded-lg border border-gray-200 bg-gray-50 px-4 py-3 sm:grid-cols-3">
+              <Info label="Kode Produksi" value={historyBatch.code_transaction} />
+              <Info label="Kode Cleaning" value={historyBatch.washing_code} />
               <Info label="No. Batch (PKG)" value={historyBatch.code} />
               <Info label="No. Lot (Indikator Kimia)" value={historyBatch.chemical_indicator} />
               <Info label="Jumlah Unit" value={`${historyBatch.units_count} unit`} />
               <Info label="Diproses oleh" value={historyBatch.processed_by} />
               <Info label="Dikemas oleh" value={historyBatch.completed_by ?? historyBatch.operator} />
               <Info label="Waktu Dikemas" value={formatDateTime(historyBatch.packaged_at)} />
+              <Info label="Jenis Kemasan" value={historyBatch.packaging_type_label} />
+              <Info label="Tgl Kedaluwarsa Steril" value={historyBatch.expiry_date} />
             </div>
 
-            <div className="space-y-1.5">
+            <div className="space-y-2.5">
               <Label>Unit Dikemas ({historyBatch.units_count})</Label>
-              <div className="divide-y divide-gray-100 rounded-lg border border-gray-200">
-                {groupUnits(historyBatch.units).map((g) => (
-                  <div key={g.key} className="px-3 py-2">
-                    <div className="flex items-center gap-2">
-                      <span className="min-w-0 truncate text-sm font-medium text-gray-800">{g.name}</span>
-                      <span className="ml-auto inline-flex shrink-0 items-center rounded-full bg-[#075489]/10 px-2 py-0.5 text-xs font-semibold text-[#075489]">
-                        {g.units.length} unit
-                      </span>
-                    </div>
-                    <div className="mt-1 flex flex-wrap gap-1.5">
-                      {g.units.map((u) => (
-                        <span key={u.id} className="rounded bg-[#075489]/10 px-1.5 py-0.5 font-mono text-[11px] font-semibold text-[#075489]">
-                          {u.code ?? `#${u.id}`}
+              {/* Dipisah dulu per jenis: Paket & Satuan. Di tiap seksi, unit tetap
+                  dikelompokkan seperti sebelumnya (paket per set fisik, satuan per instrumen). */}
+              {[
+                { kind: "paket" as const, label: "Paket", units: historyBatch.units.filter((u) => u.source === "paket") },
+                { kind: "satuan" as const, label: "Satuan", units: historyBatch.units.filter((u) => u.source !== "paket") },
+              ]
+                .filter((sec) => sec.units.length > 0)
+                .map((sec) => (
+                  <div key={sec.kind} className="space-y-1">
+                    {/* Hanya seksi Paket yang diberi label; satuan langsung tampil nama instrumennya. */}
+                    {sec.kind === "paket" && (
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-semibold uppercase tracking-wide text-gray-500">{sec.label}</span>
+                        <span className="inline-flex shrink-0 items-center rounded-full bg-gray-100 px-2 py-0.5 text-[11px] font-semibold text-gray-500">
+                          {groupUnits(sec.units).length}
                         </span>
+                      </div>
+                    )}
+                    <div className="divide-y divide-gray-100 rounded-lg border border-gray-200">
+                      {groupUnits(sec.units).map((g) => (
+                        <div key={g.key} className="px-3 py-2">
+                          <div className="flex items-center gap-2">
+                            {g.image ? (
+                              <button
+                                type="button"
+                                onClick={() => setZoom({ url: g.image as string, name: g.name })}
+                                title="Klik untuk perbesar"
+                                className="group relative h-8 w-8 shrink-0 cursor-zoom-in overflow-hidden rounded-md border border-gray-200"
+                              >
+                                {/* eslint-disable-next-line @next/next/no-img-element */}
+                                <img
+                                  src={g.image}
+                                  alt={g.name}
+                                  className="h-full w-full object-cover transition-transform group-hover:scale-105"
+                                />
+                                <span className="absolute inset-0 flex items-center justify-center bg-black/0 text-white opacity-0 transition group-hover:bg-black/30 group-hover:opacity-100">
+                                  <ZoomIn className="h-3.5 w-3.5" />
+                                </span>
+                              </button>
+                            ) : (
+                              <Package className="h-4 w-4 shrink-0 text-[#075489]" />
+                            )}
+                            <span className="min-w-0 truncate text-sm font-medium text-gray-800">{g.name}</span>
+                            <span className="ml-auto inline-flex shrink-0 items-center rounded-full bg-[#075489]/10 px-2 py-0.5 text-xs font-semibold text-[#075489]">
+                              {g.units.length} unit
+                            </span>
+                          </div>
+                          {/* Rincian unit: nama instrumen (snapshot produksi) + kode unitnya,
+                              urut ke bawah seperti checklist inspeksi. */}
+                          <div className="mt-1.5 flex flex-col gap-1">
+                            {g.units.map((u) => (
+                              <div
+                                key={u.id}
+                                className="flex items-center gap-2 rounded-md bg-gray-50 px-2 py-1.5"
+                              >
+                                <span className="min-w-0 flex-1 truncate text-sm text-gray-700">
+                                  {u.name ?? u.instrument?.name ?? "Instrumen"}
+                                </span>
+                                <span className="shrink-0 rounded bg-[#075489]/10 px-1.5 py-0.5 font-mono text-[11px] font-semibold text-[#075489]">
+                                  {u.code ?? `#${u.id}`}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
                       ))}
                     </div>
                   </div>
                 ))}
-              </div>
             </div>
           </div>
         )}

@@ -15,6 +15,8 @@ type ConfirmDialogProps = {
   // Teks tombol konfirmasi — default "Hapus" (untuk aksi hapus).
   confirmLabel?: string
   loadingLabel?: string
+  // Ukuran modal — default "sm". Pakai "md"/"lg" untuk konfirmasi berisi daftar panjang.
+  size?: "sm" | "md" | "lg"
 }
 
 export function ConfirmDialog({
@@ -26,13 +28,14 @@ export function ConfirmDialog({
   loading = false,
   confirmLabel = "Hapus",
   loadingLabel = "Menghapus...",
+  size = "sm",
 }: ConfirmDialogProps) {
   return (
     <Modal
       open={open}
       onClose={loading ? () => {} : onClose}
       title={title}
-      size="sm"
+      size={size}
       footer={
         <>
           <Button variant="outline" onClick={onClose} disabled={loading}>
