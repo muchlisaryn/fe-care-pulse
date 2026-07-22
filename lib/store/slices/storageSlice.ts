@@ -6,6 +6,8 @@ export type StorageIncomingUnit = {
   id: number
   code: string | null
   instrument: string | null
+  /** Nomor label kemasan yang tercetak di bungkus steril (satu label = satu bungkus). */
+  barcode_no: string | null
   image_url: string | null
   // Gambar SET (katalog paket) — untuk thumbnail grup paket.
   package_image?: string | null
@@ -52,58 +54,105 @@ export type StorageInventoryRow = {
   batch: string | null
 }
 
+/** Angka ringkasan gudang — dipakai kartu statistik tanpa memuat seluruh baris. */
+export type StorageSummary = { total: number; alert: number; expired: number }
+
+/**
+ * Daftar yang dimuat BERTAHAP (lazy load): halaman 1 saat dibutuhkan, halaman
+ * berikutnya menyusul saat pengguna men-scroll sampai dasar daftar.
+ */
+export type LazyList<T> = {
+  items: T[]
+  /** Halaman terakhir yang sudah masuk `items`. */
+  page: number
+  lastPage: number
+  /** Jumlah baris keseluruhan di server (bukan yang sudah dimuat). */
+  total: number
+  /** Muat halaman pertama (daftar masih kosong). */
+  loading: boolean
+  /** Muat halaman berikutnya (menambah di bawah). */
+  loadingMore: boolean
+  loaded: boolean
+}
+
 type StorageState = {
-  incoming: StorageIncomingOrder[]
-  incomingLoading: boolean
-  incomingLoaded: boolean
-  productionIncoming: StorageIncomingOrder[]
-  productionIncomingLoading: boolean
-  productionIncomingLoaded: boolean
-  inventory: StorageInventoryRow[]
-  inventoryLoading: boolean
-  inventoryLoaded: boolean
+  incoming: LazyList<StorageIncomingOrder>
+  productionIncoming: LazyList<StorageIncomingOrder>
+  inventory: LazyList<StorageInventoryRow>
+  summary: StorageSummary
+  summaryLoaded: boolean
   dirty: boolean
 }
 
+const emptyList = <T>(): LazyList<T> => ({
+  items: [],
+  page: 0,
+  lastPage: 1,
+  total: 0,
+  loading: false,
+  loadingMore: false,
+  loaded: false,
+})
+
 const initialState: StorageState = {
-  incoming: [],
-  incomingLoading: false,
-  incomingLoaded: false,
-  productionIncoming: [],
-  productionIncomingLoading: false,
-  productionIncomingLoaded: false,
-  inventory: [],
-  inventoryLoading: false,
-  inventoryLoaded: false,
+  incoming: emptyList<StorageIncomingOrder>(),
+  productionIncoming: emptyList<StorageIncomingOrder>(),
+  inventory: emptyList<StorageInventoryRow>(),
+  summary: { total: 0, alert: 0, expired: 0 },
+  summaryLoaded: false,
   dirty: false,
 }
 
-// Ambil seluruh halaman lalu gabungkan jadi satu array.
-async function fetchAllPages<T>(url: string): Promise<T[]> {
-  const collected: T[] = []
-  let current = 1
-  let last = 1
-  do {
-    const res = await api.get(url, { params: { page: current } })
-    const payload = res.data.data
-    collected.push(...payload.data)
-    last = payload.last_page
-    current += 1
-  } while (current <= last)
-  return collected
+// Satu halaman hasil paginate Laravel.
+type PageResult<T> = { items: T[]; page: number; lastPage: number; total: number }
+
+/** Argumen thunk: halaman ke-berapa + kata kunci pencarian (dicari di server). */
+export type FetchPageArg = { page?: number; search?: string }
+
+async function fetchPage<T>(url: string, { page = 1, search }: FetchPageArg): Promise<PageResult<T>> {
+  const res = await api.get(url, { params: { page, search: search || undefined } })
+  const p = res.data.data
+  return { items: p.data, page: p.current_page, lastPage: p.last_page, total: p.total }
 }
 
-export const fetchStorageIncoming = createAsyncThunk("storage/incoming", () =>
-  fetchAllPages<StorageIncomingOrder>("/master/storage/incoming"),
+export const fetchStorageIncoming = createAsyncThunk("storage/incoming", (arg: FetchPageArg = {}) =>
+  fetchPage<StorageIncomingOrder>("/master/storage/incoming", arg),
 )
 
-export const fetchProductionStorageIncoming = createAsyncThunk("storage/productionIncoming", () =>
-  fetchAllPages<StorageIncomingOrder>("/master/storage/production-incoming"),
+export const fetchProductionStorageIncoming = createAsyncThunk(
+  "storage/productionIncoming",
+  (arg: FetchPageArg = {}) => fetchPage<StorageIncomingOrder>("/master/storage/production-incoming", arg),
 )
 
-export const fetchStorageInventory = createAsyncThunk("storage/inventory", () =>
-  fetchAllPages<StorageInventoryRow>("/master/storage/inventory"),
+export const fetchStorageInventory = createAsyncThunk("storage/inventory", (arg: FetchPageArg = {}) =>
+  fetchPage<StorageInventoryRow>("/master/storage/inventory", arg),
 )
+
+export const fetchStorageSummary = createAsyncThunk("storage/summary", async () => {
+  const res = await api.get("/master/storage/summary")
+  return res.data.data as StorageSummary
+})
+
+// Reducer bersama ketiga daftar: halaman 1 mengganti isi, halaman > 1 menambah.
+function onPending<T>(list: LazyList<T>, page: number) {
+  if (page > 1) list.loadingMore = true
+  else list.loading = true
+}
+
+function onFulfilled<T>(list: LazyList<T>, result: PageResult<T>) {
+  list.items = result.page > 1 ? [...list.items, ...result.items] : result.items
+  list.page = result.page
+  list.lastPage = result.lastPage
+  list.total = result.total
+  list.loading = false
+  list.loadingMore = false
+  list.loaded = true
+}
+
+function onRejected<T>(list: LazyList<T>) {
+  list.loading = false
+  list.loadingMore = false
+}
 
 const storageSlice = createSlice({
   name: "storage",
@@ -115,41 +164,39 @@ const storageSlice = createSlice({
   },
   extraReducers: (builder) => {
     builder
-      .addCase(fetchStorageIncoming.pending, (state) => {
-        state.incomingLoading = true
+      .addCase(fetchStorageIncoming.pending, (state, action) => {
+        onPending(state.incoming, action.meta.arg.page ?? 1)
       })
       .addCase(fetchStorageIncoming.fulfilled, (state, action) => {
-        state.incoming = action.payload
-        state.incomingLoading = false
-        state.incomingLoaded = true
+        onFulfilled(state.incoming, action.payload)
         state.dirty = false
       })
       .addCase(fetchStorageIncoming.rejected, (state) => {
-        state.incomingLoading = false
+        onRejected(state.incoming)
       })
-      .addCase(fetchProductionStorageIncoming.pending, (state) => {
-        state.productionIncomingLoading = true
+      .addCase(fetchProductionStorageIncoming.pending, (state, action) => {
+        onPending(state.productionIncoming, action.meta.arg.page ?? 1)
       })
       .addCase(fetchProductionStorageIncoming.fulfilled, (state, action) => {
-        state.productionIncoming = action.payload
-        state.productionIncomingLoading = false
-        state.productionIncomingLoaded = true
+        onFulfilled(state.productionIncoming, action.payload)
         state.dirty = false
       })
       .addCase(fetchProductionStorageIncoming.rejected, (state) => {
-        state.productionIncomingLoading = false
+        onRejected(state.productionIncoming)
       })
-      .addCase(fetchStorageInventory.pending, (state) => {
-        state.inventoryLoading = true
+      .addCase(fetchStorageInventory.pending, (state, action) => {
+        onPending(state.inventory, action.meta.arg.page ?? 1)
       })
       .addCase(fetchStorageInventory.fulfilled, (state, action) => {
-        state.inventory = action.payload
-        state.inventoryLoading = false
-        state.inventoryLoaded = true
+        onFulfilled(state.inventory, action.payload)
         state.dirty = false
       })
       .addCase(fetchStorageInventory.rejected, (state) => {
-        state.inventoryLoading = false
+        onRejected(state.inventory)
+      })
+      .addCase(fetchStorageSummary.fulfilled, (state, action) => {
+        state.summary = action.payload
+        state.summaryLoaded = true
       })
   },
 })

@@ -1,6 +1,6 @@
 "use client"
 
-import { Suspense, useEffect, useMemo, useRef, useState } from "react"
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useSearchParams } from "next/navigation"
 import {
   Warehouse,
@@ -12,24 +12,24 @@ import {
   ChevronDown,
   ChevronRight,
   ZoomIn,
-  ScanLine,
   X,
 } from "lucide-react"
 import { Input } from "@/components/atoms/Input"
 import { Button } from "@/components/atoms/Button"
 import { Badge } from "@/components/atoms/Badge"
 import { Select } from "@/components/atoms/Select"
-import { SelectSearch } from "@/components/atoms/SelectSearch"
 import { Card } from "@/components/molecules/Card"
 import { StatCard } from "@/components/molecules/StatCard"
 import { PageHeader } from "@/components/molecules/PageHeader"
 import { Modal } from "@/components/molecules/Modal"
-import { QrScannerModal } from "@/components/molecules/QrScannerModal"
+import { LoadMoreSentinel } from "@/components/molecules/LoadMoreSentinel"
+import { RackPickerModal } from "@/components/molecules/RackPickerModal"
 import { useAppDispatch, useAppSelector } from "@/lib/store/hooks"
 import {
   fetchStorageIncoming,
   fetchProductionStorageIncoming,
   fetchStorageInventory,
+  fetchStorageSummary,
   invalidateStorage,
   type StorageIncomingOrder,
   type StorageIncomingUnit,
@@ -45,6 +45,8 @@ type StoreUnitGroup = {
   key: string
   source: "satuan" | "paket"
   packageName: string | null
+  /** Nomor label kemasan bungkus steril grup ini (satu label = satu bungkus). */
+  barcodeNo: string | null
   units: StorageIncomingUnit[]
 }
 
@@ -70,22 +72,14 @@ const STORAGE_TABS: StorageTab[] = ["simpan", "inventaris"]
 function StorageSterilPage() {
   const dispatch = useAppDispatch()
   const searchParams = useSearchParams()
-  const {
-    incoming,
-    incomingLoaded,
-    productionIncoming,
-    productionIncomingLoaded,
-    inventory,
-    inventoryLoading,
-    inventoryLoaded,
-  } = useAppSelector((s) => s.storage)
+  const { incoming, productionIncoming, inventory, summary } = useAppSelector((s) => s.storage)
 
   // Gabungan order steril + batch produksi steril (yang belum tersimpan penuh)
   // untuk daftar "Perlu Disimpan". Order sudah otomatis keluar saat digudang;
   // batch produksi disaring di sini karena statusnya tidak berpindah.
   const incomingAll = useMemo(
-    () => [...incoming, ...productionIncoming.filter((o) => o.stored_count < o.unit_count)],
-    [incoming, productionIncoming],
+    () => [...incoming.items, ...productionIncoming.items.filter((o) => o.stored_count < o.unit_count)],
+    [incoming.items, productionIncoming.items],
   )
 
   // Tab aktif disinkronkan ke URL (?tab=inventaris) agar bisa di-deep-link & bertahan
@@ -103,6 +97,9 @@ function StorageSterilPage() {
       next === "simpan" ? "/cssd/storage-steril" : `/cssd/storage-steril?tab=${next}`,
     )
   }
+  // Pencarian dijalankan di SERVER (data dimuat bertahap, jadi tak bisa disaring
+  // di klien): `searchInput` draft di kotak isian, `search` yang sudah dikirim.
+  const [searchInput, setSearchInput] = useState("")
   const [search, setSearch] = useState("")
   // Inventaris: pengelompokan + status lipat per grup.
   const [groupBy, setGroupBy] = useState<"rak" | "batch">("rak")
@@ -136,24 +133,77 @@ function StorageSterilPage() {
   // Status muat pilihan rak (animasi loading dropdown) + penanda sudah dimuat.
   const [rackOptionsLoading, setRackOptionsLoading] = useState(false)
   const rackLoadedRef = useRef(false)
-  // Rak yang dipilih untuk SEMUA grup sekaligus (dropdown "isi otomatis semua").
+  // Rak yang dipilih untuk SEMUA grup sekaligus (tombol "Pilih Rak (Semua)").
   const [bulkRack, setBulkRack] = useState("")
-  // Scan rak PER INSTRUMEN via KAMERA: klik "Scan Rak" pada grup → kamera terbuka
-  // (scannerOpen) dengan target grup (scanGroupKey); QR terbaca → rak grup terisi.
-  const [scannerOpen, setScannerOpen] = useState(false)
-  const [scanGroupKey, setScanGroupKey] = useState<string | null>(null)
+  // Target tombol "Pilih Rak" yang sedang dibuka: satu grup instrumen, atau
+  // "semua" (isi otomatis seluruh batch). null = modal pemilih rak tertutup.
+  const [pickerTarget, setPickerTarget] = useState<{ type: "all" } | { type: "group"; key: string } | null>(null)
   const [scanNotice, setScanNotice] = useState<string | null>(null)
 
-  // Inventory dipakai StatCard ringkasan yang SELALU tampil (+ tab Inventaris), jadi
-  // selalu dimuat. Data "Perlu Disimpan" (incoming/produksi) di-LAZY-LOAD: hanya
-  // diambil saat tab simpan aktif — dilewati bila langsung membuka tab Inventaris.
+  // Angka kartu statistik diambil dari endpoint ringkasan (bukan menghitung
+  // seluruh baris di klien) supaya daftarnya bisa dimuat bertahap.
   useEffect(() => {
-    dispatch(fetchStorageInventory())
+    dispatch(fetchStorageSummary())
+  }, [dispatch])
+
+  // LAZY LOAD: tiap tab hanya mengambil HALAMAN PERTAMA saat tab itu dibuka
+  // (atau saat kata kunci pencarian berubah). Halaman berikutnya menyusul lewat
+  // pengamat scroll di dasar daftar.
+  useEffect(() => {
     if (tab === "simpan") {
-      dispatch(fetchStorageIncoming())
-      dispatch(fetchProductionStorageIncoming())
+      dispatch(fetchStorageIncoming({ page: 1, search }))
+      dispatch(fetchProductionStorageIncoming({ page: 1, search }))
+    } else {
+      dispatch(fetchStorageInventory({ page: 1, search }))
     }
-  }, [dispatch, tab])
+  }, [dispatch, tab, search])
+
+  // Ambil halaman berikutnya daftar tab aktif. Untuk tab "Perlu Disimpan" ada dua
+  // sumber (order & batch produksi) — order dihabiskan dulu, baru batch produksi.
+  const loadMore = useCallback(() => {
+    if (tab === "simpan") {
+      if (incoming.loading || incoming.loadingMore || productionIncoming.loadingMore) return
+      if (incoming.page < incoming.lastPage) {
+        dispatch(fetchStorageIncoming({ page: incoming.page + 1, search }))
+      } else if (productionIncoming.page < productionIncoming.lastPage) {
+        dispatch(fetchProductionStorageIncoming({ page: productionIncoming.page + 1, search }))
+      }
+      return
+    }
+    if (inventory.loading || inventory.loadingMore) return
+    if (inventory.page < inventory.lastPage) {
+      dispatch(fetchStorageInventory({ page: inventory.page + 1, search }))
+    }
+  }, [dispatch, tab, search, incoming, productionIncoming, inventory])
+
+  // Masih ada halaman berikutnya untuk tab aktif?
+  const hasMore =
+    tab === "simpan"
+      ? incoming.page < incoming.lastPage || productionIncoming.page < productionIncoming.lastPage
+      : inventory.page < inventory.lastPage
+  const loadingMore =
+    tab === "simpan" ? incoming.loadingMore || productionIncoming.loadingMore : inventory.loadingMore
+
+  // Pengamat scroll: begitu penanda di dasar daftar terlihat, halaman berikutnya
+  // diambil otomatis (infinite scroll). rootMargin → dimuat sedikit lebih awal.
+  const sentinelRef = useRef<HTMLDivElement | null>(null)
+  useEffect(() => {
+    const el = sentinelRef.current
+    if (!el || !hasMore) return
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0]?.isIntersecting) loadMore()
+      },
+      { rootMargin: "200px" },
+    )
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [hasMore, loadMore])
+
+  function handleSearch(e: React.FormEvent) {
+    e.preventDefault()
+    setSearch(searchInput)
+  }
 
   // Muat pilihan rak dari Master Rak — lazy, dipanggil saat tombol "Simpan ke Rak"
   // ditekan (bukan saat mount). Hanya di-fetch sekali (cache via ref).
@@ -172,11 +222,13 @@ function StorageSterilPage() {
   }
 
   // Dipanggil setelah menyimpan ke rak: unit pindah dari "Perlu Disimpan" ke
-  // "Inventaris". Selalu segarkan data simpan; inventaris hanya bila sudah pernah dimuat.
+  // "Inventaris". Daftar dimuat ulang dari halaman pertama + angka ringkasan;
+  // inventaris hanya bila sudah pernah dimuat (tetap malas bila belum dibuka).
   function refresh() {
-    dispatch(fetchStorageIncoming())
-    dispatch(fetchProductionStorageIncoming())
-    if (inventoryLoaded) dispatch(fetchStorageInventory())
+    dispatch(fetchStorageIncoming({ page: 1, search }))
+    dispatch(fetchProductionStorageIncoming({ page: 1, search }))
+    if (inventory.loaded) dispatch(fetchStorageInventory({ page: 1, search }))
+    dispatch(fetchStorageSummary())
   }
 
   function openStore(order: StorageIncomingOrder) {
@@ -194,23 +246,23 @@ function StorageSterilPage() {
 
   // Unit modal dikelompokkan: paket (per package_name) jadi satu grup → satu rak.
   // Satuan dengan JENIS instrumen yang sama juga digabung jadi satu grup → satu rak
-  // (karena akan disimpan di rak yang sama).
+  // (karena akan disimpan di rak yang sama). Nomor label kemasan (barcode_no) ikut
+  // jadi kunci: bungkus steril berbeda label = barang berbeda meski isinya sejenis.
   const unitGroups = useMemo<StoreUnitGroup[]>(() => {
     if (!active) return []
     const groups: StoreUnitGroup[] = []
     const byKey = new Map<string, StoreUnitGroup>()
     for (const u of active.units) {
       // Paket → gabung per nama paket; satuan → gabung per jenis instrumen.
-      const key =
-        u.source === "paket"
-          ? `paket|${u.package_name ?? "Paket"}`
-          : `satuan|${u.instrument ?? `#${u.id}`}`
+      const name = u.source === "paket" ? u.package_name ?? "Paket" : u.instrument ?? `#${u.id}`
+      const key = `${u.source}|${name}|${u.barcode_no ?? ""}`
       let g = byKey.get(key)
       if (!g) {
         g = {
           key,
           source: u.source,
           packageName: u.source === "paket" ? u.package_name ?? "Paket" : null,
+          barcodeNo: u.barcode_no,
           units: [],
         }
         byKey.set(key, g)
@@ -244,33 +296,27 @@ function StorageSterilPage() {
     })
   }
 
-  // Buka kamera scan untuk SATU grup instrumen.
-  function openGroupScanner(key: string) {
-    setScanNotice(null)
-    setScanGroupKey(key)
-    setScannerOpen(true)
-  }
+  // Grup yang sedang jadi target modal "Pilih Rak" (null bila targetnya semua).
+  const pickerGroup =
+    pickerTarget?.type === "group" ? unitGroups.find((g) => g.key === pickerTarget.key) ?? null : null
 
-  // Hasil baca QR dari kamera → cocokkan ke nama rak (case-insensitive) lalu isi
-  // rak grup terpilih. Bila rak tak dikenal → notifikasi.
-  function handleRackScanned(raw: string) {
-    const text = raw.trim()
-    const group = scanGroupKey ? unitGroups.find((g) => g.key === scanGroupKey) : null
-    setScanGroupKey(null)
-    if (!text || !group) return
-    const match = rackOptions.find((r) => r.name.toLowerCase() === text.toLowerCase())
-    if (!match) {
-      setScanNotice(`Rak "${text}" tidak ditemukan di Master Rak.`)
+  // Rak terpilih dari modal (hasil scan QR atau pilih manual) → isi ke grup
+  // terkait, atau ke SELURUH batch bila tombol yang ditekan adalah "semua".
+  function handleRackPicked(name: string) {
+    if (!pickerTarget) return
+    if (pickerTarget.type === "all") {
+      setAllRack(name)
+      setScanNotice(`Rak "${name}" → semua instrumen.`)
       return
     }
-    setGroupRack(group, match.name)
-    setScanNotice(`Rak "${match.name}" → ${groupTitle(group)}.`)
+    if (!pickerGroup) return
+    setGroupRack(pickerGroup, name)
+    setScanNotice(`Rak "${name}" → ${groupTitle(pickerGroup)}.`)
   }
 
-  // Tutup modal simpan + reset state scan sekaligus.
+  // Tutup modal simpan + reset state pemilih rak sekaligus.
   function closeModal() {
-    setScannerOpen(false)
-    setScanGroupKey(null)
+    setPickerTarget(null)
     setScanNotice(null)
     setBulkRack("")
     setActive(null)
@@ -306,34 +352,15 @@ function StorageSterilPage() {
     }
   }
 
-  const q = search.trim().toLowerCase()
-  const incomingFiltered = useMemo(() => {
-    if (!q) return incomingAll
-    return incomingAll.filter(
-      (o) =>
-        o.code.toLowerCase().includes(q) ||
-        (o.code_transaction ?? "").toLowerCase().includes(q) ||
-        (o.borrowed_by ?? "").toLowerCase().includes(q) ||
-        (o.room?.name ?? "").toLowerCase().includes(q),
-    )
-  }, [incomingAll, q])
-
-  const inventoryFiltered = useMemo(() => {
-    if (!q) return inventory
-    return inventory.filter(
-      (r) =>
-        r.rack_code.toLowerCase().includes(q) ||
-        (r.unit.code ?? "").toLowerCase().includes(q) ||
-        (r.unit.instrument ?? "").toLowerCase().includes(q) ||
-        (r.package_name ?? "").toLowerCase().includes(q) ||
-        (r.production_code ?? "").toLowerCase().includes(q) ||
-        (r.order?.code ?? "").toLowerCase().includes(q),
-    )
-  }, [inventory, q])
+  // Penyaringan dilakukan di server (lihat efek lazy load di atas); `q` hanya
+  // penanda apakah pencarian sedang aktif untuk teks "tidak ditemukan".
+  const q = search.trim()
+  const incomingFiltered = incomingAll
+  const inventoryFiltered = inventory.items
 
   // Kelompokkan inventaris (per rak / per order) agar ringkas & bisa dilipat.
   const inventoryGroups = useMemo(() => {
-    const map = new Map<string, typeof inventoryFiltered>()
+    const map = new Map<string, StorageInventoryRow[]>()
     for (const r of inventoryFiltered) {
       const key = groupBy === "rak" ? r.rack_code : r.batch ?? "Tanpa Batch"
       const arr = map.get(key) ?? []
@@ -345,8 +372,6 @@ function StorageSterilPage() {
       .sort((a, b) => a.key.localeCompare(b.key, "id", { numeric: true }))
   }, [inventoryFiltered, groupBy])
 
-  const alertCount = inventory.filter((r) => r.alert && !r.expired).length
-  const expiredCount = inventory.filter((r) => r.expired).length
 
   // Satu baris unit di detail inventaris (dipakai untuk satuan & isi paket).
   function renderUnitRow(r: StorageInventoryRow) {
@@ -368,7 +393,12 @@ function StorageSterilPage() {
               className="h-6 w-6 shrink-0 cursor-zoom-in overflow-hidden rounded border border-gray-200"
             >
               {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={r.unit.image_url} alt={r.unit.instrument ?? ""} className="h-full w-full object-cover" />
+              <img
+                src={r.unit.image_url}
+                alt={r.unit.instrument ?? ""}
+                loading="lazy"
+                className="h-full w-full object-cover"
+              />
             </button>
           )}
           <span className="shrink-0 font-mono text-xs font-semibold text-[#075489] bg-[#075489]/8 px-2 py-0.5 rounded">
@@ -399,9 +429,9 @@ function StorageSterilPage() {
       />
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-        <StatCard title="Unit di Gudang Steril" value={`${inventory.length}`} icon={Warehouse} />
-        <StatCard title="Mendekati Kedaluwarsa" value={`${alertCount}`} icon={CalendarClock} positive={false} />
-        <StatCard title="Sudah Kedaluwarsa" value={`${expiredCount}`} icon={AlertTriangle} positive={false} />
+        <StatCard title="Unit di Gudang Steril" value={`${summary.total}`} icon={Warehouse} />
+        <StatCard title="Mendekati Kedaluwarsa" value={`${summary.alert}`} icon={CalendarClock} positive={false} />
+        <StatCard title="Sudah Kedaluwarsa" value={`${summary.expired}`} icon={AlertTriangle} positive={false} />
       </div>
 
       <Card className="p-0">
@@ -409,9 +439,16 @@ function StorageSterilPage() {
           <div className="flex gap-5 overflow-x-auto border-b border-gray-200 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
             {(
               [
-                { key: "simpan", label: "Perlu Disimpan", count: incomingAll.length },
-                { key: "inventaris", label: "Inventaris Gudang", count: inventory.length },
-              ] as { key: StorageTab; label: string; count: number }[]
+                // Angka dari server (total keseluruhan), bukan jumlah baris yang
+                // kebetulan sudah dimuat — daftarnya bertambah sambil di-scroll.
+                // null = tabnya belum pernah dibuka, jadi angkanya belum diketahui.
+                {
+                  key: "simpan",
+                  label: "Perlu Disimpan",
+                  count: incoming.loaded ? incoming.total + productionIncoming.total : null,
+                },
+                { key: "inventaris", label: "Inventaris Gudang", count: summary.total },
+              ] as { key: StorageTab; label: string; count: number | null }[]
             ).map((t) => {
               const activeT = tab === t.key
               return (
@@ -427,36 +464,43 @@ function StorageSterilPage() {
                   }
                 >
                   {t.label}
-                  <span
-                    className={
-                      "rounded-full px-1.5 py-0.5 text-xs font-semibold " +
-                      (activeT ? "bg-[#075489]/10 text-[#075489]" : "bg-gray-100 text-gray-500")
-                    }
-                  >
-                    {t.count}
-                  </span>
+                  {t.count !== null && (
+                    <span
+                      className={
+                        "rounded-full px-1.5 py-0.5 text-xs font-semibold " +
+                        (activeT ? "bg-[#075489]/10 text-[#075489]" : "bg-gray-100 text-gray-500")
+                      }
+                    >
+                      {t.count}
+                    </span>
+                  )}
                 </button>
               )
             })}
           </div>
 
-          <div className="relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 pointer-events-none" />
-            <Input
-              placeholder={
-                tab === "simpan"
-                  ? "Cari order / peminjam / ruangan..."
-                  : "Cari kode unit, instrumen, rak, atau order..."
-              }
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              className="pl-9"
-            />
-          </div>
+          <form onSubmit={handleSearch} className="flex w-full gap-2">
+            <div className="relative flex-1">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 pointer-events-none" />
+              <Input
+                placeholder={
+                  tab === "simpan"
+                    ? "Cari order / peminjam / ruangan..."
+                    : "Cari kode unit, instrumen, rak, atau order..."
+                }
+                value={searchInput}
+                onChange={(e) => setSearchInput(e.target.value)}
+                className="pl-9"
+              />
+            </div>
+            <Button type="submit" className="bg-[#075489] hover:bg-[#075489]/90 text-white shrink-0">
+              Cari
+            </Button>
+          </form>
         </div>
 
         {tab === "simpan" ? (
-          !incomingLoaded && !productionIncomingLoaded ? (
+          incoming.loading || (!incoming.loaded && !productionIncoming.loaded) ? (
             <div className="py-16 text-center text-sm text-gray-400">Memuat data...</div>
           ) : incomingFiltered.length === 0 ? (
             <div className="py-16 text-center text-sm text-gray-400">
@@ -503,9 +547,11 @@ function StorageSterilPage() {
                   </div>
                 </div>
               ))}
+              {/* Penanda dasar daftar: memicu pengambilan halaman berikutnya. */}
+              <LoadMoreSentinel ref={sentinelRef} hasMore={hasMore} loading={loadingMore} onLoadMore={loadMore} />
             </div>
           )
-        ) : inventoryLoading && !inventoryLoaded ? (
+        ) : inventory.loading ? (
           <div className="py-16 text-center text-sm text-gray-400">Memuat data...</div>
         ) : inventoryFiltered.length === 0 ? (
           <div className="py-16 text-center text-sm text-gray-400">
@@ -649,6 +695,9 @@ function StorageSterilPage() {
                   )
                 })}
               </div>
+
+            {/* Penanda dasar daftar: memicu pengambilan halaman berikutnya. */}
+            <LoadMoreSentinel ref={sentinelRef} hasMore={hasMore} loading={loadingMore} onLoadMore={loadMore} />
           </div>
         )}
       </Card>
@@ -657,8 +706,8 @@ function StorageSterilPage() {
       <Modal
         open={active !== null}
         onClose={saving ? () => {} : closeModal}
-        title={active ? `Simpan ke Gudang ${active.code_transaction ?? active.code}` : "Simpan ke Gudang"}
-        size="lg"
+        title="Simpan ke Gudang"
+        size="xl"
         footer={
           <div className="flex w-full flex-col items-stretch gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
             {error ? <p className="text-sm text-red-600">{error}</p> : null}
@@ -679,27 +728,26 @@ function StorageSterilPage() {
       >
         {active && (
           <div className="space-y-4">
-            {/* Pengisian rak PER INSTRUMEN: klik "Scan Rak" pada item yang dituju →
-                kamera terbuka untuk baca QR rak, atau pilih rak manual dari dropdown. */}
+            {/* Pengisian rak PER INSTRUMEN: klik "Pilih Rak" pada item yang dituju →
+                modal terbuka berisi pilihan scan QR rak atau pilih manual dari daftar. */}
             {active.units.some((u) => !u.stored) && (
               <div className="flex flex-col gap-2 rounded-lg border border-gray-200 bg-gray-50 px-4 py-3">
-                <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                  <div className="min-w-0">
-                    <p className="text-sm font-medium text-gray-800">Tentukan lokasi rak per instrumen</p>
-                    <p className="text-xs text-gray-500">
-                      Klik <span className="font-medium">Scan Rak</span> pada instrumen yang dituju → kamera terbuka untuk baca QR rak, lalu rak otomatis terisi — atau pilih rak manual dari dropdown.
-                    </p>
-                  </div>
+                {/* Sejajar dengan kartu di bawahnya: keterangan melar di kiri,
+                    tombol rak lebar tetap di kanan. */}
+                <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
+                  <p className="min-w-0 flex-1 text-sm font-medium text-gray-800">
+                    Tentukan lokasi rak untuk semua instrumen
+                  </p>
                   {/* Pilih satu rak → isi otomatis ke SEMUA instrumen batch ini. */}
-                  <div className="w-full sm:w-52">
-                    <SelectSearch
-                      options={rackOptions.map((r) => ({ value: r.name, label: r.name }))}
-                      value={bulkRack}
-                      onChange={(value) => setAllRack(value)}
-                      loading={rackOptionsLoading}
-                      placeholder="Isi semua rak..."
-                    />
-                  </div>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => setPickerTarget({ type: "all" })}
+                    className="w-full shrink-0 sm:w-52"
+                    title="Pilih satu rak untuk semua instrumen batch ini"
+                  >
+                    <span className="truncate">{bulkRack ? `Semua: ${bulkRack}` : "Pilih Rak (Semua)"}</span>
+                  </Button>
                 </div>
                 {scanNotice && (
                   <p className="text-xs text-gray-600">{scanNotice}</p>
@@ -733,7 +781,10 @@ function StorageSterilPage() {
                           : "border-gray-200")
                     }
                   >
-                    <div className="flex flex-wrap items-center gap-2">
+                    {/* Dua kolom sejajar: kiri identitas grup (melar), kanan aksi rak
+                        dengan lebar tetap supaya rapi & sebaris antar kartu. */}
+                    <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
+                      <div className="flex min-w-0 flex-1 items-center gap-2">
                       {/* Foto set/instrumen menggantikan ikon; klik untuk zoom. Fallback ke ikon bila tak ada foto. */}
                       {photo ? (
                         <button
@@ -750,6 +801,7 @@ function StorageSterilPage() {
                           <img
                             src={photo}
                             alt={title ?? "Instrumen"}
+                            loading="lazy"
                             className="h-full w-full object-cover transition-transform group-hover:scale-105"
                           />
                           <span className="absolute inset-0 flex items-center justify-center bg-black/0 text-white opacity-0 transition-opacity group-hover:bg-black/30 group-hover:opacity-100">
@@ -760,14 +812,25 @@ function StorageSterilPage() {
                         <Boxes className="h-4 w-4 shrink-0 text-[#075489]" />
                       )}
                       {/* Hanya paket yang diberi badge; satuan langsung tampil nama instrumennya. */}
-                      {isPaket && <Badge variant="info">Paket</Badge>}
-                      <span className="text-sm font-medium text-gray-800">{title}</span>
-                      <span className="text-xs text-gray-400">{g.units.length} unit</span>
-                      {/* Lokasi rak: scan barcode/QR rak (pilih item ini dulu) ATAU
-                          pilih dari dropdown. Grup yang sudah tersimpan tak bisa diubah. */}
-                      <div className="ml-auto flex w-full items-center gap-2 sm:w-auto">
+                      <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+                        {isPaket && <Badge variant="info">Paket</Badge>}
+                        <span className="truncate text-sm font-medium text-gray-800">{title}</span>
+                        {/* Nomor label kemasan yang tercetak di bungkus sterilnya. */}
+                        {g.barcodeNo ? (
+                          <span className="font-mono text-xs font-semibold text-[#075489] bg-[#075489]/8 px-1.5 py-0.5 rounded">
+                            {g.barcodeNo}
+                          </span>
+                        ) : (
+                          <span className="text-xs text-gray-400">—</span>
+                        )}
+                        <span className="text-xs text-gray-400">{g.units.length} unit</span>
+                      </div>
+                      </div>
+                      {/* Lokasi rak: tombol "Pilih Rak" → modal berisi scan QR atau
+                          pilih manual. Grup yang sudah tersimpan tak bisa diubah. */}
+                      <div className="w-full shrink-0 sm:w-52">
                         {allStored ? (
-                          <div className="flex flex-1 sm:justify-end">
+                          <div className="flex justify-start sm:justify-end">
                             <Badge variant="success">
                               <span className="inline-flex items-center gap-1">
                                 <MapPin className="h-3 w-3" />
@@ -776,27 +839,17 @@ function StorageSterilPage() {
                             </Badge>
                           </div>
                         ) : (
-                          <>
-                            <div className="w-full sm:w-52">
-                              <SelectSearch
-                                options={rackOptions.map((r) => ({ value: r.name, label: r.name }))}
-                                value={groupRack}
-                                onChange={(value) => setGroupRack(g, value)}
-                                loading={rackOptionsLoading}
-                                placeholder="Pilih rak..."
-                              />
-                            </div>
-                            <Button
-                              type="button"
-                              variant="outline"
-                              onClick={() => openGroupScanner(g.key)}
-                              className="shrink-0"
-                              title="Scan QR rak pakai kamera untuk item ini"
-                            >
-                              <ScanLine className="h-4 w-4" />
-                              Scan Rak
-                            </Button>
-                          </>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            onClick={() => setPickerTarget({ type: "group", key: g.key })}
+                            className={
+                              "w-full " + (groupRack ? "border-[#075489] text-[#075489]" : "")
+                            }
+                            title="Pilih rak untuk item ini — scan QR atau pilih dari daftar"
+                          >
+                            <span className="truncate">{groupRack || "Pilih Rak"}</span>
+                          </Button>
                         )}
                       </div>
                     </div>
@@ -807,8 +860,8 @@ function StorageSterilPage() {
                       {g.units.map((u) => (
                         <span
                           key={u.id}
-                          className="inline-flex items-center gap-1 font-mono text-[11px] font-semibold text-[#075489] bg-[#075489]/8 px-1.5 py-0.5 rounded"
-                          title={u.instrument ?? undefined}
+                          className="inline-flex items-center gap-1 text-[11px] font-semibold text-[#075489] bg-[#075489]/8 px-1.5 py-0.5 rounded"
+                          title={u.code ?? undefined}
                         >
                           {u.image_url && (
                             <button
@@ -822,10 +875,17 @@ function StorageSterilPage() {
                               className="h-4 w-4 shrink-0 cursor-zoom-in overflow-hidden rounded-sm border border-gray-200"
                             >
                               {/* eslint-disable-next-line @next/next/no-img-element */}
-                              <img src={u.image_url} alt={u.instrument ?? ""} className="h-full w-full object-cover" />
+                              <img
+                                src={u.image_url}
+                                alt={u.instrument ?? ""}
+                                loading="lazy"
+                                className="h-full w-full object-cover"
+                              />
                             </button>
                           )}
-                          {u.code ?? `#${u.id}`}
+                          {/* Isi paket ditampilkan dengan NAMA instrumen (dari
+                              production_item), bukan kode unitnya. */}
+                          {u.instrument ?? u.code ?? `#${u.id}`}
                         </span>
                       ))}
                     </div>
@@ -838,16 +898,27 @@ function StorageSterilPage() {
         )}
       </Modal>
 
-      {/* Kamera scan QR rak untuk grup terpilih → isi rak otomatis. */}
-      <QrScannerModal
-        open={scannerOpen}
-        onClose={() => {
-          setScannerOpen(false)
-          setScanGroupKey(null)
-        }}
-        onScan={handleRackScanned}
-        title="Scan QR Rak"
-        hint="Arahkan kamera ke QR label rak."
+      {/* Modal pilih rak: scan QR pakai kamera ATAU pilih manual dari Master Rak. */}
+      <RackPickerModal
+        open={pickerTarget !== null}
+        onClose={() => setPickerTarget(null)}
+        racks={rackOptions}
+        loading={rackOptionsLoading}
+        value={
+          pickerTarget?.type === "all"
+            ? bulkRack
+            : pickerGroup
+              ? rackById[pickerGroup.units.find((u) => !u.stored)?.id ?? -1] ?? ""
+              : ""
+        }
+        target={
+          pickerTarget?.type === "all"
+            ? "semua instrumen batch ini"
+            : pickerGroup
+              ? groupTitle(pickerGroup)
+              : null
+        }
+        onSelect={handleRackPicked}
       />
 
       {/* Zoom foto instrumen — overlay layar penuh, klik di mana saja untuk menutup */}

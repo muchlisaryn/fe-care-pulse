@@ -10,15 +10,16 @@ type ModalProps = {
   title: string
   children: React.ReactNode
   footer?: React.ReactNode
-  size?: "sm" | "md" | "lg" | "fit"
+  size?: "sm" | "md" | "lg" | "xl" | "fit"
 }
 
-// Ukuran modal: kecil (sm) / sedang (md) / besar (lg) — lebar tetap (max-width),
-// atau `fit` yang lebarnya MENGIKUTI isi konten (shrink-to-fit, dibatasi 95vw).
+// Ukuran modal: kecil (sm) / sedang (md) / besar (lg) / sangat besar (xl) — lebar
+// tetap (max-width), atau `fit` yang lebarnya MENGIKUTI isi konten (dibatasi 95vw).
 const sizeClass = {
   sm: "w-full max-w-sm", // kecil — konfirmasi / daftar ringkas
   md: "w-full max-w-lg", // sedang — form biasa
   lg: "w-full max-w-2xl", // besar — tabel / rincian panjang
+  xl: "w-full max-w-5xl", // sangat besar — daftar unit + aksi per baris
   fit: "w-auto max-w-[95vw]", // menyesuaikan lebar dengan isi konten
 }
 
