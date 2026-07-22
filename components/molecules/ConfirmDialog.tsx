@@ -15,8 +15,8 @@ type ConfirmDialogProps = {
   // Teks tombol konfirmasi — default "Hapus" (untuk aksi hapus).
   confirmLabel?: string
   loadingLabel?: string
-  // Ukuran modal — default "sm". Pakai "md"/"lg" untuk konfirmasi berisi daftar panjang.
-  size?: "sm" | "md" | "lg"
+  // Ukuran modal — default "sm". "md"/"lg" untuk daftar panjang; "fit" = lebar mengikuti isi.
+  size?: "sm" | "md" | "lg" | "fit"
 }
 
 export function ConfirmDialog({

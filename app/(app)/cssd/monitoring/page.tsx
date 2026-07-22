@@ -24,7 +24,7 @@ import { RoomDistributionCard } from "@/components/molecules/RoomDistributionCar
 import { PageHeader } from "@/components/molecules/PageHeader"
 import { Modal } from "@/components/molecules/Modal"
 import { Pagination } from "@/components/molecules/Pagination"
-import { OrderTimeline, type TimelineEvent } from "@/components/molecules/OrderTimeline"
+import { OrderTimeline } from "@/components/molecules/OrderTimeline"
 import { useAppDispatch, useAppSelector } from "@/lib/store/hooks"
 import { invalidateOrders } from "@/lib/store/slices/orderSlice"
 import { fetchIncomingCount } from "@/lib/store/slices/notifSlice"
@@ -100,6 +100,10 @@ type ReturnUnit = {
   is_returned: boolean
   /** Kode batch produksi (PRD-...) — label pada bungkus steril unit ini. */
   production_code: string | null
+  /** Nomor label fisik (packaging_item.barcode_no) — dasar pengelompokan unit. */
+  barcode_no: string | null
+  /** Nama instrumen dari SNAPSHOT production_item (bukan master). */
+  instrument_name: string | null
   instrument_stock: { code: string | null; instrument: { name: string } | null } | null
   condition_out: { id: number; name: string } | null
   condition_in: { id: number; name: string } | null
@@ -120,7 +124,6 @@ type ReturnOrder = {
   patient_name?: string | null
   distributed_to?: string | null
   items: ReturnUnit[]
-  timeline?: TimelineEvent[]
 }
 
 // Kode untuk judul modal: no. order + no. transaksi. INV baru terbit saat order
@@ -1348,7 +1351,7 @@ function MonitoringCssd() {
               </section>
 
               {/* Riwayat peminjaman: dibuat → diterima CSSD → dipinjam ruangan lain → selesai */}
-              <OrderTimeline events={returnOrder.timeline} />
+              <OrderTimeline orderId={returnOrder.id} />
 
               {/* Data pengembalian */}
               <section className="space-y-3">
@@ -1388,10 +1391,10 @@ function MonitoringCssd() {
                 const visibleUnits = q
                   ? returnOrder.items.filter((u) => {
                       const code = u.instrument_stock?.code?.toLowerCase() ?? ""
-                      const name = u.instrument_stock?.instrument?.name?.toLowerCase() ?? ""
+                      const name = (u.instrument_name ?? u.instrument_stock?.instrument?.name)?.toLowerCase() ?? ""
                       const pkg = u.package_name?.toLowerCase() ?? ""
-                      const prod = u.production_code?.toLowerCase() ?? ""
-                      return code.includes(q) || name.includes(q) || pkg.includes(q) || prod.includes(q)
+                      const barcode = u.barcode_no?.toLowerCase() ?? ""
+                      return code.includes(q) || name.includes(q) || pkg.includes(q) || barcode.includes(q)
                     })
                   : returnOrder.items
 
@@ -1424,7 +1427,7 @@ function MonitoringCssd() {
                       <div className="relative sm:w-72">
                         <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 pointer-events-none" />
                         <Input
-                          placeholder="Cari unit (kode / nama / paket)..."
+                          placeholder="Cari unit (kode / nama / paket / barcode)..."
                           value={returnUnitSearch}
                           onChange={(e) => setReturnUnitSearch(e.target.value)}
                           className="pl-9"
@@ -1460,15 +1463,15 @@ function MonitoringCssd() {
                                   <span className="truncate text-sm font-semibold text-gray-800">
                                     {g.name ?? "Instrumen Satuan"}
                                   </span>
-                                  {/* Kode batch produksi = label bungkus steril grup ini
-                                      (lebih dari satu bila isinya dari beberapa batch). */}
-                                  {[...new Set(g.units.map((u) => u.production_code).filter(Boolean))].map(
-                                    (code) => (
+                                  {/* Nomor label fisik (barcode_no) grup ini — menggantikan
+                                      kode produksi (lebih dari satu bila dari beberapa label). */}
+                                  {[...new Set(g.units.map((u) => u.barcode_no).filter(Boolean))].map(
+                                    (bc) => (
                                       <span
-                                        key={code}
+                                        key={bc}
                                         className="shrink-0 rounded bg-[#075489]/8 px-1.5 py-0.5 font-mono text-xs font-semibold text-[#075489]"
                                       >
-                                        {code}
+                                        {bc}
                                       </span>
                                     ),
                                   )}
@@ -1503,7 +1506,7 @@ function MonitoringCssd() {
                                         {u.instrument_stock?.code ?? "—"}
                                       </span>
                                       <span className="truncate text-gray-700">
-                                        {u.instrument_stock?.instrument?.name ?? (
+                                        {(u.instrument_name ?? u.instrument_stock?.instrument?.name) ?? (
                                           <span className="text-xs text-gray-400">—</span>
                                         )}
                                       </span>
@@ -1661,7 +1664,7 @@ function MonitoringCssd() {
                             {u.instrument_stock?.code ?? "—"}
                           </span>
                           <span className="truncate text-gray-700">
-                            {u.instrument_stock?.instrument?.name ?? "—"}
+                            {(u.instrument_name ?? u.instrument_stock?.instrument?.name) ?? "—"}
                           </span>
                           {u.source === "paket" && u.package_name && (
                             <span className="shrink-0 truncate text-xs text-gray-400">
@@ -1700,7 +1703,7 @@ function MonitoringCssd() {
                                 {u.instrument_stock?.code ?? "—"}
                               </span>
                               <span className="truncate text-gray-600">
-                                {u.instrument_stock?.instrument?.name ?? "—"}
+                                {(u.instrument_name ?? u.instrument_stock?.instrument?.name) ?? "—"}
                               </span>
                               {u.source === "paket" && u.package_name && (
                                 <span className="shrink-0 truncate text-xs text-gray-400">
@@ -1760,58 +1763,85 @@ function MonitoringCssd() {
             )}
 
             {/* Timeline tracking: dibuat → di-ACC → dipindah antar ruangan → dikembalikan */}
-            <OrderTimeline events={historyOrder.timeline} />
+            <OrderTimeline orderId={historyOrder.id} />
 
-            <div className="overflow-hidden rounded-lg border border-gray-200">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-gray-100 bg-gray-50">
-                    <th className="py-2.5 px-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-400">
-                      Unit
-                    </th>
-                    <th className="py-2.5 px-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-400">
-                      Kondisi Keluar
-                    </th>
-                    <th className="py-2.5 px-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-400">
-                      Kondisi Masuk
-                    </th>
-                    <th className="py-2.5 px-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-400 w-28">
-                      Status
-                    </th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-50">
-                  {historyOrder.items.map((u) => (
-                    <tr key={u.id}>
-                      <td className="py-2.5 px-3">
-                        <span className="font-mono text-xs font-semibold text-[#4ba69d] bg-[#4ba69d]/10 px-2 py-0.5 rounded">
-                          {u.instrument_stock?.code ?? "—"}
-                        </span>
-                        {u.instrument_stock?.instrument?.name && (
-                          <span className="ml-2 text-gray-700">{u.instrument_stock.instrument.name}</span>
-                        )}
-                        {u.source === "paket" && u.package_name && (
-                          <span className="ml-2 text-xs text-gray-400">· {u.package_name}</span>
-                        )}
-                      </td>
-                      <td className="py-2.5 px-3 text-gray-700">
-                        {u.condition_out?.name ?? <span className="text-gray-400 text-xs">—</span>}
-                      </td>
-                      <td className="py-2.5 px-3 text-gray-700">
-                        {u.condition_in?.name ?? <span className="text-gray-400 text-xs">—</span>}
-                      </td>
-                      <td className="py-2.5 px-3">
-                        {u.is_returned ? (
-                          <Badge variant="success">Kembali</Badge>
+            {/* Grouping sama seperti Pengembalian: per paket/satuan + header nama &
+                barcode_no; read-only (kondisi keluar → masuk + status). */}
+            {(() => {
+              const groupMap = new Map<string, { name: string | null; units: ReturnUnit[] }>()
+              for (const u of historyOrder.items) {
+                const name = u.source === "paket" ? (u.package_name ?? "Paket") : null
+                const key = name ?? "__satuan__"
+                const g = groupMap.get(key) ?? { name, units: [] }
+                g.units.push(u)
+                groupMap.set(key, g)
+              }
+              const groups = [...groupMap.values()]
+              return (
+                <div className="space-y-3">
+                  {groups.map((g) => (
+                    <div
+                      key={g.name ?? "__satuan__"}
+                      className="overflow-hidden rounded-lg border border-gray-200"
+                    >
+                      {/* Kepala grup: nama paket / satuan + barcode_no */}
+                      <div className="flex items-center gap-2 border-b border-gray-200 bg-gray-50 px-3 py-2">
+                        {g.name ? (
+                          <Package className="h-4 w-4 shrink-0 text-[#075489]" />
                         ) : (
-                          <Badge variant="warning">Belum</Badge>
+                          <Wrench className="h-4 w-4 shrink-0 text-gray-400" />
                         )}
-                      </td>
-                    </tr>
+                        <span className="truncate text-sm font-semibold text-gray-800">
+                          {g.name ?? "Instrumen Satuan"}
+                        </span>
+                        {[...new Set(g.units.map((u) => u.barcode_no).filter(Boolean))].map((bc) => (
+                          <span
+                            key={bc}
+                            className="shrink-0 rounded bg-[#075489]/8 px-1.5 py-0.5 font-mono text-xs font-semibold text-[#075489]"
+                          >
+                            {bc}
+                          </span>
+                        ))}
+                      </div>
+
+                      {/* Baris unit: kode + nama, kondisi keluar → masuk, status */}
+                      <div className="divide-y divide-gray-100">
+                        {g.units.map((u) => (
+                          <div
+                            key={u.id}
+                            className="grid grid-cols-1 gap-2 px-3 py-2.5 text-sm sm:grid-cols-[minmax(0,1fr)_9rem_9rem_6rem] sm:items-center sm:gap-3"
+                          >
+                            <div className="flex min-w-0 items-center gap-2">
+                              <span className="shrink-0 rounded bg-[#4ba69d]/10 px-2 py-0.5 font-mono text-xs font-semibold text-[#4ba69d]">
+                                {u.instrument_stock?.code ?? "—"}
+                              </span>
+                              <span className="truncate text-gray-700">
+                                {u.instrument_name ?? u.instrument_stock?.instrument?.name ?? "—"}
+                              </span>
+                            </div>
+                            <div className="text-gray-700">
+                              <span className="text-xs text-gray-400 sm:hidden">Kondisi keluar: </span>
+                              {u.condition_out?.name ?? <span className="text-xs text-gray-400">—</span>}
+                            </div>
+                            <div className="text-gray-700">
+                              <span className="text-xs text-gray-400 sm:hidden">Kondisi masuk: </span>
+                              {u.condition_in?.name ?? <span className="text-xs text-gray-400">—</span>}
+                            </div>
+                            <div>
+                              {u.is_returned ? (
+                                <Badge variant="success">Kembali</Badge>
+                              ) : (
+                                <Badge variant="warning">Belum</Badge>
+                              )}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
                   ))}
-                </tbody>
-              </table>
-            </div>
+                </div>
+              )
+            })()}
           </div>
         )}
       </Modal>
@@ -2232,7 +2262,7 @@ function ReturnedUnitRow({ unit, satuan = false }: { unit: ReturnUnit; satuan?: 
         <span className="shrink-0 font-mono text-xs font-semibold text-[#4ba69d] bg-[#4ba69d]/10 px-2 py-0.5 rounded">
           {unit.instrument_stock?.code ?? "—"}
         </span>
-        <span className="truncate text-sm text-gray-700">{unit.instrument_stock?.instrument?.name ?? "—"}</span>
+        <span className="truncate text-sm text-gray-700">{unit.instrument_name ?? unit.instrument_stock?.instrument?.name ?? "—"}</span>
       </div>
       {/* Kanan: kondisi keluar → masuk (turun ke baris bawah bila sempit) */}
       <span className="flex items-center gap-1.5 text-xs text-gray-500">

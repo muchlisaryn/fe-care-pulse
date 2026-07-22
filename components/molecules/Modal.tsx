@@ -10,13 +10,16 @@ type ModalProps = {
   title: string
   children: React.ReactNode
   footer?: React.ReactNode
-  size?: "sm" | "md" | "lg"
+  size?: "sm" | "md" | "lg" | "fit"
 }
 
+// Ukuran modal: kecil (sm) / sedang (md) / besar (lg) — lebar tetap (max-width),
+// atau `fit` yang lebarnya MENGIKUTI isi konten (shrink-to-fit, dibatasi 95vw).
 const sizeClass = {
-  sm: "max-w-sm",
-  md: "max-w-lg",
-  lg: "max-w-2xl",
+  sm: "w-full max-w-sm", // kecil — konfirmasi / daftar ringkas
+  md: "w-full max-w-lg", // sedang — form biasa
+  lg: "w-full max-w-2xl", // besar — tabel / rincian panjang
+  fit: "w-auto max-w-[95vw]", // menyesuaikan lebar dengan isi konten
 }
 
 export function Modal({ open, onClose, title, children, footer, size = "md" }: ModalProps) {
@@ -34,7 +37,7 @@ export function Modal({ open, onClose, title, children, footer, size = "md" }: M
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center px-4">
       <div className="absolute inset-0 bg-black/40" onClick={onClose} />
-      <div className={cn("relative w-full rounded-xl bg-white shadow-xl flex flex-col max-h-[90vh]", sizeClass[size])}>
+      <div className={cn("relative rounded-xl bg-white shadow-xl flex flex-col max-h-[90vh]", sizeClass[size])}>
         {/* Header */}
         <div className="flex items-center justify-between border-b border-gray-100 px-6 py-4 shrink-0">
           <h2 className="text-base font-semibold text-gray-900">{title}</h2>

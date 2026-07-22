@@ -142,7 +142,6 @@ export default function LaporanPerAlatPage() {
         "No",
         "Paket",
         "Nama Alat",
-        "Kode Unit",
         "Kode Batch",
         "Status",
         "Metode Steril",
@@ -161,7 +160,6 @@ export default function LaporanPerAlatPage() {
             ++n,
             g.type === "paket" ? g.name ?? "" : "",
             u.name ?? "",
-            u.unit_code ?? "",
             g.batch_code ?? "",
             statusLabel[g.status ?? ""] ?? g.status ?? "",
             methodLabel[g.method ?? ""] ?? g.method ?? "",
@@ -204,7 +202,7 @@ export default function LaporanPerAlatPage() {
               <div className="relative">
                 <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
                 <Input
-                  placeholder="Cari nama atau kode unit..."
+                  placeholder="Cari nama unit..."
                   value={form.search}
                   onChange={(e) => setForm((f) => ({ ...f, search: e.target.value }))}
                   className="pl-9"
@@ -396,9 +394,6 @@ function ReportRows({
                 <span className="font-medium text-gray-900">{g.name ?? "—"}</span>
                 {isPaket && <span className="text-xs text-gray-400">{g.qty} alat</span>}
               </div>
-              {!isPaket && g.unit_code && (
-                <p className="font-mono text-xs text-gray-400">{g.unit_code}</p>
-              )}
             </div>
           </div>
         </td>
@@ -421,9 +416,6 @@ function ReportRows({
             <td className="px-4" />
             <td className="py-1.5 px-4" colSpan={4}>
               <div className="flex flex-wrap items-center gap-2 pl-10">
-                <span className="rounded bg-[#075489]/8 px-1.5 py-0.5 font-mono text-xs font-semibold text-[#075489]">
-                  {u.unit_code ?? `#${u.id}`}
-                </span>
                 <span className="text-gray-700">{u.name ?? "—"}</span>
                 {u.result && <span className="text-xs text-gray-400">· {u.result}</span>}
               </div>
@@ -478,7 +470,6 @@ function ReportCard({
             <span className="font-medium text-gray-900">{g.name ?? "—"}</span>
             {isPaket && <span className="text-xs text-gray-400">{g.qty} alat</span>}
           </div>
-          {!isPaket && g.unit_code && <p className="font-mono text-xs text-gray-400">{g.unit_code}</p>}
         </div>
         <span className="shrink-0 text-xs font-medium text-gray-400">No {no}</span>
       </button>
@@ -500,9 +491,6 @@ function ReportCard({
         <div className="divide-y divide-gray-50 border-t border-gray-100 bg-gray-50/50">
           {g.units.map((u) => (
             <div key={u.id} className="flex flex-wrap items-center gap-2 px-4 py-2">
-              <span className="rounded bg-[#075489]/8 px-1.5 py-0.5 font-mono text-xs font-semibold text-[#075489]">
-                {u.unit_code ?? `#${u.id}`}
-              </span>
               <span className="text-sm text-gray-700">{u.name ?? "—"}</span>
               {u.condition && <span className="ml-auto text-xs text-gray-500">{u.condition}</span>}
               {u.result && <span className="text-xs text-gray-400">· {u.result}</span>}

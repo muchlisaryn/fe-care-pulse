@@ -709,7 +709,7 @@ export function ProductionSterilizationTab({
                                 <Badge variant="info">Paket</Badge>
                                 <span className="shrink-0 text-[11px] text-gray-400">{g.units.length} unit</span>
                               </span>
-                              <span className="mt-0.5 block truncate text-[11px] text-gray-500">
+                              <span className="mt-0.5 block text-[11px] text-gray-500">
                                 {instrumentCounts(g.units).map((c) => `${c.name} (${c.qty})`).join(", ")}
                               </span>
                             </span>
@@ -796,7 +796,7 @@ export function ProductionSterilizationTab({
         title="Selesaikan Validasi"
         confirmLabel="Selesaikan"
         loadingLabel="Memproses..."
-        size="lg"
+        size="fit"
         description={
           validating ? (
             <span className="block space-y-3">
@@ -814,16 +814,16 @@ export function ProductionSterilizationTab({
                   </span>
                   {groupUnits(vPassedUnits).map((g) => (
                     <span key={g.key} className="flex items-start justify-between gap-3">
-                      <span className="min-w-0 flex-1">
+                      <span>
                         <span className="flex items-center gap-1.5">
-                          <span className="truncate text-sm text-gray-700">{g.title}</span>
+                          <span className="text-sm text-gray-700">{g.title}</span>
                           {g.source === "paket" && <Badge variant="info">Paket</Badge>}
                           {g.units.length > 1 && (
                             <span className="shrink-0 text-[11px] text-gray-400">×{g.units.length}</span>
                           )}
                         </span>
                         {g.source === "paket" && (
-                          <span className="mt-0.5 block truncate text-[11px] text-gray-500">
+                          <span className="mt-0.5 block text-[11px] text-gray-500">
                             {instrumentCounts(g.units).map((c) => `${c.name} (${c.qty})`).join(", ")}
                           </span>
                         )}
@@ -842,16 +842,16 @@ export function ProductionSterilizationTab({
                   </span>
                   {groupUnits(vFailedUnits).map((g) => (
                     <span key={g.key} className="flex items-start justify-between gap-3">
-                      <span className="min-w-0 flex-1">
+                      <span>
                         <span className="flex items-center gap-1.5">
-                          <span className="truncate text-sm text-gray-700">{g.title}</span>
+                          <span className="text-sm text-gray-700">{g.title}</span>
                           {g.source === "paket" && <Badge variant="info">Paket</Badge>}
                           {g.units.length > 1 && (
                             <span className="shrink-0 text-[11px] text-gray-400">×{g.units.length}</span>
                           )}
                         </span>
                         {g.source === "paket" && (
-                          <span className="mt-0.5 block truncate text-[11px] text-gray-500">
+                          <span className="mt-0.5 block text-[11px] text-gray-500">
                             {instrumentCounts(g.units).map((c) => `${c.name} (${c.qty})`).join(", ")}
                           </span>
                         )}

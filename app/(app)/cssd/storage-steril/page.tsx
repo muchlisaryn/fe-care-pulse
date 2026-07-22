@@ -1,6 +1,7 @@
 "use client"
 
-import { useEffect, useMemo, useRef, useState } from "react"
+import { Suspense, useEffect, useMemo, useRef, useState } from "react"
+import { useSearchParams } from "next/navigation"
 import {
   Warehouse,
   Search,
@@ -64,8 +65,11 @@ function errMsg(e: unknown): string {
   return x.response?.data?.message ?? "Terjadi kesalahan."
 }
 
-export default function StorageSterilPage() {
+const STORAGE_TABS: StorageTab[] = ["simpan", "inventaris"]
+
+function StorageSterilPage() {
   const dispatch = useAppDispatch()
+  const searchParams = useSearchParams()
   const {
     incoming,
     incomingLoaded,
@@ -84,7 +88,21 @@ export default function StorageSterilPage() {
     [incoming, productionIncoming],
   )
 
-  const [tab, setTab] = useState<StorageTab>("simpan")
+  // Tab aktif disinkronkan ke URL (?tab=inventaris) agar bisa di-deep-link & bertahan
+  // saat refresh. Tab default "simpan" (URL tanpa query).
+  const tabParam = searchParams.get("tab")
+  const [tab, setTab] = useState<StorageTab>(
+    STORAGE_TABS.includes(tabParam as StorageTab) ? (tabParam as StorageTab) : "simpan",
+  )
+  function changeTab(next: StorageTab) {
+    setTab(next)
+    // history.replaceState (bukan router) → URL berubah seketika tanpa navigasi server.
+    window.history.replaceState(
+      null,
+      "",
+      next === "simpan" ? "/cssd/storage-steril" : `/cssd/storage-steril?tab=${next}`,
+    )
+  }
   const [search, setSearch] = useState("")
   // Inventaris: pengelompokan + status lipat per grup.
   const [groupBy, setGroupBy] = useState<"rak" | "batch">("rak")
@@ -126,14 +144,16 @@ export default function StorageSterilPage() {
   const [scanGroupKey, setScanGroupKey] = useState<string | null>(null)
   const [scanNotice, setScanNotice] = useState<string | null>(null)
 
-  // Selalu segarkan saat halaman dibuka agar unit yang baru selesai disterilkan
-  // langsung muncul (tanpa perlu refresh manual). Data cache tetap tampil seketika
-  // sementara refetch berjalan di latar — spinner hanya tampil saat load pertama.
+  // Inventory dipakai StatCard ringkasan yang SELALU tampil (+ tab Inventaris), jadi
+  // selalu dimuat. Data "Perlu Disimpan" (incoming/produksi) di-LAZY-LOAD: hanya
+  // diambil saat tab simpan aktif — dilewati bila langsung membuka tab Inventaris.
   useEffect(() => {
-    dispatch(fetchStorageIncoming())
-    dispatch(fetchProductionStorageIncoming())
     dispatch(fetchStorageInventory())
-  }, [dispatch])
+    if (tab === "simpan") {
+      dispatch(fetchStorageIncoming())
+      dispatch(fetchProductionStorageIncoming())
+    }
+  }, [dispatch, tab])
 
   // Muat pilihan rak dari Master Rak — lazy, dipanggil saat tombol "Simpan ke Rak"
   // ditekan (bukan saat mount). Hanya di-fetch sekali (cache via ref).
@@ -151,10 +171,12 @@ export default function StorageSterilPage() {
     }
   }
 
+  // Dipanggil setelah menyimpan ke rak: unit pindah dari "Perlu Disimpan" ke
+  // "Inventaris". Selalu segarkan data simpan; inventaris hanya bila sudah pernah dimuat.
   function refresh() {
     dispatch(fetchStorageIncoming())
     dispatch(fetchProductionStorageIncoming())
-    dispatch(fetchStorageInventory())
+    if (inventoryLoaded) dispatch(fetchStorageInventory())
   }
 
   function openStore(order: StorageIncomingOrder) {
@@ -396,7 +418,7 @@ export default function StorageSterilPage() {
                 <button
                   key={t.key}
                   type="button"
-                  onClick={() => setTab(t.key)}
+                  onClick={() => changeTab(t.key)}
                   className={
                     "relative -mb-px flex shrink-0 items-center gap-2 whitespace-nowrap border-b-2 px-1 pb-2.5 pt-1 text-sm transition-colors " +
                     (activeT
@@ -856,5 +878,17 @@ export default function StorageSterilPage() {
         </div>
       )}
     </div>
+  )
+}
+
+/**
+ * Bungkus dengan Suspense karena `useSearchParams` (baca tab dari URL) memaksa
+ * client-side rendering hingga boundary terdekat saat prerender.
+ */
+export default function StorageSterilPageWrapper() {
+  return (
+    <Suspense fallback={null}>
+      <StorageSterilPage />
+    </Suspense>
   )
 }
