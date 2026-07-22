@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react"
 import { Search, Archive } from "lucide-react"
-import { Barcode } from "@/components/atoms/Barcode"
+import { QRCodeSVG } from "qrcode.react"
 import { Button } from "@/components/atoms/Button"
 import { Input } from "@/components/atoms/Input"
 import { Label } from "@/components/atoms/Label"
@@ -25,12 +25,6 @@ import api from "@/lib/axios"
 const emptyForm = {
   name: "",
   note: "",
-}
-
-// Code 128 set B hanya mengenal ASCII 32..126; karakter di luar itu diam-diam
-// dikodekan jadi spasi, sehingga hasil scan tak akan cocok dengan nama rak.
-function isCode128Safe(text: string): boolean {
-  return [...text].every((ch) => ch.charCodeAt(0) >= 32 && ch.charCodeAt(0) <= 126)
 }
 
 // Nama & keterangan rak adalah teks bebas, sementara label dicetak lewat
@@ -113,13 +107,13 @@ export default function MasterRakPage() {
     }
   }
 
-  // Cetak label rak: barcode Code 128 berisi NAMA rak persis seperti di master —
-  // itu yang dicocokkan saat scan di halaman Storage Steril. Karena itu label
-  // wajib dicetak ulang bila nama rak diubah.
+  // Cetak label rak: QR berisi NAMA rak persis seperti di master — itu yang
+  // dicocokkan saat scan di halaman Storage Steril. Karena itu label wajib
+  // dicetak ulang bila nama rak diubah.
   function handlePrintLabel() {
     if (!labelTarget) return
-    const svg = document.getElementById("rak-label-barcode")
-    const barcode = svg ? new XMLSerializer().serializeToString(svg) : ""
+    const svg = document.getElementById("rak-label-qr")
+    const qr = svg ? new XMLSerializer().serializeToString(svg) : ""
     const w = window.open("", "_blank", "width=480,height=360")
     if (!w) return
     w.document.write(`
@@ -129,21 +123,24 @@ export default function MasterRakPage() {
           <style>
             * { box-sizing: border-box; }
             body { margin: 0; font-family: Arial, Helvetica, sans-serif; }
-            .label { border: 1px solid #000; padding: 12px 16px; width: 380px; }
+            .label { display: flex; gap: 16px; align-items: flex-start; border: 1px solid #000; padding: 12px 16px; width: 380px; }
+            .label .qr { flex: none; }
+            .label .qr svg { display: block; width: 108px; height: 108px; }
+            .label .body { flex: 1; min-width: 0; }
             .label .kind { font-size: 11px; font-weight: 600; letter-spacing: 1px; color: #111; }
-            .label .name { font-size: 22px; font-weight: 800; letter-spacing: .5px; text-transform: uppercase; color: #111; margin-top: 2px; }
-            .label .barcode { margin-top: 10px; }
-            .label .barcode svg { display: block; width: 100%; height: auto; }
+            .label .name { font-size: 22px; font-weight: 800; letter-spacing: .5px; text-transform: uppercase; color: #111; margin-top: 2px; word-break: break-word; }
             .label .note { margin-top: 8px; font-size: 11px; color: #111; }
             @media print { @page { margin: 8mm; } }
           </style>
         </head>
         <body>
           <div class="label">
-            <div class="kind">LOKASI RAK</div>
-            <div class="name">${escapeHtml(labelTarget.name)}</div>
-            <div class="barcode">${barcode}</div>
-            ${labelTarget.note ? `<div class="note">${escapeHtml(labelTarget.note)}</div>` : ""}
+            <div class="qr">${qr}</div>
+            <div class="body">
+              <div class="kind">LOKASI RAK</div>
+              <div class="name">${escapeHtml(labelTarget.name)}</div>
+              ${labelTarget.note ? `<div class="note">${escapeHtml(labelTarget.note)}</div>` : ""}
+            </div>
           </div>
         </body>
       </html>
@@ -250,25 +247,23 @@ export default function MasterRakPage() {
       >
         {labelTarget && (
           <div className="space-y-3">
-            <div className="rounded-lg border border-gray-200 px-4 py-3">
-              <p className="text-[11px] font-semibold tracking-wider text-gray-500">LOKASI RAK</p>
-              <p className="text-lg font-bold uppercase text-gray-900">{labelTarget.name}</p>
-              <Barcode
-                id="rak-label-barcode"
+            <div className="flex items-start gap-4 rounded-lg border border-gray-200 px-4 py-3">
+              <QRCodeSVG
+                id="rak-label-qr"
                 value={labelTarget.name}
-                height={56}
-                className="mt-2 h-auto w-full"
+                size={108}
+                level="M"
+                marginSize={0}
+                className="shrink-0"
               />
-              {labelTarget.note && <p className="mt-1 text-xs text-gray-500">{labelTarget.note}</p>}
+              <div className="min-w-0">
+                <p className="text-[11px] font-semibold tracking-wider text-gray-500">LOKASI RAK</p>
+                <p className="text-lg font-bold uppercase text-gray-900 break-words">{labelTarget.name}</p>
+                {labelTarget.note && <p className="mt-1 text-xs text-gray-500">{labelTarget.note}</p>}
+              </div>
             </div>
-            {!isCode128Safe(labelTarget.name) && (
-              <p className="text-xs text-red-600">
-                Nama rak ini mengandung karakter yang tidak bisa dikodekan ke barcode, jadi hasil
-                scan tidak akan cocok. Pakai huruf, angka, dan spasi biasa saja.
-              </p>
-            )}
             <p className="text-xs text-gray-500">
-              Tempel label ini di rak. Barcode-nya berisi nama rak, jadi bila nama rak diubah, label
+              Tempel label ini di rak. QR-nya berisi nama rak, jadi bila nama rak diubah, label
               wajib dicetak ulang.
             </p>
           </div>

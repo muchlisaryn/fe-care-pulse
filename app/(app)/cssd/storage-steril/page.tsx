@@ -11,6 +11,7 @@ import {
   ChevronDown,
   ChevronRight,
   ZoomIn,
+  ScanLine,
   X,
 } from "lucide-react"
 import { Input } from "@/components/atoms/Input"
@@ -22,6 +23,7 @@ import { Card } from "@/components/molecules/Card"
 import { StatCard } from "@/components/molecules/StatCard"
 import { PageHeader } from "@/components/molecules/PageHeader"
 import { Modal } from "@/components/molecules/Modal"
+import { QrScannerModal } from "@/components/molecules/QrScannerModal"
 import { useAppDispatch, useAppSelector } from "@/lib/store/hooks"
 import {
   fetchStorageIncoming,
@@ -107,8 +109,6 @@ export default function StorageSterilPage() {
   // Modal simpan ke rak.
   const [active, setActive] = useState<StorageIncomingOrder | null>(null)
   const [rackById, setRackById] = useState<Record<number, string>>({})
-  // Rak yang dipilih untuk SEMUA grup sekaligus (per batch).
-  const [bulkRack, setBulkRack] = useState("")
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   // Foto instrumen yang sedang di-zoom (klik thumbnail) — null = tidak ada.
@@ -118,6 +118,13 @@ export default function StorageSterilPage() {
   // Status muat pilihan rak (animasi loading dropdown) + penanda sudah dimuat.
   const [rackOptionsLoading, setRackOptionsLoading] = useState(false)
   const rackLoadedRef = useRef(false)
+  // Rak yang dipilih untuk SEMUA grup sekaligus (dropdown "isi otomatis semua").
+  const [bulkRack, setBulkRack] = useState("")
+  // Scan rak PER INSTRUMEN via KAMERA: klik "Scan Rak" pada grup → kamera terbuka
+  // (scannerOpen) dengan target grup (scanGroupKey); QR terbaca → rak grup terisi.
+  const [scannerOpen, setScannerOpen] = useState(false)
+  const [scanGroupKey, setScanGroupKey] = useState<string | null>(null)
+  const [scanNotice, setScanNotice] = useState<string | null>(null)
 
   // Selalu segarkan saat halaman dibuka agar unit yang baru selesai disterilkan
   // langsung muncul (tanpa perlu refresh manual). Data cache tetap tampil seketika
@@ -203,7 +210,7 @@ export default function StorageSterilPage() {
     })
   }
 
-  // Set satu lokasi rak untuk SELURUH batch sekaligus (semua unit belum tersimpan).
+  // Isi satu lokasi rak untuk SELURUH batch sekaligus (semua unit belum tersimpan).
   function setAllRack(value: string) {
     setBulkRack(value)
     setRackById((prev) => {
@@ -214,6 +221,45 @@ export default function StorageSterilPage() {
       return next
     })
   }
+
+  // Buka kamera scan untuk SATU grup instrumen.
+  function openGroupScanner(key: string) {
+    setScanNotice(null)
+    setScanGroupKey(key)
+    setScannerOpen(true)
+  }
+
+  // Hasil baca QR dari kamera → cocokkan ke nama rak (case-insensitive) lalu isi
+  // rak grup terpilih. Bila rak tak dikenal → notifikasi.
+  function handleRackScanned(raw: string) {
+    const text = raw.trim()
+    const group = scanGroupKey ? unitGroups.find((g) => g.key === scanGroupKey) : null
+    setScanGroupKey(null)
+    if (!text || !group) return
+    const match = rackOptions.find((r) => r.name.toLowerCase() === text.toLowerCase())
+    if (!match) {
+      setScanNotice(`Rak "${text}" tidak ditemukan di Master Rak.`)
+      return
+    }
+    setGroupRack(group, match.name)
+    setScanNotice(`Rak "${match.name}" → ${groupTitle(group)}.`)
+  }
+
+  // Tutup modal simpan + reset state scan sekaligus.
+  function closeModal() {
+    setScannerOpen(false)
+    setScanGroupKey(null)
+    setScanNotice(null)
+    setBulkRack("")
+    setActive(null)
+  }
+
+  // Notifikasi scan hilang sendiri setelah beberapa detik.
+  useEffect(() => {
+    if (!scanNotice) return
+    const t = setTimeout(() => setScanNotice(null), 4000)
+    return () => clearTimeout(t)
+  }, [scanNotice])
 
   async function saveStorage() {
     if (!active || saving) return
@@ -228,7 +274,7 @@ export default function StorageSterilPage() {
     setError(null)
     try {
       await api.post(active.store_url ?? `/master/orders/${active.id}/store`, { items })
-      setActive(null)
+      closeModal()
       dispatch(invalidateStorage())
       refresh()
     } catch (e) {
@@ -588,14 +634,14 @@ export default function StorageSterilPage() {
       {/* Modal simpan ke rak */}
       <Modal
         open={active !== null}
-        onClose={saving ? () => {} : () => setActive(null)}
-        title={active ? `Simpan ke Gudang — ${active.code_transaction ?? active.code}` : "Simpan ke Gudang"}
+        onClose={saving ? () => {} : closeModal}
+        title={active ? `Simpan ke Gudang ${active.code_transaction ?? active.code}` : "Simpan ke Gudang"}
         size="lg"
         footer={
           <div className="flex w-full flex-col items-stretch gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
             {error ? <p className="text-sm text-red-600">{error}</p> : null}
             <div className="flex shrink-0 justify-end gap-2 sm:ml-auto">
-              <Button variant="outline" onClick={() => setActive(null)} disabled={saving}>
+              <Button variant="outline" onClick={closeModal} disabled={saving}>
                 Batal
               </Button>
               <Button
@@ -611,25 +657,31 @@ export default function StorageSterilPage() {
       >
         {active && (
           <div className="space-y-4">
-            {/* Pengisian rak lewat PILIHAN (dropdown) — tidak lagi via scan. Bisa
-                sekaligus se-batch (di sini) atau per paket/instrumen (di daftar). */}
+            {/* Pengisian rak PER INSTRUMEN: klik "Scan Rak" pada item yang dituju →
+                kamera terbuka untuk baca QR rak, atau pilih rak manual dari dropdown. */}
             {active.units.some((u) => !u.stored) && (
-              <div className="flex flex-col gap-2 rounded-lg border border-gray-200 bg-gray-50 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
-                <div className="min-w-0">
-                  <p className="text-sm font-medium text-gray-800">Pilih Rak untuk semua paket</p>
-                  <p className="text-xs text-gray-500">
-                    Pilih satu rak untuk seluruh item di batch ini sekaligus — tetap bisa diubah per paket/instrumen di bawah.
-                  </p>
+              <div className="flex flex-col gap-2 rounded-lg border border-gray-200 bg-gray-50 px-4 py-3">
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium text-gray-800">Tentukan lokasi rak per instrumen</p>
+                    <p className="text-xs text-gray-500">
+                      Klik <span className="font-medium">Scan Rak</span> pada instrumen yang dituju → kamera terbuka untuk baca QR rak, lalu rak otomatis terisi — atau pilih rak manual dari dropdown.
+                    </p>
+                  </div>
+                  {/* Pilih satu rak → isi otomatis ke SEMUA instrumen batch ini. */}
+                  <div className="w-full sm:w-52">
+                    <SelectSearch
+                      options={rackOptions.map((r) => ({ value: r.name, label: r.name }))}
+                      value={bulkRack}
+                      onChange={(value) => setAllRack(value)}
+                      loading={rackOptionsLoading}
+                      placeholder="Isi semua rak..."
+                    />
+                  </div>
                 </div>
-                <div className="w-full sm:w-52">
-                  <SelectSearch
-                    options={rackOptions.map((r) => ({ value: r.name, label: r.name }))}
-                    value={bulkRack}
-                    onChange={(value) => setAllRack(value)}
-                    loading={rackOptionsLoading}
-                    placeholder="Pilih rak untuk semua..."
-                  />
-                </div>
+                {scanNotice && (
+                  <p className="text-xs text-gray-600">{scanNotice}</p>
+                )}
               </div>
             )}
 
@@ -689,11 +741,11 @@ export default function StorageSterilPage() {
                       {isPaket && <Badge variant="info">Paket</Badge>}
                       <span className="text-sm font-medium text-gray-800">{title}</span>
                       <span className="text-xs text-gray-400">{g.units.length} unit</span>
-                      {/* Lokasi rak dipilih dari dropdown (Master Rak). Grup yang sudah
-                          tersimpan raknya tak bisa diubah lagi. */}
-                      <div className="ml-auto w-full sm:w-52">
+                      {/* Lokasi rak: scan barcode/QR rak (pilih item ini dulu) ATAU
+                          pilih dari dropdown. Grup yang sudah tersimpan tak bisa diubah. */}
+                      <div className="ml-auto flex w-full items-center gap-2 sm:w-auto">
                         {allStored ? (
-                          <div className="flex sm:justify-end">
+                          <div className="flex flex-1 sm:justify-end">
                             <Badge variant="success">
                               <span className="inline-flex items-center gap-1">
                                 <MapPin className="h-3 w-3" />
@@ -702,13 +754,27 @@ export default function StorageSterilPage() {
                             </Badge>
                           </div>
                         ) : (
-                          <SelectSearch
-                            options={rackOptions.map((r) => ({ value: r.name, label: r.name }))}
-                            value={groupRack}
-                            onChange={(value) => setGroupRack(g, value)}
-                            loading={rackOptionsLoading}
-                            placeholder="Pilih rak..."
-                          />
+                          <>
+                            <div className="w-full sm:w-52">
+                              <SelectSearch
+                                options={rackOptions.map((r) => ({ value: r.name, label: r.name }))}
+                                value={groupRack}
+                                onChange={(value) => setGroupRack(g, value)}
+                                loading={rackOptionsLoading}
+                                placeholder="Pilih rak..."
+                              />
+                            </div>
+                            <Button
+                              type="button"
+                              variant="outline"
+                              onClick={() => openGroupScanner(g.key)}
+                              className="shrink-0"
+                              title="Scan QR rak pakai kamera untuk item ini"
+                            >
+                              <ScanLine className="h-4 w-4" />
+                              Scan Rak
+                            </Button>
+                          </>
                         )}
                       </div>
                     </div>
@@ -749,6 +815,18 @@ export default function StorageSterilPage() {
           </div>
         )}
       </Modal>
+
+      {/* Kamera scan QR rak untuk grup terpilih → isi rak otomatis. */}
+      <QrScannerModal
+        open={scannerOpen}
+        onClose={() => {
+          setScannerOpen(false)
+          setScanGroupKey(null)
+        }}
+        onScan={handleRackScanned}
+        title="Scan QR Rak"
+        hint="Arahkan kamera ke QR label rak."
+      />
 
       {/* Zoom foto instrumen — overlay layar penuh, klik di mana saja untuk menutup */}
       {zoom && (
