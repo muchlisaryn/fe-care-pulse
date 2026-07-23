@@ -139,6 +139,9 @@ function StorageSterilPage() {
   // "semua" (isi otomatis seluruh batch). null = modal pemilih rak tertutup.
   const [pickerTarget, setPickerTarget] = useState<{ type: "all" } | { type: "group"; key: string } | null>(null)
   const [scanNotice, setScanNotice] = useState<string | null>(null)
+  // Pencarian DI DALAM modal simpan: datanya sudah ada di klien (unit satu batch),
+  // jadi disaring lokal & langsung saat diketik (live search) — tanpa tombol Cari.
+  const [modalSearch, setModalSearch] = useState("")
 
   // Angka kartu statistik diambil dari endpoint ringkasan (bukan menghitung
   // seluruh baris di klien) supaya daftarnya bisa dimuat bertahap.
@@ -237,6 +240,7 @@ function StorageSterilPage() {
     setActive(order)
     setError(null)
     setBulkRack("")
+    setModalSearch("")
     const init: Record<number, string> = {}
     order.units.forEach((u) => {
       init[u.id] = u.rack_code ?? ""
@@ -272,6 +276,22 @@ function StorageSterilPage() {
     }
     return groups
   }, [active])
+
+  // Hasil penyaringan daftar di modal: cocokkan kata kunci ke KODE (nomor label
+  // kemasan & kode unit) maupun NAMA (nama paket / nama instrumen). Penyaringan ini
+  // hanya memengaruhi TAMPILAN — rak yang sudah diisi pada grup yang sedang
+  // tersembunyi tetap ikut tersimpan.
+  const filteredGroups = useMemo(() => {
+    const q = modalSearch.trim().toLowerCase()
+    if (!q) return unitGroups
+    return unitGroups.filter((g) =>
+      [
+        groupTitle(g),
+        g.barcodeNo,
+        ...g.units.flatMap((u) => [u.instrument, u.code]),
+      ].some((v) => v?.toLowerCase().includes(q)),
+    )
+  }, [unitGroups, modalSearch])
 
   // Set satu lokasi rak untuk semua unit (belum tersimpan) dalam satu grup/paket.
   function setGroupRack(group: StoreUnitGroup, value: string) {
@@ -319,6 +339,7 @@ function StorageSterilPage() {
     setPickerTarget(null)
     setScanNotice(null)
     setBulkRack("")
+    setModalSearch("")
     setActive(null)
   }
 
@@ -604,14 +625,15 @@ function StorageSterilPage() {
                           {(() => {
                             // Kelompokkan sesuai bentuknya saat DIPRODUKSI: paket per nama
                             // paket, satuan per jenis instrumen — masing-masing dipisah lagi
-                            // per batch produksi, karena bungkus steril berbeda batch adalah
-                            // barang berbeda meski isinya sejenis.
+                            // per NOMOR LABEL kemasan, karena bungkus steril berbeda label
+                            // adalah barang berbeda meski isinya sejenis. Nama & nomor label
+                            // sama-sama bersumber dari snapshot production_item.
                             const bundles = new Map<
                               string,
                               {
                                 source: "satuan" | "paket"
                                 name: string
-                                productionCode: string | null
+                                barcodeNo: string | null
                                 units: typeof g.items
                               }
                             >()
@@ -620,13 +642,13 @@ function StorageSterilPage() {
                                 r.source === "paket"
                                   ? r.package_name ?? "Paket"
                                   : r.unit.instrument ?? "Instrumen"
-                              const key = `${r.source}|${name}|${r.production_code ?? ""}`
+                              const key = `${r.source}|${name}|${r.barcode_no ?? ""}`
                               const b =
                                 bundles.get(key) ??
                                 {
                                   source: r.source,
                                   name,
-                                  productionCode: r.production_code,
+                                  barcodeNo: r.barcode_no,
                                   units: [] as typeof g.items,
                                 }
                               b.units.push(r)
@@ -658,9 +680,9 @@ function StorageSterilPage() {
                                       {isPaket ? "Paket" : "Satuan"}
                                     </Badge>
                                     <span className="font-medium text-gray-800">{b.name}</span>
-                                    {b.productionCode ? (
+                                    {b.barcodeNo ? (
                                       <span className="font-mono text-xs font-semibold text-[#075489] bg-[#075489]/8 px-1.5 py-0.5 rounded">
-                                        {b.productionCode}
+                                        {b.barcodeNo}
                                       </span>
                                     ) : (
                                       <span className="text-xs text-gray-400">—</span>
@@ -755,10 +777,38 @@ function StorageSterilPage() {
               </div>
             )}
 
+            {/* Pencarian isi batch — langsung menyaring sambil diketik (data satu
+                batch sudah ada di klien). Cocok untuk batch berisi banyak paket /
+                instrumen yang hanya sebagian mau diisi raknya. */}
+            <div className="relative w-full">
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+              <Input
+                placeholder="Cari kode atau nama instrumen..."
+                value={modalSearch}
+                onChange={(e) => setModalSearch(e.target.value)}
+                className="pl-9 pr-9"
+              />
+              {modalSearch && (
+                <button
+                  type="button"
+                  onClick={() => setModalSearch("")}
+                  title="Hapus pencarian"
+                  className="absolute right-2 top-1/2 flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-md text-gray-400 hover:bg-gray-100 hover:text-gray-600"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              )}
+            </div>
+
             {/* Daftar unit + rak. Satu rak per grup: paket per nama paket,
                 satuan per jenis instrumen (unit sejenis disimpan di rak yang sama). */}
             <div className="space-y-2">
-              {unitGroups.map((g) => {
+              {filteredGroups.length === 0 && (
+                <div className="py-10 text-center text-sm text-gray-400">
+                  Tidak ada paket / instrumen yang cocok.
+                </div>
+              )}
+              {filteredGroups.map((g) => {
                 // Seluruh unit dalam grup disimpan di SATU rak.
                 const firstUnstored = g.units.find((u) => !u.stored)
                 const allStored = !firstUnstored

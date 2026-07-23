@@ -47,7 +47,9 @@ export type StorageInventoryRow = {
   expired: boolean
   source: "satuan" | "paket"
   package_name: string | null
-  /** Kode batch produksi (PRD-...) asal unit — label pada bungkus sterilnya. */
+  /** Nomor label kemasan bungkus steril (satu label = satu bungkus). */
+  barcode_no: string | null
+  /** Kode batch produksi (PRD-...) asal unit. */
   production_code: string | null
   unit: { id: number; code: string | null; instrument: string | null; image_url?: string | null }
   order: { id: number; code: string; code_transaction: string | null } | null

@@ -13,9 +13,22 @@ type QrScannerModalProps = {
 }
 
 /**
+ * Cari kamera BELAKANG dari daftar kamera perangkat lewat labelnya. Label kamera
+ * berbeda-beda per browser/bahasa ("back", "rear", "environment", "belakang", …),
+ * jadi dicocokkan dengan beberapa kata kunci sekaligus. Bila tidak ada yang cocok,
+ * kamera TERAKHIR dipakai — di Android urutannya depan lalu belakang.
+ */
+function pickBackCamera(cameras: { id: string; label: string }[]): string | null {
+  if (cameras.length === 0) return null
+  const back = cameras.find((c) => /back|rear|environment|belakang|trás|traseira|arrière|背面|후면/i.test(c.label))
+  return (back ?? cameras[cameras.length - 1]).id
+}
+
+/**
  * Modal pemindai QR/barcode via KAMERA (html5-qrcode). Dipakai di HP/tablet yang
  * tak punya scanner fisik. Kamera dimulai saat modal dibuka & dihentikan saat
- * ditutup / setelah satu pindaian berhasil.
+ * ditutup / setelah satu pindaian berhasil. Kamera yang dipakai selalu yang
+ * BELAKANG (lihat urutan percobaan di dalam efek).
  *
  * Catatan: akses kamera butuh secure context (https atau localhost). Di jaringan
  * lewat http IP biasa, browser memblokir getUserMedia — jalankan `npm run dev:https`.
@@ -38,23 +51,52 @@ export function QrScannerModal({ open, onClose, onScan, title = "Scan QR", hint 
 
     // Import dinamis agar tak dibundel di SSR & hanya jalan di browser.
     import("html5-qrcode")
-      .then(({ Html5Qrcode }) => {
+      .then(async ({ Html5Qrcode }) => {
         if (stopped) return
         setError(null)
         scanner = new Html5Qrcode(regionId, /* verbose */ false)
-        return scanner.start(
-          { facingMode: "environment" },
-          { fps: 10, qrbox: { width: 240, height: 240 } },
-          (decodedText) => {
-            if (stopped) return
-            stopped = true
-            onScanRef.current(decodedText)
-            // Hentikan kamera lalu tutup modal.
-            scanner?.stop().catch(() => {}).finally(() => onClose())
-          },
-          // Error per-frame (tidak menemukan kode) — abaikan, ini normal.
-          () => {},
-        )
+        const config = { fps: 10, qrbox: { width: 240, height: 240 } }
+        const onDecoded = (decodedText: string) => {
+          if (stopped) return
+          stopped = true
+          onScanRef.current(decodedText)
+          // Hentikan kamera lalu tutup modal.
+          scanner?.stop().catch(() => {}).finally(() => onClose())
+        }
+        // Error per-frame (tidak menemukan kode) — abaikan, ini normal.
+        const onFrameError = () => {}
+
+        /**
+         * Nyalakan kamera tertentu. `true` bila berhasil. Bila modal keburu ditutup
+         * saat kamera masih menyala, kameranya langsung dimatikan lagi (cleanup efek
+         * sudah lewat sebelum start selesai).
+         */
+        const tryStart = async (camera: string | MediaTrackConstraints) => {
+          await scanner!.start(camera, config, onDecoded, onFrameError)
+          if (stopped) await scanner!.stop().catch(() => {})
+          return true
+        }
+
+        // Urutan percobaan agar kamera BELAKANG yang terpakai — bukan kamera depan:
+        // 1) `exact: "environment"` → browser WAJIB memakai kamera belakang;
+        // 2) pilih deviceId kamera belakang dari daftar kamera (lewat labelnya);
+        // 3) `facingMode: "environment"` biasa — sekadar preferensi, jalan terakhir
+        //    untuk perangkat berkamera tunggal (mis. laptop).
+        try {
+          if (await tryStart({ facingMode: { exact: "environment" } })) return
+        } catch {
+          if (stopped) return
+        }
+
+        try {
+          const backId = pickBackCamera(await Html5Qrcode.getCameras())
+          if (stopped) return
+          if (backId && (await tryStart(backId))) return
+        } catch {
+          if (stopped) return
+        }
+
+        await tryStart({ facingMode: "environment" })
       })
       .catch((e: unknown) => {
         if (stopped) return
