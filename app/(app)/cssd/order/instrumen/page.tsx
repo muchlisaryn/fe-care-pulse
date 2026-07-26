@@ -777,7 +777,7 @@ export default function OrderInstrumenPage() {
             </div>
 
             {/* Aksi */}
-            <div className="flex gap-2">
+            <div className="flex justify-end gap-2">
               <Button type="submit" className="bg-[#075489] hover:bg-[#075489]/90 text-white shrink-0">
                 Cari
               </Button>
@@ -1215,8 +1215,8 @@ export default function OrderInstrumenPage() {
         title={detail ? `Detail Order : ${detailTitleCodes(detail)}` : "Detail Order"}
         size="lg"
         footer={
-          <div className="flex w-full items-center justify-between gap-3">
-            <div className="flex gap-2">
+          <div className="flex w-full flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
+            <div className="flex flex-wrap gap-2 empty:hidden">
               {detail &&
                 nextActions[detail.status].map((a) => (
                   <Button

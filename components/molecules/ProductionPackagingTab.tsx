@@ -853,7 +853,7 @@ export function ProductionPackagingTab({
                     key={i}
                     onClick={() => toggleLabel(i)}
                     className={
-                      "relative w-[220px] cursor-pointer rounded-lg border p-3 text-center transition-colors " +
+                      "relative w-full cursor-pointer rounded-lg border p-3 text-center transition-colors sm:w-[220px] " +
                       (picked
                         ? "border-[#075489] bg-[#075489]/5 ring-1 ring-[#075489]/20"
                         : "border-gray-200 hover:border-[#075489]/40")
@@ -958,7 +958,7 @@ export function ProductionPackagingTab({
               <Info label="Dikemas oleh" value={historyBatch.completed_by ?? historyBatch.operator} />
               <Info label="Waktu Dikemas" value={formatDateTime(historyBatch.packaged_at)} />
               <Info label="Jenis Kemasan" value={historyBatch.packaging_type_label} />
-              <Info label="Tgl Kedaluwarsa Steril" value={historyBatch.expiry_date} />
+              <Info label="Tgl Kedaluwarsa Steril" value={formatDate(historyBatch.expiry_date)} />
             </div>
 
             <div className="space-y-2.5">

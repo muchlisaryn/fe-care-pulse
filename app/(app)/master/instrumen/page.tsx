@@ -461,8 +461,8 @@ export default function MasterInstrumenPage() {
       </div>
 
       <Card className="p-0">
-        <div className="px-5 py-4 border-b border-gray-100">
-          <form onSubmit={handleSearch} className="flex gap-2 w-full">
+        <div className="px-4 py-4 border-b border-gray-100 sm:px-5">
+          <form onSubmit={handleSearch} className="flex flex-col gap-2 sm:flex-row sm:items-center">
             <div className="relative flex-1">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 pointer-events-none" />
               <Input
@@ -472,17 +472,19 @@ export default function MasterInstrumenPage() {
                 className="pl-9"
               />
             </div>
-            <Button type="submit" className="bg-[#075489] hover:bg-[#075489]/90 text-white shrink-0">
-              Cari
-            </Button>
-            <div className="w-44 shrink-0">
-              <SelectSearch
-                options={sortOptions}
-                value={sortBy}
-                onChange={(v) => dispatch(setInstrumentSort(v as InstrumentSort))}
-                placeholder="Urutkan"
-                triggerClassName="h-10 px-4"
-              />
+            <div className="flex gap-2">
+              <Button type="submit" className="bg-[#075489] hover:bg-[#075489]/90 text-white shrink-0">
+                Cari
+              </Button>
+              <div className="flex-1 sm:w-44 sm:flex-none">
+                <SelectSearch
+                  options={sortOptions}
+                  value={sortBy}
+                  onChange={(v) => dispatch(setInstrumentSort(v as InstrumentSort))}
+                  placeholder="Urutkan"
+                  triggerClassName="h-10 px-4"
+                />
+              </div>
             </div>
           </form>
         </div>
@@ -613,7 +615,7 @@ export default function MasterInstrumenPage() {
       {stockModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
           <div className="w-full max-w-5xl rounded-xl bg-white shadow-xl flex flex-col max-h-[95vh]">
-            <div className="flex items-start justify-between border-b border-gray-100 px-6 py-4">
+            <div className="flex items-start justify-between border-b border-gray-100 px-4 py-4 sm:px-6">
               <div className="flex items-center gap-3">
                 <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-[#4ba69d]/10 text-[#4ba69d]">
                   <Layers className="h-5 w-5" />
@@ -637,14 +639,14 @@ export default function MasterInstrumenPage() {
             </div>
 
             {!stockLoading && stocks.length > 0 && (
-              <div className="flex items-center gap-6 border-b border-gray-100 px-6 py-3 text-sm">
+              <div className="flex flex-wrap items-center gap-x-6 gap-y-1 border-b border-gray-100 px-4 py-3 text-sm sm:px-6">
                 <span className="text-gray-500">Total unit: <span className="font-semibold text-gray-900">{stocks.length}</span></span>
                 <span className="text-gray-500">Tersedia: <span className="font-semibold text-[#4ba69d]">{stocks.filter((s) => s.status === "tersedia").length}</span></span>
                 <span className="text-gray-500">Dipakai/Proses: <span className="font-semibold text-amber-500">{stocks.filter((s) => s.status !== "tersedia").length}</span></span>
               </div>
             )}
 
-            <div className="flex-1 overflow-y-auto">
+            <div className="flex-1 overflow-x-auto overflow-y-auto">
               {stockLoading ? (
                 <div className="py-10 text-center text-sm text-gray-400">Memuat stock...</div>
               ) : stocks.length === 0 ? (
@@ -656,7 +658,7 @@ export default function MasterInstrumenPage() {
                   <p className="text-xs">Tambahkan unit pertama lewat form di bawah.</p>
                 </div>
               ) : (
-                <table className="w-full text-sm">
+                <table className="w-full min-w-[640px] text-sm">
                   <thead>
                     <tr className="border-b border-gray-100">
                       <th className="py-3 pl-4 pr-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-400 w-10">No</th>
@@ -733,10 +735,10 @@ export default function MasterInstrumenPage() {
               )}
             </div>
 
-            <div className="border-t border-gray-100 bg-gray-50 px-6 py-4">
+            <div className="border-t border-gray-100 bg-gray-50 px-4 py-4 sm:px-6">
               <p className="mb-3 text-xs font-bold uppercase tracking-widest text-gray-400">Tambah Stock</p>
-              <div className="flex items-end gap-3">
-                <div className="w-56 space-y-1.5">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+                <div className="space-y-1.5 sm:w-56">
                   <Label>Kondisi</Label>
                   <SelectSearch options={kondisiOptions} value={newConditionId} onChange={setNewConditionId} disabled={stockBusy} placeholder="-- Pilih kondisi --" />
                 </div>

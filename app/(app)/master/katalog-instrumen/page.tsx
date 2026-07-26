@@ -1,8 +1,7 @@
 "use client"
 
 import { useEffect, useMemo, useRef, useState } from "react"
-import { Search, Library, ChevronRight, Package, X, Printer, Image as ImageIcon, Upload, ZoomIn } from "lucide-react"
-import { QRCodeSVG } from "qrcode.react"
+import { Search, Library, ChevronRight, Package, X, Image as ImageIcon, Upload, ZoomIn } from "lucide-react"
 import { Button } from "@/components/atoms/Button"
 import { Badge } from "@/components/atoms/Badge"
 import { Input } from "@/components/atoms/Input"
@@ -50,27 +49,6 @@ type PickedItem = {
 }
 
 const emptyForm = { code: "", name: "", type: "paket" as "single" | "paket", description: "" }
-
-// Helper tanggal untuk label sterilisasi.
-function toInputDate(d: Date): string {
-  const y = d.getFullYear()
-  const m = String(d.getMonth() + 1).padStart(2, "0")
-  const dd = String(d.getDate()).padStart(2, "0")
-  return `${y}-${m}-${dd}`
-}
-
-function addMonths(d: Date, n: number): Date {
-  const x = new Date(d)
-  x.setMonth(x.getMonth() + n)
-  return x
-}
-
-// "YYYY-MM-DD" → "DD.MM.YYYY" (format pada label).
-function formatTanggal(s: string): string {
-  if (!s) return "-"
-  const [y, m, dd] = s.split("-")
-  return `${dd}.${m}.${y}`
-}
 
 function SetManager() {
   const [catalogs, setCatalogs] = useState<InstrumentCatalog[]>([])
@@ -140,13 +118,6 @@ function SetManager() {
   // Hapus.
   const [deleteTarget, setDeleteTarget] = useState<InstrumentCatalog | null>(null)
   const [deletingId, setDeletingId] = useState<number | null>(null)
-
-  // Cetak label sterilisasi.
-  const [labelTarget, setLabelTarget] = useState<InstrumentCatalog | null>(null)
-  const [labelLoading, setLabelLoading] = useState(false)
-  const [labelPcs, setLabelPcs] = useState(0)
-  const [sterilDate, setSterilDate] = useState("")
-  const [expiredDate, setExpiredDate] = useState("")
 
   async function loadCatalogs() {
     setLoading(true)
@@ -353,68 +324,6 @@ function SetManager() {
     }
   }
 
-  async function openLabel(cat: InstrumentCatalog) {
-    setLabelTarget(cat)
-    setLabelLoading(true)
-    const today = new Date()
-    setSterilDate(toInputDate(today))
-    setExpiredDate(toInputDate(addMonths(today, 3)))
-    try {
-      const res = await api.get(`/master/instrument-catalogs/${cat.id}`)
-      const items = (res.data.data.items ?? []) as CatalogItem[]
-      // PCS = total seluruh jumlah unit dalam paket.
-      setLabelPcs(items.reduce((sum, it) => sum + (it.quantity || 0), 0))
-    } finally {
-      setLabelLoading(false)
-    }
-  }
-
-  function handlePrintLabel() {
-    if (!labelTarget) return
-    const svg = document.getElementById("label-qr")
-    const qr = svg ? new XMLSerializer().serializeToString(svg) : ""
-    const w = window.open("", "_blank", "width=560,height=360")
-    if (!w) return
-    w.document.write(`
-      <html>
-        <head>
-          <title>Label ${labelTarget.code}</title>
-          <style>
-            * { box-sizing: border-box; }
-            body { margin: 0; font-family: Arial, Helvetica, sans-serif; }
-            .label { display: flex; gap: 16px; align-items: flex-start; border: 1px solid #000; padding: 14px 18px; width: 440px; }
-            .label .qr { flex: none; }
-            .label .pcs { font-size: 11px; font-weight: 600; color: #111; }
-            .label .name { font-size: 19px; font-weight: 800; letter-spacing: .5px; text-transform: uppercase; color: #111; margin-top: 2px; }
-            .label .dates { margin-top: 16px; font-size: 11px; color: #111; }
-            .label .dates .row { display: flex; margin-bottom: 4px; }
-            .label .dates .row .k { width: 130px; }
-            .label .dates .row .v { font-weight: 700; }
-            .label .serial { margin-top: 12px; font-family: 'Courier New', monospace; font-size: 10px; letter-spacing: 1px; color: #111; }
-            @media print { @page { margin: 8mm; } }
-          </style>
-        </head>
-        <body>
-          <div class="label">
-            <div class="qr">${qr}</div>
-            <div class="body">
-              <div class="pcs">${labelPcs} PCS</div>
-              <div class="name">${labelTarget.name}</div>
-              <div class="dates">
-                <div class="row"><span class="k">Sterilization Date</span><span class="v">${formatTanggal(sterilDate)}</span></div>
-                <div class="row"><span class="k">Expired Date</span><span class="v">${formatTanggal(expiredDate)}</span></div>
-              </div>
-              <div class="serial">${labelTarget.code} - A001</div>
-            </div>
-          </div>
-        </body>
-      </html>
-    `)
-    w.document.close()
-    w.focus()
-    w.print()
-  }
-
   // Opsi instrumen di dropdown = belum dipilih.
   const instrumentOptions = instruments
     .filter((s) => !picked.some((p) => p.instrument_id === s.id))
@@ -478,11 +387,11 @@ function SetManager() {
               const items = expandedItems[cat.id]
               return (
                 <div key={cat.id}>
-                  <div className="grid grid-cols-12 items-center gap-3 px-5 py-3 hover:bg-gray-50/60">
+                  <div className="flex flex-wrap items-center gap-x-3 gap-y-2 px-4 py-3 hover:bg-gray-50/60 sm:grid sm:grid-cols-12 sm:gap-3 sm:px-5">
                     <button
                       type="button"
                       onClick={() => toggleExpand(cat)}
-                      className="col-span-2 flex items-center gap-2 text-left"
+                      className="order-1 flex items-center gap-2 text-left sm:order-none sm:col-span-2"
                     >
                       <ChevronRight
                         className={`h-4 w-4 shrink-0 text-gray-400 transition-transform ${isOpen ? "rotate-90" : ""}`}
@@ -491,7 +400,7 @@ function SetManager() {
                         {cat.code}
                       </span>
                     </button>
-                    <div className="col-span-4 flex items-center gap-2.5 font-medium text-gray-900">
+                    <div className="order-3 flex w-full items-center gap-2.5 font-medium text-gray-900 sm:order-none sm:col-span-4 sm:w-auto">
                       {cat.image_url ? (
                         <button
                           type="button"
@@ -512,19 +421,11 @@ function SetManager() {
                       )}
                       <span className="truncate">{cat.name}</span>
                     </div>
-                    <div className="col-span-1 text-center text-sm font-semibold text-gray-700">
+                    <div className="order-2 ml-auto text-sm font-semibold text-gray-700 sm:order-none sm:col-span-1 sm:ml-0 sm:text-center">
                       {cat.items_count}
+                      <span className="ml-1 text-xs font-normal text-gray-400 sm:hidden">rincian</span>
                     </div>
-                    <div className="col-span-5 flex justify-end gap-2">
-                      <Button
-                        size="xs"
-                        variant="outline"
-                        className="border-[#4ba69d] text-[#4ba69d] hover:bg-[#4ba69d]/10"
-                        onClick={() => openLabel(cat)}
-                      >
-                        <Printer className="h-3.5 w-3.5" />
-                        Label
-                      </Button>
+                    <div className="order-4 flex w-full justify-end gap-2 sm:order-none sm:col-span-5 sm:w-auto">
                       <Button size="xs" variant="outline" onClick={() => openEdit(cat)}>
                         Edit
                       </Button>
@@ -542,7 +443,7 @@ function SetManager() {
 
                   {/* Panel rincian instrumen */}
                   {isOpen && (
-                    <div className="bg-gray-50/70 px-5 pb-4 pt-1 sm:pl-12">
+                    <div className="bg-gray-50/70 px-4 pb-4 pt-1 sm:px-5 sm:pl-12">
                       {cat.description && (
                         <p className="py-2 text-xs text-gray-500">{cat.description}</p>
                       )}
@@ -721,7 +622,7 @@ function SetManager() {
                       <span className="font-mono text-xs font-semibold text-[#075489]">{p.code}</span>
                       <span className="text-sm text-gray-700">{p.name}</span>
                     </span>
-                    <div className="ml-auto flex items-center gap-2">
+                    <div className="flex w-full items-center gap-2 sm:ml-auto sm:w-auto">
                       <div className="flex items-center gap-1.5">
                         <span className="text-xs text-gray-400">Qty</span>
                         <Input
@@ -734,7 +635,7 @@ function SetManager() {
                           className="w-16 text-center"
                         />
                       </div>
-                      <div className="w-44">
+                      <div className="flex-1 sm:w-44">
                         <SelectSearch
                           options={conditionOptions}
                           value={p.standard_condition_id}
@@ -787,92 +688,6 @@ function SetManager() {
               alt={previewImage.name}
               className="max-h-[70vh] w-auto rounded-lg object-contain"
             />
-          </div>
-        )}
-      </Modal>
-
-      {/* Cetak Label Sterilisasi */}
-      <Modal
-        open={labelTarget !== null}
-        onClose={() => setLabelTarget(null)}
-        title="Cetak Label Sterilisasi"
-        size="md"
-        footer={
-          <>
-            <Button variant="outline" onClick={() => setLabelTarget(null)}>
-              Tutup
-            </Button>
-            <Button
-              onClick={handlePrintLabel}
-              disabled={labelLoading}
-              className="bg-[#075489] hover:bg-[#075489]/90 text-white"
-            >
-              <Printer className="h-4 w-4" />
-              Cetak
-            </Button>
-          </>
-        }
-      >
-        {labelTarget && (
-          <div className="space-y-5">
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-              <div className="space-y-1.5">
-                <Label htmlFor="lbl-steril">Tanggal Sterilisasi</Label>
-                <Input
-                  id="lbl-steril"
-                  type="date"
-                  value={sterilDate}
-                  onChange={(e) => setSterilDate(e.target.value)}
-                />
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="lbl-exp">Tanggal Kadaluwarsa</Label>
-                <Input
-                  id="lbl-exp"
-                  type="date"
-                  value={expiredDate}
-                  onChange={(e) => setExpiredDate(e.target.value)}
-                />
-              </div>
-            </div>
-
-            {/* Preview label (WYSIWYG dengan hasil cetak) */}
-            <div>
-              <p className="mb-2 text-xs font-bold uppercase tracking-widest text-gray-400">Preview</p>
-              <div className="flex items-start gap-4 rounded-md border border-gray-900 bg-white px-4 py-3">
-                <QRCodeSVG
-                  id="label-qr"
-                  value={`${process.env.NEXT_PUBLIC_APP_URL ?? (typeof window !== "undefined" ? window.location.origin : "")}/cssd/scan?code=${encodeURIComponent(labelTarget.code)}`}
-                  size={92}
-                  level="M"
-                  marginSize={0}
-                />
-                <div className="flex-1">
-                  <p className="text-[11px] font-semibold text-gray-900">
-                    {labelLoading ? "…" : labelPcs} PCS
-                  </p>
-                  <p className="text-lg font-extrabold uppercase tracking-wide text-gray-900">
-                    {labelTarget.name}
-                  </p>
-                  <div className="mt-3 space-y-1 text-[11px] text-gray-900">
-                    <div className="flex">
-                      <span className="w-32">Sterilization Date</span>
-                      <span className="font-bold">{formatTanggal(sterilDate)}</span>
-                    </div>
-                    <div className="flex">
-                      <span className="w-32">Expired Date</span>
-                      <span className="font-bold">{formatTanggal(expiredDate)}</span>
-                    </div>
-                  </div>
-                  <p className="mt-2 font-mono text-[10px] tracking-widest text-gray-900">
-                    {labelTarget.code} - A001
-                  </p>
-                </div>
-              </div>
-              <p className="mt-2 text-xs text-gray-400">
-                PCS dihitung otomatis dari total jumlah unit dalam paket.
-              </p>
-            </div>
           </div>
         )}
       </Modal>

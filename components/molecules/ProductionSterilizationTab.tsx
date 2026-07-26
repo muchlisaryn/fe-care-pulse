@@ -475,7 +475,7 @@ export function ProductionSterilizationTab({
         title="Buat Batch Sterilisasi"
         size="lg"
         footer={
-          <div className="flex w-full items-center justify-between gap-3">
+          <div className="flex w-full flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
             {error ? (
               <p className="text-sm text-red-600">{error}</p>
             ) : (
@@ -483,7 +483,7 @@ export function ProductionSterilizationTab({
                 {selectedReady.length} item · {selectedUnitCount} unit digabung ke satu batch.
               </span>
             )}
-            <div className="flex shrink-0 gap-2">
+            <div className="flex shrink-0 justify-end gap-2">
               <Button variant="outline" onClick={() => setBatchOpen(false)} disabled={saving}>
                 Batal
               </Button>
@@ -596,7 +596,7 @@ export function ProductionSterilizationTab({
         title={validating ? `Validasi Sterilisasi — ${validating.sterilization?.code ?? validating.code}` : "Validasi Sterilisasi"}
         size="lg"
         footer={
-          <div className="flex w-full items-center justify-between gap-3">
+          <div className="flex w-full flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
             {vError ? (
               <p className="text-sm text-red-600">{vError}</p>
             ) : (
@@ -605,7 +605,7 @@ export function ProductionSterilizationTab({
                 {vFailedCount > 0 ? " → antre re-proses" : ""}
               </span>
             )}
-            <div className="flex shrink-0 gap-2">
+            <div className="flex shrink-0 justify-end gap-2">
               <Button variant="outline" onClick={() => setValidating(null)} disabled={vSaving}>
                 Batal
               </Button>

@@ -40,7 +40,7 @@ export function Modal({ open, onClose, title, children, footer, size = "md" }: M
       <div className="absolute inset-0 bg-black/40" onClick={onClose} />
       <div className={cn("relative rounded-xl bg-white shadow-xl flex flex-col max-h-[90vh]", sizeClass[size])}>
         {/* Header */}
-        <div className="flex items-center justify-between border-b border-gray-100 px-6 py-4 shrink-0">
+        <div className="flex items-center justify-between border-b border-gray-100 px-4 py-4 sm:px-6 shrink-0">
           <h2 className="text-base font-semibold text-gray-900">{title}</h2>
           <button
             onClick={onClose}
@@ -51,13 +51,14 @@ export function Modal({ open, onClose, title, children, footer, size = "md" }: M
         </div>
 
         {/* Body */}
-        <div className="flex-1 overflow-y-auto px-6 py-5">
+        <div className="flex-1 overflow-y-auto px-4 py-5 sm:px-6">
           {children}
         </div>
 
-        {/* Footer */}
+        {/* Footer — di mobile tombol menumpuk & full-width (aksi utama di bawah,
+            mudah dijangkau ibu jari); di desktop sejajar rata kanan. */}
         {footer && (
-          <div className="flex justify-end gap-3 border-t border-gray-100 px-6 py-4 shrink-0">
+          <div className="flex flex-col gap-2 border-t border-gray-100 px-4 py-4 sm:px-6 sm:flex-row sm:justify-end sm:gap-3 [&>button]:w-full sm:[&>button]:w-auto shrink-0">
             {footer}
           </div>
         )}
