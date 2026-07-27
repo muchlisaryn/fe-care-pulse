@@ -194,6 +194,7 @@ export default function MasterSterilizerMachinePage() {
           <div className="py-16 text-center text-sm text-gray-400">Memuat data...</div>
         ) : (
           <DataTable
+            rowNumberOffset={(page - 1) * 20}
             columns={columns}
             data={items}
             onEdit={openEdit}

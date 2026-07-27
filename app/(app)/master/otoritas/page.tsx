@@ -252,6 +252,7 @@ export default function MasterOtoritasPage() {
           <div className="py-16 text-center text-sm text-gray-400">Memuat data...</div>
         ) : (
           <DataTable
+            rowNumberOffset={(page - 1) * PER_PAGE}
             columns={columns}
             data={items}
             onEdit={openEdit}

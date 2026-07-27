@@ -35,7 +35,7 @@ import {
 } from "@/lib/store/slices/orderTransferSlice"
 import { fetchPendingTransferCount } from "@/lib/store/slices/notifSlice"
 import { invalidateMonitoring } from "@/lib/store/slices/monitoringSlice"
-import { fetchRooms } from "@/lib/store/slices/roomSlice"
+import { fetchRoomOptions } from "@/lib/store/slices/roomSlice"
 import api from "@/lib/axios"
 
 // Unit yang dipilih untuk dipinjam-alih dari satu order yang sedang dipinjam.
@@ -232,7 +232,7 @@ export default function OrderInstrumenPage() {
   const [expandedPaket, setExpandedPaket] = useState<Set<string>>(new Set())
 
   // Form "Pinjam" (pinjam-alih dari peminjam saat ini).
-  const rooms = useAppSelector((s) => s.rooms.items)
+  const rooms = useAppSelector((s) => s.rooms.options)
   const roomOptions = rooms.map((r) => ({ value: String(r.id), label: r.name }))
   const authName = useAppSelector((s) => s.auth.name)
   const [pinjamTarget, setPinjamTarget] = useState<PinjamTarget | null>(null)
@@ -342,7 +342,7 @@ export default function OrderInstrumenPage() {
     units: BorrowableUnit[],
   ) {
     // Muat daftar ruangan (untuk pilihan ruangan tujuan) hanya saat form dibuka.
-    dispatch(fetchRooms())
+    dispatch(fetchRoomOptions())
     setPinjamTarget({
       fromOrderId: order.id,
       fromOrderCode: order.code,

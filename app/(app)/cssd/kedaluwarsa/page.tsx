@@ -160,7 +160,7 @@ export default function KedaluwarsaPage() {
         {loading ? (
           <div className="py-16 text-center text-sm text-gray-400">Memuat data...</div>
         ) : (
-          <DataTable columns={columns} data={paged} emptyMessage="Tidak ada batch yang mendekati kedaluwarsa." />
+          <DataTable columns={columns} data={paged} emptyMessage="Tidak ada batch yang mendekati kedaluwarsa." rowNumberOffset={(page - 1) * ITEMS_PER_PAGE} />
         )}
 
         <Pagination

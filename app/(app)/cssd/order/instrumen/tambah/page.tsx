@@ -13,7 +13,7 @@ import { Card } from "@/components/molecules/Card"
 import { PageHeader } from "@/components/molecules/PageHeader"
 import { FormSectionHeader } from "@/components/molecules/FormSectionHeader"
 import { useAppDispatch, useAppSelector } from "@/lib/store/hooks"
-import { fetchRooms } from "@/lib/store/slices/roomSlice"
+import { fetchRoomOptions } from "@/lib/store/slices/roomSlice"
 import { invalidateOrders } from "@/lib/store/slices/orderSlice"
 import api from "@/lib/axios"
 
@@ -68,7 +68,7 @@ export default function TambahOrderInstrumenPage() {
   const router = useRouter()
   const dispatch = useAppDispatch()
 
-  const rooms = useAppSelector((s) => s.rooms.items)
+  const rooms = useAppSelector((s) => s.rooms.options)
   const roomOptions = rooms.map((r) => ({
     value: String(r.id),
     label: r.layanan ? `${r.name} · ${LAYANAN_LABEL[r.layanan]}` : r.name,
@@ -108,7 +108,7 @@ export default function TambahOrderInstrumenPage() {
   const [loadingPaketItems, setLoadingPaketItems] = useState(false)
 
   useEffect(() => {
-    dispatch(fetchRooms())
+    dispatch(fetchRoomOptions())
 
     let active = true
 

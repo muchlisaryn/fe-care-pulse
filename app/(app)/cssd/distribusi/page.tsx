@@ -12,7 +12,7 @@ import { Card } from "@/components/molecules/Card"
 import { PageHeader } from "@/components/molecules/PageHeader"
 import { Modal } from "@/components/molecules/Modal"
 import { useAppDispatch, useAppSelector } from "@/lib/store/hooks"
-import { fetchRooms } from "@/lib/store/slices/roomSlice"
+import { fetchRoomOptions } from "@/lib/store/slices/roomSlice"
 import {
   fetchDistributions,
   invalidateDistributions,
@@ -54,7 +54,7 @@ function nowLocalInput(): string {
 
 export default function DistribusiPage() {
   const dispatch = useAppDispatch()
-  const rooms = useAppSelector((s) => s.rooms.items)
+  const rooms = useAppSelector((s) => s.rooms.options)
   const { items: distributions, search, loading, loaded, dirty } = useAppSelector((s) => s.distributions)
 
   // Data referensi untuk form
@@ -80,7 +80,7 @@ export default function DistribusiPage() {
   const [detailLoading, setDetailLoading] = useState(false)
 
   useEffect(() => {
-    dispatch(fetchRooms())
+    dispatch(fetchRoomOptions())
     let active = true
     ;(async () => {
       try {
