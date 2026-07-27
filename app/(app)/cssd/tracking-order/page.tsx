@@ -8,7 +8,6 @@ import {
   ArrowLeftRight,
   AlertTriangle,
   ScanLine,
-  Undo2,
   ChevronRight,
   History,
   Loader2,
@@ -132,6 +131,16 @@ function titleCodes(order: ReturnOrder) {
   return order.code_transaction ? `${order.code} (${order.code_transaction})` : order.code
 }
 
+// Ringkasan jumlah pinjaman pada kartu order: PAKET dihitung per SET, instrumen
+// lepas per UNIT fisik — mis. "2 set · 3 unit". `fallbackUnits` dipakai bila
+// jumlah set belum tersedia (data monitoring lama) agar kartu tidak tampil "0".
+function qtySummary(sets: number, units: number, fallbackUnits: number): string {
+  const parts: string[] = []
+  if (sets > 0) parts.push(`${sets} set`)
+  if (units > 0) parts.push(`${units} unit`)
+  return parts.length > 0 ? parts.join(" · ") : `${fallbackUnits} unit`
+}
+
 function formatDate(value: string | null) {
   if (!value) return "—"
   const d = new Date(value)
@@ -161,8 +170,13 @@ type OrderGroup = {
   room: string | null
   order_date: string | null
   return_plan_date: string | null
+  /** Total unit fisik (paket + satuan) — dasar hitung lama. */
   totalQty: number
-  paketGroups: { name: string; instruments: MonitoredInstrument[] }[]
+  /** Unit fisik dari baris satuan saja — yang dihitung dalam satuan "unit". */
+  satuanQty: number
+  /** Total set dari seluruh paket — yang dihitung dalam satuan "set". */
+  totalSets: number
+  paketGroups: { name: string; sets: number; instruments: MonitoredInstrument[] }[]
   satuanInstruments: MonitoredInstrument[]
 }
 
@@ -199,6 +213,15 @@ function buildOrderGroups(
         satuan.push(r)
       }
     }
+    // Paket dihitung per SET (dari baris permintaan), satuan per UNIT fisik.
+    // Semua baris dalam satu grup paket membawa `package_sets` yang sama; bila
+    // backend tidak mengirimnya (data lama), set tidak ditampilkan.
+    const paketGroups = [...paket.entries()].map(([name, instruments]) => ({
+      name,
+      sets: instruments.find((i) => i.package_sets != null)?.package_sets ?? 0,
+      instruments,
+    }))
+
     return {
       order_code,
       code_transaction: first.code_transaction,
@@ -207,7 +230,9 @@ function buildOrderGroups(
       order_date: first.order_date,
       return_plan_date: first.return_plan_date,
       totalQty: rows.reduce((s, r) => s + r.qty, 0),
-      paketGroups: [...paket.entries()].map(([name, instruments]) => ({ name, instruments })),
+      satuanQty: satuan.reduce((s, r) => s + r.qty, 0),
+      totalSets: paketGroups.reduce((s, g) => s + g.sets, 0),
+      paketGroups,
       satuanInstruments: satuan,
     }
   })
@@ -687,7 +712,13 @@ function MonitoringCssd() {
           !q ||
           (r.instrument?.code ?? "").toLowerCase().includes(q) ||
           (r.instrument?.name ?? "").toLowerCase().includes(q) ||
-          r.units.some((u) => (u.code ?? "").toLowerCase().includes(q)) ||
+          // Kode unit fisik & nomor label bungkus (barcode) — agar hasil scan
+          // label paket langsung menemukan order yang harus dikembalikan.
+          r.units.some(
+            (u) =>
+              (u.code ?? "").toLowerCase().includes(q) ||
+              (u.barcode_no ?? "").toLowerCase().includes(q),
+          ) ||
           r.room.toLowerCase().includes(q) ||
           (r.borrowed_by ?? "").toLowerCase().includes(q) ||
           r.order_code.toLowerCase().includes(q) ||
@@ -784,8 +815,13 @@ function MonitoringCssd() {
             (i.instrument?.name ?? "").toLowerCase().includes(rq) ||
             (i.instrument?.code ?? "").toLowerCase().includes(rq) ||
             (i.package_name ?? "").toLowerCase().includes(rq) ||
+            (i.code_transaction ?? "").toLowerCase().includes(rq) ||
             i.order_code.toLowerCase().includes(rq) ||
-            i.units.some((u) => (u.code ?? "").toLowerCase().includes(rq)),
+            i.units.some(
+              (u) =>
+                (u.code ?? "").toLowerCase().includes(rq) ||
+                (u.barcode_no ?? "").toLowerCase().includes(rq),
+            ),
         )
     return buildOrderGroups(items, detailRoom.name)
   }, [detailRoom, roomDetailSearch])
@@ -930,7 +966,7 @@ function MonitoringCssd() {
                     ? "Mencari ke database..."
                     : scanArmed
                       ? "Mode scan aktif — pindai barcode transaksi..."
-                      : "Cari order / peminjam / instrumen..."
+                      : "Cari peminjam / no. invoice / barcode label..."
                 }
                 value={searchInput}
                 onChange={(e) => setSearchInput(e.target.value)}
@@ -1077,7 +1113,7 @@ function MonitoringCssd() {
             <div className="relative">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 pointer-events-none" />
               <Input
-                placeholder="Cari peminjam, paket, instrumen, kode unit, atau order..."
+                placeholder="Cari peminjam, no. invoice, barcode label, paket, atau instrumen..."
                 value={roomDetailSearch}
                 onChange={(e) => setRoomDetailSearch(e.target.value)}
                 className="pl-9"
@@ -1914,11 +1950,13 @@ function OrderGroupCard({
   const orderOpen = expandedOrder.has(o.order_code)
   return (
           <div className={"rounded-lg border border-gray-200 border-l-4 " + STATUS_BORDER.dipinjam}>
-            <div className="flex flex-col px-1 sm:flex-row sm:items-start sm:gap-1">
+            {/* sm:items-center → tombol Pengembalian sejajar tengah kartu, bukan menempel atas */}
+            <div className="flex flex-col px-1 sm:flex-row sm:items-center sm:gap-1">
+              {/* items-center → keterangan jumlah sejajar tengah, selurus tombol Pengembalian */}
               <button
                 type="button"
                 onClick={() => toggleOrder(o.order_code)}
-                className="flex min-w-0 flex-1 items-start justify-between gap-2 px-2 py-2.5 text-left"
+                className="flex min-w-0 flex-1 items-center justify-between gap-2 px-2 py-2.5 text-left"
               >
                 <div className="flex min-w-0 items-start gap-2">
                   <ChevronRight
@@ -1942,19 +1980,19 @@ function OrderGroupCard({
                     </div>
                   </div>
                 </div>
-                <span className="shrink-0 text-xs text-gray-500">{o.totalQty} unit</span>
+                <span className="shrink-0 text-xs text-gray-500">
+                  {qtySummary(o.totalSets, o.satuanQty, o.totalQty)}
+                </span>
               </button>
               {onReturn && (
-                <div className="flex gap-1.5 border-t border-gray-100 px-2 py-2 sm:mt-1.5 sm:shrink-0 sm:border-0 sm:px-0 sm:py-0 sm:pr-1">
+                <div className="flex justify-center gap-1.5 border-t border-gray-100 px-2 py-2 sm:shrink-0 sm:items-center sm:border-0 sm:px-0 sm:py-0 sm:pr-1">
                   <button
                     type="button"
                     onClick={() => onReturn(o.order_code)}
                     title="Pengembalian order ini"
-                    aria-label="Pengembalian order ini"
-                    className="flex flex-1 items-center justify-center gap-1.5 rounded-md border border-[#075489] bg-[#075489] px-3 py-1.5 text-xs font-medium text-white hover:bg-[#075489]/90 sm:flex-none sm:px-1.5"
+                    className="flex flex-1 items-center justify-center rounded-md border border-[#075489] bg-[#075489] px-4 py-1.5 text-xs font-medium text-white hover:bg-[#075489]/90 sm:flex-none"
                   >
-                    <Undo2 className="h-4 w-4" />
-                    <span className="sm:hidden">Kembalikan</span>
+                    Pengembalian
                   </button>
                 </div>
               )}
@@ -1983,7 +2021,10 @@ function OrderGroupCard({
                           <Badge variant="info">Paket</Badge>
                           <span className="text-sm font-medium text-gray-800">{g.name}</span>
                         </div>
-                        <span className="text-xs text-gray-500">{paketQty} unit</span>
+                        {/* Paket selalu dihitung per SET (bukan unit fisiknya). */}
+                        <span className="shrink-0 text-xs text-gray-500">
+                          {g.sets > 0 ? `${g.sets} set` : `${paketQty} unit`}
+                        </span>
                       </button>
 
                       {paketOpen && (
@@ -2297,7 +2338,7 @@ function MonInstrumentRow({
           <span className="truncate text-sm text-gray-700">{row.instrument?.name ?? "—"}</span>
         </div>
         <span className="shrink-0 text-xs font-semibold text-gray-600">
-          {row.qty} <span className="font-normal text-gray-400">pcs</span>
+          {row.qty} <span className="font-normal text-gray-400">unit</span>
         </span>
       </div>
       {row.units.length > 0 && (

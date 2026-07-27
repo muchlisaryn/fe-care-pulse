@@ -335,6 +335,15 @@ export default function TambahOrderInstrumenPage() {
       })
       dispatch(invalidateOrders())
       router.push("/cssd/order/instrumen")
+    } catch (err) {
+      // Server memvalidasi ulang stok steril saat menyimpan (422) — stok bisa
+      // sudah diambil order lain sejak halaman ini dimuat. Tampilkan alasannya
+      // agar peminjam tahu harus memuat ulang, bukan gagal diam-diam.
+      const e = err as {
+        response?: { data?: { message?: string; errors?: Record<string, string[]> } }
+      }
+      const fieldError = Object.values(e.response?.data?.errors ?? {})[0]?.[0]
+      setFormError(fieldError ?? e.response?.data?.message ?? "Gagal menyimpan order.")
     } finally {
       setSaving(false)
     }

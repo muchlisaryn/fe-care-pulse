@@ -305,8 +305,13 @@ function SetManager() {
       setModal(null)
       loadCatalogs()
     } catch (err) {
-      const e = err as { response?: { data?: { message?: string } } }
-      setFormError(e.response?.data?.message ?? "Gagal menyimpan katalog.")
+      // 422 mengembalikan pesan generik di `message`; pesan yang berguna (mis. kode /
+      // nama katalog sudah dipakai) ada di `errors` per field — tampilkan itu dulu.
+      const e = err as {
+        response?: { data?: { message?: string; errors?: Record<string, string[]> } }
+      }
+      const fieldError = Object.values(e.response?.data?.errors ?? {})[0]?.[0]
+      setFormError(fieldError ?? e.response?.data?.message ?? "Gagal menyimpan katalog.")
     } finally {
       setSaving(false)
     }
