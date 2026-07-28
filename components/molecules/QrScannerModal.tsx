@@ -17,8 +17,10 @@ type QrScannerModalProps = {
  * tak punya scanner fisik. Kamera dimulai saat modal dibuka & dihentikan saat
  * ditutup / setelah satu pindaian berhasil.
  *
- * Catatan: akses kamera butuh secure context (https atau localhost). Di jaringan
- * lewat http IP biasa, browser memblokir getUserMedia — jalankan `npm run dev:https`.
+ * Catatan: akses kamera butuh secure context (https atau localhost). Bila halaman
+ * dibuka lewat http biasa (IP LAN / domain produksi tanpa TLS), `mediaDevices`
+ * tidak ada sama sekali — saat pengembangan pakai `npm run dev:https`, di server
+ * pasang sertifikat di web server-nya.
  */
 export function QrScannerModal({ open, onClose, onScan, title = "Scan QR", hint }: QrScannerModalProps) {
   // Id unik & stabil per instance untuk elemen target html5-qrcode.
@@ -36,33 +38,44 @@ export function QrScannerModal({ open, onClose, onScan, title = "Scan QR", hint 
     let scanner: import("html5-qrcode").Html5Qrcode | null = null
     let stopped = false
 
-    // Import dinamis agar tak dibundel di SSR & hanya jalan di browser.
-    import("html5-qrcode")
-      .then(({ Html5Qrcode }) => {
-        if (stopped) return
-        setError(null)
-        scanner = new Html5Qrcode(regionId, /* verbose */ false)
-        return scanner.start(
-          { facingMode: "environment" },
-          { fps: 10, qrbox: { width: 240, height: 240 } },
-          (decodedText) => {
-            if (stopped) return
-            stopped = true
-            onScanRef.current(decodedText)
-            // Hentikan kamera lalu tutup modal.
-            scanner?.stop().catch(() => {}).finally(() => onClose())
-          },
-          // Error per-frame (tidak menemukan kode) — abaikan, ini normal.
-          () => {},
+    // Halaman non-secure (http selain localhost): `mediaDevices` tidak ada sama
+    // sekali, jadi pemindainya tak perlu dimuat. Penyebabnya disampaikan lewat
+    // rantai promise yang sama agar pesannya tetap satu jalur.
+    // typeof, bukan sekadar cek truthy: tipe bawaan TS menganggap `mediaDevices`
+    // selalu ada, padahal di halaman non-secure objeknya memang tidak dibuat.
+    const start = typeof navigator.mediaDevices?.getUserMedia === "function"
+      ? // Import dinamis agar tak dibundel di SSR & hanya jalan di browser.
+        import("html5-qrcode").then(({ Html5Qrcode }) => {
+          if (stopped) return
+          setError(null)
+          scanner = new Html5Qrcode(regionId, /* verbose */ false)
+          return scanner.start(
+            { facingMode: "environment" },
+            { fps: 10, qrbox: { width: 240, height: 240 } },
+            (decodedText) => {
+              if (stopped) return
+              stopped = true
+              onScanRef.current(decodedText)
+              // Hentikan kamera lalu tutup modal.
+              scanner?.stop().catch(() => {}).finally(() => onClose())
+            },
+            // Error per-frame (tidak menemukan kode) — abaikan, ini normal.
+            () => {},
+          )
+        })
+      : Promise.reject(
+          new Error(
+            "Kamera tidak tersedia karena halaman ini dibuka lewat http. Buka lewat https (atau localhost) agar kamera bisa dipakai.",
+          ),
         )
-      })
-      .catch((e: unknown) => {
-        if (stopped) return
-        const msg =
-          (e as { message?: string })?.message ??
-          "Tidak bisa mengakses kamera. Pastikan izin kamera aktif & memakai https/localhost."
-        setError(msg)
-      })
+
+    start.catch((e: unknown) => {
+      if (stopped) return
+      const msg =
+        (e as { message?: string })?.message ??
+        "Tidak bisa mengakses kamera. Pastikan izin kamera aktif & memakai https/localhost."
+      setError(msg)
+    })
 
     return () => {
       stopped = true
