@@ -31,6 +31,9 @@ type DataTableProps<T extends object> = {
   rowNumber?: (row: T, index: number) => ReactNode
   // Sembunyikan kolom "No" (mis. saat tabel sudah punya kolom urutan sendiri).
   hideRowNumber?: boolean
+  // Jumlah baris di halaman-halaman sebelumnya, mis. `(page - 1) * perPage`.
+  // Tanpa ini penomoran mengulang dari 1 di tiap halaman.
+  rowNumberOffset?: number
 }
 
 export function DataTable<T extends object>({
@@ -44,6 +47,7 @@ export function DataTable<T extends object>({
   isRowLoading,
   rowNumber,
   hideRowNumber = false,
+  rowNumberOffset = 0,
 }: DataTableProps<T>) {
   const hasActions = !!(onEdit || onDelete || extraActions?.length)
 
@@ -97,7 +101,7 @@ export function DataTable<T extends object>({
                 {!hideRowNumber && (
                   <div className="flex items-center border-b border-gray-100 bg-gray-50/70 px-4 py-2">
                     <span className="inline-flex h-6 items-center justify-center rounded-full bg-[#075489]/10 px-2.5 text-xs font-semibold text-[#075489]">
-                      No {rowNumber ? rowNumber(row, i) : i + 1}
+                      No {rowNumber ? rowNumber(row, i) : rowNumberOffset + i + 1}
                     </span>
                   </div>
                 )}
@@ -175,7 +179,7 @@ export function DataTable<T extends object>({
                 >
                   {!hideRowNumber && (
                     <td className="py-3 pl-4 pr-3 text-gray-400">
-                      {rowNumber ? rowNumber(row, i) : i + 1}
+                      {rowNumber ? rowNumber(row, i) : rowNumberOffset + i + 1}
                     </td>
                   )}
                   {columns.map((col, j) => (

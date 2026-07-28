@@ -4,5 +4,5 @@ import { redirect } from "next/navigation"
 // menjadi tab pada halaman Tracking Order. URL lama diarahkan ke tab tersebut
 // agar bookmark/tautan lama tetap berfungsi.
 export default function SterilisasiRedirectPage() {
-  redirect("/cssd/monitoring?tab=sterilization")
+  redirect("/cssd/tracking-order?tab=sterilization")
 }

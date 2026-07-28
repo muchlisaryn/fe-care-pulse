@@ -53,7 +53,8 @@ function formatDate(value: string | null) {
   return d.toLocaleDateString("id-ID", { day: "2-digit", month: "short", year: "numeric" })
 }
 
-const GRID = "grid grid-cols-[150px_160px_150px_130px_84px_1fr_80px] items-start gap-3 leading-tight"
+// Kolom Qty dilebarkan dari 80px agar muat angka + satuannya ("set" / "unit").
+const GRID = "grid grid-cols-[150px_160px_150px_130px_84px_1fr_110px] items-start gap-3 leading-tight"
 
 export default function MonitorRuanganPage() {
   const dispatch = useAppDispatch()
@@ -243,7 +244,13 @@ export default function MonitorRuanganPage() {
                       </span>
                     </div>
                     <div className="truncate font-semibold uppercase">{ln.name}</div>
-                    <div className="text-right text-lg font-bold tabular-nums">{ln.qty}</div>
+                    {/* Paket dihitung per SET, instrumen lepas per UNIT fisik. */}
+                    <div className="text-right text-lg font-bold tabular-nums">
+                      {ln.qty}
+                      <span className="ml-1 text-sm font-normal text-white/70">
+                        {ln.jenis === "Paket" ? "set" : "unit"}
+                      </span>
+                    </div>
                   </div>
                 )
               )}

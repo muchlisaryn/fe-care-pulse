@@ -12,7 +12,7 @@ import { Card } from "@/components/molecules/Card"
 import { PageHeader } from "@/components/molecules/PageHeader"
 import { Modal } from "@/components/molecules/Modal"
 import { useAppDispatch, useAppSelector } from "@/lib/store/hooks"
-import { fetchRooms } from "@/lib/store/slices/roomSlice"
+import { fetchRoomOptions } from "@/lib/store/slices/roomSlice"
 import {
   fetchDistributions,
   invalidateDistributions,
@@ -54,7 +54,7 @@ function nowLocalInput(): string {
 
 export default function DistribusiPage() {
   const dispatch = useAppDispatch()
-  const rooms = useAppSelector((s) => s.rooms.items)
+  const rooms = useAppSelector((s) => s.rooms.options)
   const { items: distributions, search, loading, loaded, dirty } = useAppSelector((s) => s.distributions)
 
   // Data referensi untuk form
@@ -80,7 +80,7 @@ export default function DistribusiPage() {
   const [detailLoading, setDetailLoading] = useState(false)
 
   useEffect(() => {
-    dispatch(fetchRooms())
+    dispatch(fetchRoomOptions())
     let active = true
     ;(async () => {
       try {
@@ -319,8 +319,8 @@ export default function DistribusiPage() {
                     <p className="text-sm">Belum ada BMHP dipilih.</p>
                   </div>
                 ) : (
-                  <div className="overflow-hidden rounded-lg border border-gray-200">
-                    <table className="w-full text-sm">
+                  <div className="overflow-x-auto rounded-lg border border-gray-200">
+                    <table className="w-full min-w-[440px] text-sm">
                       <thead>
                         <tr className="border-b border-gray-100 bg-gray-50 text-left text-xs uppercase tracking-wide text-gray-400">
                           <th className="px-3 py-2">Nama</th>
@@ -442,7 +442,7 @@ export default function DistribusiPage() {
           <div className="py-10 text-center text-sm text-gray-400">Memuat data...</div>
         ) : detail ? (
           <div className="space-y-4">
-            <div className="grid grid-cols-2 gap-3 text-sm">
+            <div className="grid grid-cols-1 gap-3 text-sm sm:grid-cols-2">
               <Info label="Unit" value={detail.room?.name} />
               <Info label="Status" value={detail.status === "dibatalkan" ? "Dibatalkan" : "Terdistribusi"} />
               <Info label="Pengirim" value={detail.sender} />
@@ -450,8 +450,8 @@ export default function DistribusiPage() {
               <Info label="Tanggal" value={formatDateTime(detail.distributed_at)} />
               <Info label="Keterangan" value={detail.note} />
             </div>
-            <div className="overflow-hidden rounded-lg border border-gray-200">
-              <table className="w-full text-sm">
+            <div className="overflow-x-auto rounded-lg border border-gray-200">
+              <table className="w-full min-w-[360px] text-sm">
                 <thead>
                   <tr className="border-b border-gray-100 bg-gray-50 text-left text-xs uppercase tracking-wide text-gray-400">
                     <th className="px-3 py-2">Nama</th>

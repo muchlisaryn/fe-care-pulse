@@ -13,7 +13,7 @@ import { Card } from "@/components/molecules/Card"
 import { PageHeader } from "@/components/molecules/PageHeader"
 import { FormSectionHeader } from "@/components/molecules/FormSectionHeader"
 import { useAppDispatch, useAppSelector } from "@/lib/store/hooks"
-import { fetchRooms } from "@/lib/store/slices/roomSlice"
+import { fetchRoomOptions } from "@/lib/store/slices/roomSlice"
 import { invalidateOrders } from "@/lib/store/slices/orderSlice"
 import api from "@/lib/axios"
 
@@ -68,7 +68,7 @@ export default function TambahOrderInstrumenPage() {
   const router = useRouter()
   const dispatch = useAppDispatch()
 
-  const rooms = useAppSelector((s) => s.rooms.items)
+  const rooms = useAppSelector((s) => s.rooms.options)
   const roomOptions = rooms.map((r) => ({
     value: String(r.id),
     label: r.layanan ? `${r.name} · ${LAYANAN_LABEL[r.layanan]}` : r.name,
@@ -108,7 +108,7 @@ export default function TambahOrderInstrumenPage() {
   const [loadingPaketItems, setLoadingPaketItems] = useState(false)
 
   useEffect(() => {
-    dispatch(fetchRooms())
+    dispatch(fetchRoomOptions())
 
     let active = true
 
@@ -335,6 +335,15 @@ export default function TambahOrderInstrumenPage() {
       })
       dispatch(invalidateOrders())
       router.push("/cssd/order/instrumen")
+    } catch (err) {
+      // Server memvalidasi ulang stok steril saat menyimpan (422) — stok bisa
+      // sudah diambil order lain sejak halaman ini dimuat. Tampilkan alasannya
+      // agar peminjam tahu harus memuat ulang, bukan gagal diam-diam.
+      const e = err as {
+        response?: { data?: { message?: string; errors?: Record<string, string[]> } }
+      }
+      const fieldError = Object.values(e.response?.data?.errors ?? {})[0]?.[0]
+      setFormError(fieldError ?? e.response?.data?.message ?? "Gagal menyimpan order.")
     } finally {
       setSaving(false)
     }

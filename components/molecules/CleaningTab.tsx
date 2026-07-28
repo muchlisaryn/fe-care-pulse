@@ -880,7 +880,7 @@ function CleaningOrderCard({
   }
   return (
     <div className="rounded-lg border border-gray-200">
-      <div className="flex items-start gap-1 px-1">
+      <div className="flex flex-col gap-1 px-1 sm:flex-row sm:items-start">
         <button
           type="button"
           onClick={onOpen}
@@ -1041,7 +1041,7 @@ function CleaningOrderCard({
             </div>
           </div>
         </button>
-        <div className="mt-1.5 mr-1 flex shrink-0 items-center gap-1.5 self-center">
+        <div className="mb-2 mr-2 flex shrink-0 items-center justify-end gap-1.5 sm:mb-0 sm:mr-1 sm:mt-1.5 sm:self-center">
           {washed || canceled ? null : (
             inProcess ? (
               <button

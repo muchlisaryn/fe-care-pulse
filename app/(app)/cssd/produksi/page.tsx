@@ -1,7 +1,7 @@
 "use client"
 
 import { Suspense, useEffect, useMemo, useRef, useState } from "react"
-import { useSearchParams } from "next/navigation"
+import { useRouter, useSearchParams } from "next/navigation"
 import { Trash2, Package, Search, ScanLine, AlertTriangle, Loader2, ZoomIn } from "lucide-react"
 import { Button } from "@/components/atoms/Button"
 import { Input } from "@/components/atoms/Input"
@@ -75,6 +75,7 @@ const PRODUKSI_TABS: ProduksiTab[] = ["produksi", "cleaning", "packaging", "ster
 
 function ProduksiCssdPage() {
   const searchParams = useSearchParams()
+  const router = useRouter()
   const dispatch = useAppDispatch()
   const toast = useToast()
 
@@ -449,11 +450,12 @@ function ProduksiCssdPage() {
     setScannedCodes([])
     setScanAlert(null)
     // Catat tab aktif di URL: /cssd/produksi (form) atau /cssd/produksi?tab=cleaning.
-    // Pakai history API, BUKAN router.replace: ganti tab murni state klien, sedangkan
-    // router.replace memicu navigasi server (RSC round-trip + proxy) sehingga URL baru
-    // berubah setelah request itu selesai. history.replaceState memperbaruinya seketika
-    // tanpa menjalankan ulang server — cara yang memang dianjurkan Next.js untuk ini.
-    window.history.replaceState(null, '', next === 'produksi' ? '/cssd/produksi' : `/cssd/produksi?tab=${next}`)
+    // Pakai router.replace (BUKAN window.history.replaceState): di App Router, perubahan
+    // URL lewat history API mentah kerap "ditarik balik" oleh router Next pada render
+    // berikutnya (halaman ini memakai useSearchParams), sehingga URL tampak tidak berubah.
+    // router.replace menyinkronkan URL ke state router Next dengan andal; RSC-nya ke
+    // server Next (bukan proxy backend), jadi ringan. scroll:false agar posisi tak melompat.
+    router.replace(next === 'produksi' ? '/cssd/produksi' : `/cssd/produksi?tab=${next}`, { scroll: false })
   }
 
   // Pratinjau / zoom gambar instrumen/paket di daftar produksi.
@@ -764,7 +766,7 @@ function ProduksiCssdPage() {
                   className="sm:w-44"
                 />
               </div>
-              <div className="flex gap-2">
+              <div className="flex justify-end gap-2">
                 <Button type="submit" className="bg-[#075489] hover:bg-[#075489]/90 text-white shrink-0">
                   Terapkan
                 </Button>

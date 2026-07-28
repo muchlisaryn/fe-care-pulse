@@ -8,6 +8,8 @@ export type MonitoredUnit = {
   instrument_stock_id: number | null
   code: string | null
   status: string | null
+  /** Nomor label fisik bungkus steril (packaging_item.barcode_no) — bisa dicari/di-scan. */
+  barcode_no: string | null
   condition: { id: number; name: string } | null
 }
 
@@ -20,6 +22,8 @@ export type MonitoredInstrument = {
   return_plan_date: string | null
   source: "satuan" | "paket"
   package_name: string | null
+  /** Jumlah SET paket ini pada order (null untuk baris satuan). `qty` tetap unit fisik. */
+  package_sets: number | null
   instrument: { id: number; code: string; name: string } | null
   qty: number
   units: MonitoredUnit[]

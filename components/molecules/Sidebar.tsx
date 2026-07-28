@@ -68,7 +68,7 @@ type SidebarProps = {
 }
 
 // URL menu yang menampilkan order masuk → tempat badge notifikasi.
-const INCOMING_MENU_URL = "/cssd/monitoring"
+const INCOMING_MENU_URL = "/cssd/tracking-order"
 
 function NotifBadge({ count, className }: { count: number; className?: string }) {
   if (count <= 0) return null

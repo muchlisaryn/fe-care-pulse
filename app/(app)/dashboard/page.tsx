@@ -64,14 +64,14 @@ export default function DashboardPage() {
         <h2 className="mb-3 text-sm font-semibold text-gray-700">Order Peminjaman</h2>
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <ActionCard
-            href="/cssd/monitoring"
+            href="/cssd/tracking-order"
             icon={Hourglass}
             label="Order Masuk — Perlu Diproses"
             value={v(orders.diajukan)}
             tone="amber"
           />
           <ActionCard
-            href="/cssd/monitoring"
+            href="/cssd/tracking-order"
             icon={PackageOpen}
             label="Sedang Dipinjam"
             value={v(orders.dipinjam)}

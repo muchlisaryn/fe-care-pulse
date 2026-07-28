@@ -35,7 +35,7 @@ import {
 } from "@/lib/store/slices/orderTransferSlice"
 import { fetchPendingTransferCount } from "@/lib/store/slices/notifSlice"
 import { invalidateMonitoring } from "@/lib/store/slices/monitoringSlice"
-import { fetchRooms } from "@/lib/store/slices/roomSlice"
+import { fetchRoomOptions } from "@/lib/store/slices/roomSlice"
 import api from "@/lib/axios"
 
 // Unit yang dipilih untuk dipinjam-alih dari satu order yang sedang dipinjam.
@@ -232,7 +232,7 @@ export default function OrderInstrumenPage() {
   const [expandedPaket, setExpandedPaket] = useState<Set<string>>(new Set())
 
   // Form "Pinjam" (pinjam-alih dari peminjam saat ini).
-  const rooms = useAppSelector((s) => s.rooms.items)
+  const rooms = useAppSelector((s) => s.rooms.options)
   const roomOptions = rooms.map((r) => ({ value: String(r.id), label: r.name }))
   const authName = useAppSelector((s) => s.auth.name)
   const [pinjamTarget, setPinjamTarget] = useState<PinjamTarget | null>(null)
@@ -342,7 +342,7 @@ export default function OrderInstrumenPage() {
     units: BorrowableUnit[],
   ) {
     // Muat daftar ruangan (untuk pilihan ruangan tujuan) hanya saat form dibuka.
-    dispatch(fetchRooms())
+    dispatch(fetchRoomOptions())
     setPinjamTarget({
       fromOrderId: order.id,
       fromOrderCode: order.code,
@@ -777,7 +777,7 @@ export default function OrderInstrumenPage() {
             </div>
 
             {/* Aksi */}
-            <div className="flex gap-2">
+            <div className="flex justify-end gap-2">
               <Button type="submit" className="bg-[#075489] hover:bg-[#075489]/90 text-white shrink-0">
                 Cari
               </Button>
@@ -1215,8 +1215,8 @@ export default function OrderInstrumenPage() {
         title={detail ? `Detail Order : ${detailTitleCodes(detail)}` : "Detail Order"}
         size="lg"
         footer={
-          <div className="flex w-full items-center justify-between gap-3">
-            <div className="flex gap-2">
+          <div className="flex w-full flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
+            <div className="flex flex-wrap gap-2 empty:hidden">
               {detail &&
                 nextActions[detail.status].map((a) => (
                   <Button
