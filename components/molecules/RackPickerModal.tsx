@@ -1,7 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useState } from "react"
-import { Camera, Check, ImageUp, List, Loader2, ScanLine, Search } from "lucide-react"
+import { Camera, CameraOff, Check, List, Loader2, ScanLine, Search } from "lucide-react"
 import { Button } from "@/components/atoms/Button"
 import { Input } from "@/components/atoms/Input"
 import { Modal } from "@/components/molecules/Modal"
@@ -236,8 +236,8 @@ function RackPicker({
       state === "ok"
         ? null
         : state === "denied"
-          ? "Izin kamera diblokir untuk situs ini, jadi pemindaian langsung mati. Memotret label rak tetap bisa."
-          : "Halaman ini dibuka lewat http, jadi kamera tidak bisa menyala langsung di dalam halaman — itu aturan browser, mengaktifkan izin di setelan HP tidak akan membantu. Memotret label rak tetap bisa; agar pemindaian langsung hidup, halaman perlu dilayani lewat https.",
+          ? "Izin kamera diblokir untuk situs ini."
+          : "Kamera tidak tersedia karena halaman ini dibuka lewat http. Buka lewat https (atau localhost) agar kamera bisa dipakai — mengaktifkan izin di setelan HP tidak akan membantu.",
     )
   }, [])
 
@@ -271,16 +271,10 @@ function RackPicker({
   /**
    * Buka kamera pemindai. Izin diminta lebih dulu lewat getUserMedia supaya
    * penolakan izin ketahuan di sini (pesan jelas), bukan berupa kamera hitam.
-   *
-   * Saat kamera langsung tak bisa dipakai, pemindainya TETAP dibuka: di sana masih
-   * ada jalur ambil-foto, yang jalan tanpa https maupun izin kamera.
    */
   async function openScanner() {
     setError(null)
-    if (camera === "blocked") {
-      setScannerOpen(true)
-      return
-    }
+    if (camera === "blocked") return
     await requestCamera()
   }
 
@@ -388,34 +382,33 @@ function RackPicker({
 
           {mode === "menu" ? (
             <div className="grid gap-3 sm:grid-cols-2">
-              {/* Pemindaian LANGSUNG butuh izin kamera + https. Kalau salah satunya
-                  tak terpenuhi, tombolnya tetap hidup — pemindainya masih menawarkan
-                  jalur ambil-foto, yang tidak butuh keduanya. Hanya saat izin masih
-                  diperiksa tombolnya dimatikan. */}
+              {/* Scan hanya bisa dipakai bila izin kamera browser aktif. */}
               <button
                 type="button"
                 onClick={openScanner}
-                disabled={camera === "checking"}
+                disabled={camera !== "ready"}
                 className={
                   "flex flex-col items-center gap-2 rounded-lg border px-4 py-6 text-center transition-colors " +
-                  (camera === "checking"
-                    ? "cursor-not-allowed border-gray-200 bg-gray-50 opacity-60"
-                    : "border-gray-200 hover:border-[#075489] hover:bg-[#075489]/5")
+                  (camera === "ready"
+                    ? "border-gray-200 hover:border-[#075489] hover:bg-[#075489]/5"
+                    : "cursor-not-allowed border-gray-200 bg-gray-50 opacity-60")
                 }
               >
                 {camera === "blocked" ? (
-                  <ImageUp className="h-7 w-7 text-[#075489]" />
+                  <CameraOff className="h-7 w-7 text-gray-400" />
                 ) : (
                   <ScanLine className="h-7 w-7 text-[#075489]" />
                 )}
-                <span className="text-sm font-medium text-gray-800">
-                  {camera === "blocked" ? "Foto QR Rak" : "Scan QR Rak"}
-                </span>
+                <span className="text-sm font-medium text-gray-800">Scan QR Rak</span>
                 <span className="text-xs text-gray-500">
                   {camera === "checking"
                     ? "Memeriksa izin kamera..."
                     : camera === "blocked"
-                      ? "Potret label raknya"
+                      ? blockReason === "unavailable"
+                        ? "Perlu https"
+                        : blockReason === "notfound"
+                          ? "Kamera tidak ada"
+                          : "Izin kamera belum aktif"
                       : "Arahkan kamera ke label rak"}
                 </span>
               </button>
