@@ -6,7 +6,7 @@
     "dev": "next dev",
     "dev:https": "next dev --experimental-https --experimental-https-key ./certificates/lan-key.pem --experimental-https-cert ./certificates/lan-cert.pem -H 0.0.0.0",
     "build": "next build",
-    "start": "next start",
+    "start": "next start -p 5000",
     "lint": "eslint"
   },
   "dependencies": {

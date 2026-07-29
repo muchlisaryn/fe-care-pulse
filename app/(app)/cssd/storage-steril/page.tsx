@@ -31,6 +31,7 @@ import {
   fetchStorageInventory,
   fetchStorageSummary,
   invalidateStorage,
+  type StorageAllocation,
   type StorageIncomingOrder,
   type StorageIncomingUnit,
   type StorageInventoryRow,
@@ -103,6 +104,10 @@ function StorageSterilPage() {
   const [search, setSearch] = useState("")
   // Inventaris: pengelompokan + status lipat per grup.
   const [groupBy, setGroupBy] = useState<"rak" | "batch">("rak")
+  // Penyaringan alokasi (dijalankan di SERVER, sama seperti pencarian): `bebas` =
+  // baris gudang yang order_id-nya masih kosong — stok pool produksi yang belum
+  // direservasi order manapun.
+  const [allocation, setAllocation] = useState<StorageAllocation>("semua")
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
   const toggleGroup = (key: string) =>
     setExpanded((prev) => {
@@ -166,9 +171,9 @@ function StorageSterilPage() {
       dispatch(fetchStorageIncoming({ page: 1, search }))
       dispatch(fetchProductionStorageIncoming({ page: 1, search }))
     } else {
-      dispatch(fetchStorageInventory({ page: 1, search }))
+      dispatch(fetchStorageInventory({ page: 1, search, allocation }))
     }
-  }, [dispatch, tab, search])
+  }, [dispatch, tab, search, allocation])
 
   // Ambil halaman berikutnya daftar tab aktif. Untuk tab "Perlu Disimpan" ada dua
   // sumber (order & batch produksi) — order dihabiskan dulu, baru batch produksi.
@@ -184,9 +189,9 @@ function StorageSterilPage() {
     }
     if (inventory.loading || inventory.loadingMore) return
     if (inventory.page < inventory.lastPage) {
-      dispatch(fetchStorageInventory({ page: inventory.page + 1, search }))
+      dispatch(fetchStorageInventory({ page: inventory.page + 1, search, allocation }))
     }
-  }, [dispatch, tab, search, incoming, productionIncoming, inventory])
+  }, [dispatch, tab, search, allocation, incoming, productionIncoming, inventory])
 
   // Masih ada halaman berikutnya untuk tab aktif?
   const hasMore =
@@ -239,7 +244,7 @@ function StorageSterilPage() {
   function refresh() {
     dispatch(fetchStorageIncoming({ page: 1, search }))
     dispatch(fetchProductionStorageIncoming({ page: 1, search }))
-    if (inventory.loaded) dispatch(fetchStorageInventory({ page: 1, search }))
+    if (inventory.loaded) dispatch(fetchStorageInventory({ page: 1, search, allocation }))
     dispatch(fetchStorageSummary())
   }
 
@@ -530,6 +535,23 @@ function StorageSterilPage() {
           ) : (
             <span className="text-xs text-gray-400">—</span>
           )}
+          {/* Reservasi baris gudang: order_id kosong = masih pool produksi (bebas
+              dialokasikan ke order berikutnya), terisi = sudah dipesan order. */}
+          {r.order ? (
+            <span
+              title="Sudah direservasi untuk order ini"
+              className="font-mono text-xs font-semibold text-amber-700 bg-amber-100 px-1.5 py-0.5 rounded"
+            >
+              {r.order.code_transaction ?? r.order.code}
+            </span>
+          ) : (
+            <span
+              title="Belum dialokasikan ke order manapun (stok pool produksi)"
+              className="text-xs font-medium text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded"
+            >
+              Bebas
+            </span>
+          )}
           {groupBy === "batch" && (
             <span className="inline-flex items-center gap-1 text-xs text-gray-500">
               <MapPin className="h-3 w-3" />
@@ -674,14 +696,22 @@ function StorageSterilPage() {
           )
         ) : inventory.loading ? (
           <div className="py-16 text-center text-sm text-gray-400">Memuat data...</div>
-        ) : inventoryFiltered.length === 0 ? (
-          <div className="py-16 text-center text-sm text-gray-400">
-            {q ? "Tidak ada unit yang cocok." : "Belum ada unit di gudang steril."}
-          </div>
         ) : (
           <div className="space-y-3 p-4">
-            {/* Toolbar: pengelompokan agar tidak menampilkan terlalu banyak baris */}
-            <div className="flex justify-end">
+            {/* Toolbar: penyaringan alokasi + pengelompokan agar tidak menampilkan
+                terlalu banyak baris. Selalu tampil (juga saat hasilnya kosong) agar
+                penyaring yang tidak menyisakan baris masih bisa dikembalikan. */}
+            <div className="flex flex-wrap justify-end gap-2">
+              <Select
+                value={allocation}
+                onChange={(e) => setAllocation(e.target.value as StorageAllocation)}
+                className="w-auto"
+                title="Saring berdasarkan reservasi order"
+              >
+                <option value="semua">Semua Alokasi</option>
+                <option value="bebas">Belum Dialokasikan</option>
+                <option value="dialokasikan">Sudah Dialokasikan</option>
+              </Select>
               <Select
                 value={groupBy}
                 onChange={(e) => setGroupBy(e.target.value as "rak" | "batch")}
@@ -692,6 +722,13 @@ function StorageSterilPage() {
               </Select>
             </div>
 
+            {inventoryFiltered.length === 0 ? (
+              <div className="py-16 text-center text-sm text-gray-400">
+                {q || allocation !== "semua"
+                  ? "Tidak ada unit yang cocok."
+                  : "Belum ada unit di gudang steril."}
+              </div>
+            ) : (
             <div className="space-y-2">
                 {inventoryGroups.map((g) => {
                   const open = q ? true : expanded.has(g.key)
@@ -811,6 +848,7 @@ function StorageSterilPage() {
                   )
                 })}
               </div>
+            )}
 
             {/* Penanda dasar daftar: memicu pengambilan halaman berikutnya. */}
             <LoadMoreSentinel ref={sentinelRef} hasMore={hasMore} loading={loadingMore} onLoadMore={loadMore} />

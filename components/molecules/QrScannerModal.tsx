@@ -50,6 +50,14 @@ export function QrScannerModal({ open, onClose, onScan, title = "Scan QR", hint 
 
     let scanner: import("html5-qrcode").Html5Qrcode | null = null
     let stopped = false
+    let stopping: Promise<void> | null = null
+
+    /**
+     * Matikan kamera — cukup sekali. Pemanggil berikutnya ikut promise yang sama
+     * supaya penutupan modal & keberhasilan pindaian tidak saling menimpa dengan
+     * dua `stop()` yang berjalan bersamaan.
+     */
+    const stopCamera = () => (stopping ??= scanner ? scanner.stop().catch(() => {}) : Promise.resolve())
 
     // Halaman non-secure (http selain localhost): `mediaDevices` tidak ada sama
     // sekali, jadi pemindainya tak perlu dimuat. Penyebabnya disampaikan lewat
@@ -68,7 +76,7 @@ export function QrScannerModal({ open, onClose, onScan, title = "Scan QR", hint 
             stopped = true
             onScanRef.current(decodedText)
             // Hentikan kamera lalu tutup modal.
-            scanner?.stop().catch(() => {}).finally(() => onClose())
+            stopCamera().finally(() => onClose())
           }
           // Error per-frame (tidak menemukan kode) — abaikan, ini normal.
           const onFrameError = () => {}
@@ -80,7 +88,7 @@ export function QrScannerModal({ open, onClose, onScan, title = "Scan QR", hint 
            */
           const tryStart = async (camera: string | MediaTrackConstraints) => {
             await scanner!.start(camera, config, onDecoded, onFrameError)
-            if (stopped) await scanner!.stop().catch(() => {})
+            if (stopped) await stopCamera()
             return true
           }
 
@@ -122,9 +130,15 @@ export function QrScannerModal({ open, onClose, onScan, title = "Scan QR", hint 
     return () => {
       stopped = true
       // Hentikan kamera saat modal ditutup / komponen unmount.
-      if (scanner) {
-        scanner.stop().catch(() => {})
-      }
+      //
+      // Menunggu `start` selesai dulu, bukan langsung stop(): saat modal ditutup
+      // selagi kamera masih dinyalakan, html5-qrcode MENOLAK stop() karena
+      // pemindainya belum berstatus SCANNING. Galatnya tertelan, start() tetap
+      // lanjut, dan kameranya menyala setelah itu tanpa ada yang mematikan —
+      // lampu kamera terus hidup sampai halaman dimuat ulang dan pemindai
+      // berikutnya gagal dengan "camera in use". Menunggu di sini membuat
+      // stop()-nya selalu kena pada saat pemindai benar-benar sudah jalan.
+      start.catch(() => {}).finally(stopCamera)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, regionId])
