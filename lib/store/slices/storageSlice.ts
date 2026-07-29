@@ -126,6 +126,11 @@ export const fetchProductionStorageIncoming = createAsyncThunk(
   (arg: FetchPageArg = {}) => fetchPage<StorageIncomingOrder>("/master/storage/production-incoming", arg),
 )
 
+/**
+ * Inventaris gudang steril — server hanya mengembalikan baris gudang ber-`order_id`
+ * NULL (stok steril pool produksi yang belum direservasi order manapun). Penyaringan
+ * seluruhnya di sisi server, FE tidak mengirim parameter tambahan.
+ */
 export const fetchStorageInventory = createAsyncThunk("storage/inventory", (arg: FetchPageArg = {}) =>
   fetchPage<StorageInventoryRow>("/master/storage/inventory", arg),
 )

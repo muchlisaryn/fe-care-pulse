@@ -5,7 +5,8 @@ export type User = {
   id: number
   name: string
   username: string
-  email: string
+  // Opsional sejak import massal boleh tanpa email (kolomnya nullable di DB).
+  email: string | null
   no_telephone: string | null
   authority_id: number | null
   authority: { id: number; name: string } | null

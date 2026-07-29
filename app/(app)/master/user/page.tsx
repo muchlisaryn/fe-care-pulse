@@ -2,7 +2,9 @@
 
 import { useEffect, useRef, useState } from "react"
 import { Download, Search, Upload } from "lucide-react"
-import * as XLSX from "xlsx"
+// Fork SheetJS yang bisa MENULIS gaya sel. Versi `xlsx` biasa hanya menulis dua
+// fill bawaan, jadi header kuning penanda kolom wajib tidak akan muncul di sana.
+import * as XLSX from "xlsx-js-style"
 import { Button } from "@/components/atoms/Button"
 import { Input } from "@/components/atoms/Input"
 import { Label } from "@/components/atoms/Label"
@@ -61,17 +63,85 @@ const emptyEdit: EditForm = {
 
 const PER_PAGE = 20
 
-// Kolom berkas import/export. Urutannya juga dipakai sebagai template & header
-// yang dicocokkan saat membaca berkas (pencocokan tidak peka huruf besar/kecil).
+// Kolom berkas import. Urutannya juga dipakai sebagai template & header yang
+// dicocokkan saat membaca berkas (pencocokan tidak peka huruf besar/kecil).
 const IMPORT_COLUMNS = ["name", "username", "email", "no_telephone", "authority", "password"] as const
+
+// Kolom yang WAJIB terisi di setiap baris — dipakai untuk mewarnai header template
+// kuning. `password` tidak masuk sini: baris yang mengosongkannya memakai password
+// default yang diisi di modal import.
+const REQUIRED_COLUMNS: ReadonlySet<string> = new Set(["name", "username", "authority"])
+
+// Lebar kolom template biar isinya tidak terpotong saat dibuka di Excel.
+const COLUMN_WIDTH: Record<string, number> = {
+  name: 26,
+  username: 18,
+  email: 28,
+  no_telephone: 16,
+  authority: 22,
+  password: 16,
+  keterangan: 52,
+}
+
+const THIN_BORDER = {
+  top: { style: "thin", color: { rgb: "BFBFBF" } },
+  bottom: { style: "thin", color: { rgb: "BFBFBF" } },
+  left: { style: "thin", color: { rgb: "BFBFBF" } },
+  right: { style: "thin", color: { rgb: "BFBFBF" } },
+} as const
+
+/** Header kuning = wajib diisi. */
+const STYLE_REQUIRED = {
+  fill: { patternType: "solid", fgColor: { rgb: "FFE699" } },
+  font: { bold: true, color: { rgb: "7F6000" } },
+  alignment: { horizontal: "center", vertical: "center" },
+  border: THIN_BORDER,
+}
+
+/** Header abu-abu = opsional. */
+const STYLE_OPTIONAL = {
+  fill: { patternType: "solid", fgColor: { rgb: "F2F2F2" } },
+  font: { bold: true, color: { rgb: "595959" } },
+  alignment: { horizontal: "center", vertical: "center" },
+  border: THIN_BORDER,
+}
+
+/** Header merah = kolom keterangan pada berkas baris gagal (diabaikan saat diunggah ulang). */
+const STYLE_NOTE = {
+  fill: { patternType: "solid", fgColor: { rgb: "F8CBAD" } },
+  font: { bold: true, color: { rgb: "833C00" } },
+  alignment: { horizontal: "center", vertical: "center" },
+  border: THIN_BORDER,
+}
+
+/**
+ * Bangun sheet dari header + baris, lalu warnai barisan header: kuning untuk kolom
+ * wajib, abu-abu untuk opsional. Inilah satu-satunya petunjuk kolom mana yang wajib —
+ * modal import sengaja tidak lagi mendaftarnya sebagai teks.
+ */
+function buildStyledSheet(headers: readonly string[], rows: string[][]) {
+  const sheet = XLSX.utils.aoa_to_sheet([[...headers], ...rows])
+
+  headers.forEach((header, i) => {
+    const ref = XLSX.utils.encode_cell({ r: 0, c: i })
+    const cell = sheet[ref]
+    if (!cell) return
+    cell.s =
+      header === "keterangan"
+        ? STYLE_NOTE
+        : REQUIRED_COLUMNS.has(header)
+          ? STYLE_REQUIRED
+          : STYLE_OPTIONAL
+  })
+
+  sheet["!cols"] = headers.map((h) => ({ wch: COLUMN_WIDTH[h] ?? 18 }))
+  return sheet
+}
 
 // Baris dikirim ke server PER BATCH, bukan sekaligus: 1000+ baris jadi beberapa
 // request kecil sehingga tidak timeout & progresnya bisa ditampilkan. Harus ≤
 // batas IMPORT_CHUNK_MAX di UserController.
 const IMPORT_CHUNK = 100
-// Ekspor menarik daftar user halaman demi halaman dengan ukuran besar agar
-// jumlah request-nya sedikit.
-const EXPORT_PAGE_SIZE = 200
 
 type ImportRow = {
   row: number
@@ -103,8 +173,9 @@ function parseSheetRows(raw: unknown[][]): ImportRow[] {
     authority: indexOf("authority"),
     password: indexOf("password"),
   }
-  // Tanpa header yang dikenali, berkasnya bukan format yang diharapkan.
-  if (cols.name < 0 || cols.username < 0 || cols.email < 0) return []
+  // Tanpa header yang dikenali, berkasnya bukan format yang diharapkan. Kolom
+  // `email` TIDAK wajib — berkas tanpa kolom itu tetap boleh diimpor.
+  if (cols.name < 0 || cols.username < 0) return []
 
   const cell = (r: unknown[], i: number) => (i < 0 ? "" : String(r[i] ?? "").trim())
 
@@ -121,7 +192,123 @@ function parseSheetRows(raw: unknown[][]): ImportRow[] {
       authority: cell(r, cols.authority),
       password: cell(r, cols.password),
     }))
-    .filter((r) => r.name || r.username || r.email)
+    .filter((r) => r.name || r.username)
+}
+
+/**
+ * Samakan bentuk teks sebelum dibandingkan: huruf besar/kecil diabaikan dan spasi
+ * ganda dirapatkan, supaya "Perawat  CSSD" tetap cocok dengan "Perawat CSSD".
+ */
+function normalize(value: string): string {
+  return value.replace(/\s+/g, " ").trim().toLowerCase()
+}
+
+/** Jarak Levenshtein — dipakai untuk menebak otoritas yang dimaksud saat salah ketik. */
+function editDistance(a: string, b: string): number {
+  if (a === b) return 0
+  let prev = Array.from({ length: b.length + 1 }, (_, i) => i)
+
+  for (let i = 1; i <= a.length; i++) {
+    const curr = [i]
+    for (let j = 1; j <= b.length; j++) {
+      curr[j] = Math.min(
+        prev[j] + 1,
+        curr[j - 1] + 1,
+        prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1),
+      )
+    }
+    prev = curr
+  }
+
+  return prev[b.length]
+}
+
+/**
+ * Cari nama otoritas terdekat dari daftar yang sah. Ambang 1/3 panjang teks: cukup
+ * longgar untuk menangkap salah ketik satu-dua huruf, tapi tidak sampai menyarankan
+ * nama yang sama sekali berbeda.
+ */
+function suggestAuthority(input: string, names: string[]): string | null {
+  const target = normalize(input)
+  let best: { name: string; distance: number } | null = null
+
+  for (const name of names) {
+    const distance = editDistance(target, normalize(name))
+    if (!best || distance < best.distance) best = { name, distance }
+  }
+
+  if (!best) return null
+  return best.distance <= Math.max(1, Math.floor(target.length / 3)) ? best.name : null
+}
+
+/**
+ * Saring baris yang sudah pasti ditolak SEBELUM apa pun dikirim ke server:
+ *
+ * 1. Username kembar sesama baris berkas — server hanya tahu bentrok dengan data
+ *    existing; duplikat internal baru ketahuan saat baris kedua disimpan dan bisa
+ *    tercecer antar batch.
+ * 2. Nama otoritas yang tidak dikenal — dicegat di sini supaya keterangannya bisa
+ *    menyertakan tebakan nama yang benar, sesuatu yang tidak bisa dilakukan server
+ *    tanpa menghitung ulang seluruh daftar otoritas per baris.
+ *
+ * Pengecekan otoritas dilewati bila daftarnya belum termuat — biar server yang
+ * memutuskan, daripada menolak baris yang sebenarnya benar.
+ */
+function preflightRows(
+  rows: ImportRow[],
+  authorityNames: string[],
+): { accepted: ImportRow[]; rejected: ImportError[] } {
+  const firstSeenAt = new Map<string, number>()
+  const validAuthorities = new Set(authorityNames.map(normalize))
+  const accepted: ImportRow[] = []
+  const rejected: ImportError[] = []
+
+  for (const row of rows) {
+    if (authorityNames.length > 0) {
+      const authority = normalize(row.authority)
+      if (!authority) {
+        rejected.push({
+          row: row.row,
+          username: row.username,
+          message: "Kolom authority wajib diisi.",
+        })
+        continue
+      }
+      if (!validAuthorities.has(authority)) {
+        const suggestion = suggestAuthority(row.authority, authorityNames)
+        rejected.push({
+          row: row.row,
+          username: row.username,
+          message: suggestion
+            ? `Otoritas "${row.authority}" tidak dikenal. Maksudnya "${suggestion}"?`
+            : `Otoritas "${row.authority}" tidak dikenal. Lihat sheet "Daftar Otoritas" pada template.`,
+        })
+        continue
+      }
+    }
+
+    const username = normalize(row.username)
+    // Username kosong dibiarkan lolos: biar server yang menjelaskan bahwa kolomnya wajib.
+    if (!username) {
+      accepted.push(row)
+      continue
+    }
+
+    const firstRow = firstSeenAt.get(username)
+    if (firstRow !== undefined) {
+      rejected.push({
+        row: row.row,
+        username: row.username,
+        message: `Username "${row.username}" sudah dipakai baris ${firstRow} pada berkas ini.`,
+      })
+      continue
+    }
+
+    firstSeenAt.set(username, row.row)
+    accepted.push(row)
+  }
+
+  return { accepted, rejected }
 }
 
 export default function MasterUserPage() {
@@ -141,11 +328,6 @@ export default function MasterUserPage() {
   const [deleteTarget, setDeleteTarget] = useState<User | null>(null)
   const [deletingId, setDeletingId] = useState<number | null>(null)
 
-  // Export: menarik seluruh halaman daftar user lalu menyusun berkas di browser.
-  const [exporting, setExporting] = useState(false)
-  const [exportDone, setExportDone] = useState(0)
-  const [exportTotal, setExportTotal] = useState(0)
-
   // Import: berkas di-parse di browser, dikirim per batch dengan progres.
   const fileRef = useRef<HTMLInputElement>(null)
   const [importOpen, setImportOpen] = useState(false)
@@ -157,6 +339,12 @@ export default function MasterUserPage() {
   const [importError, setImportError] = useState<string | null>(null)
   const [importResult, setImportResult] = useState<{ created: number; failed: number } | null>(null)
   const [importErrors, setImportErrors] = useState<ImportError[]>([])
+  // Baris yang sudah pasti ditolak (username kembar / otoritas tak dikenal),
+  // ditemukan sebelum apa pun dikirim ke server.
+  const [preflightErrors, setPreflightErrors] = useState<ImportError[]>([])
+  // Seluruh baris berkas (termasuk yang gagal) supaya berkas "baris gagal" bisa
+  // dibangun ulang lengkap dengan isinya, bukan cuma nomor baris.
+  const [sourceRows, setSourceRows] = useState<Map<number, ImportRow>>(new Map())
 
   useEffect(() => {
     if (loaded && !dirty) return
@@ -177,63 +365,52 @@ export default function MasterUserPage() {
   }
 
   /**
-   * Export seluruh user ke .xlsx. Data ditarik HALAMAN DEMI HALAMAN (bukan sekali
-   * ambil semua) supaya server tidak diminta menyusun ribuan baris dalam satu
-   * response; progresnya ditampilkan di tombol.
+   * Unduh berkas contoh: satu sheet isian + satu sheet daftar otoritas yang sah.
+   * Kolom `authority` diisi NAMA, bukan id — salah ketik nama pasti ditolak, sedangkan
+   * salah ketik id bisa mendarat di id sah lain dan diam-diam memberi hak akses keliru.
+   * Sheet kedua ada supaya namanya tinggal disalin, tidak perlu diketik ulang.
    */
-  async function handleExport() {
-    if (exporting) return
-    setExporting(true)
-    setExportDone(0)
-    setExportTotal(0)
-    try {
-      const rows: Record<string, string>[] = []
-      let current = 1
-      let last = 1
-      do {
-        const res = await api.get("/master/users", {
-          params: { page: current, per_page: EXPORT_PAGE_SIZE, search: search || undefined },
-        })
-        const p = res.data.data
-        last = p.last_page ?? 1
-        setExportTotal(p.total ?? 0)
-        for (const u of p.data as User[]) {
-          rows.push({
-            name: u.name ?? "",
-            username: u.username ?? "",
-            email: u.email ?? "",
-            no_telephone: u.no_telephone ?? "",
-            authority: u.authority?.name ?? "",
-          })
-        }
-        setExportDone(rows.length)
-        current += 1
-      } while (current <= last)
-
-      const sheet = XLSX.utils.json_to_sheet(rows, {
-        // Password sengaja TIDAK diekspor — hash-nya tidak berguna & tidak boleh
-        // ikut tersebar. Kolomnya tetap ada di template import.
-        header: ["name", "username", "email", "no_telephone", "authority"],
-      })
-      const wb = XLSX.utils.book_new()
-      XLSX.utils.book_append_sheet(wb, sheet, "User")
-      XLSX.writeFile(wb, `master-user-${new Date().toISOString().slice(0, 10)}.xlsx`)
-    } catch {
-      setImportError("Gagal mengekspor data user.")
-    } finally {
-      setExporting(false)
-    }
-  }
-
-  /** Unduh berkas contoh berisi header + satu baris isian. */
   function handleDownloadTemplate() {
-    const sheet = XLSX.utils.aoa_to_sheet([
-      [...IMPORT_COLUMNS],
+    const sheet = buildStyledSheet(IMPORT_COLUMNS, [
       ["Budi Santoso", "budi", "budi@rsijpk.co.id", "08123456789", authorities[0]?.name ?? "Administrator", ""],
     ])
+    const authoritySheet = buildStyledSheet(
+      ["authority"],
+      authorities.map((a) => [a.name]),
+    )
+
     const wb = XLSX.utils.book_new()
     XLSX.utils.book_append_sheet(wb, sheet, "Template")
+    XLSX.utils.book_append_sheet(wb, authoritySheet, "Daftar Otoritas")
     XLSX.writeFile(wb, "template-import-user.xlsx")
+  }
+
+  /**
+   * Unduh HANYA baris yang gagal, lengkap dengan isinya + kolom `keterangan`.
+   * Header kolomnya sama persis dengan template, jadi berkas ini bisa diperbaiki
+   * lalu diunggah ulang apa adanya — kolom `keterangan` diabaikan saat dibaca.
+   */
+  function handleDownloadFailed() {
+    if (importErrors.length === 0) return
+
+    const rows = importErrors.map((e) => {
+      const src = sourceRows.get(e.row)
+      return [
+        src?.name ?? "",
+        src?.username ?? e.username ?? "",
+        src?.email ?? "",
+        src?.no_telephone ?? "",
+        src?.authority ?? "",
+        src?.password ?? "",
+        e.message,
+      ]
+    })
+
+    const sheet = buildStyledSheet([...IMPORT_COLUMNS, "keterangan"], rows)
+    const wb = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(wb, sheet, "Gagal")
+    const base = importFileName.replace(/\.[^.]+$/, "") || "import-user"
+    XLSX.writeFile(wb, `gagal-${base}.xlsx`)
   }
 
   function openImport() {
@@ -242,6 +419,8 @@ export default function MasterUserPage() {
     setImportError(null)
     setImportResult(null)
     setImportErrors([])
+    setPreflightErrors([])
+    setSourceRows(new Map())
     setImportDone(0)
     setImportOpen(true)
   }
@@ -256,6 +435,8 @@ export default function MasterUserPage() {
     setImportError(null)
     setImportResult(null)
     setImportErrors([])
+    setPreflightErrors([])
+    setSourceRows(new Map())
     setImportRows(null)
     try {
       const buf = await file.arrayBuffer()
@@ -266,13 +447,29 @@ export default function MasterUserPage() {
 
       if (parsed.length === 0) {
         setImportError(
-          "Berkas tidak berisi data user yang bisa dibaca. Header wajib memuat kolom: name, username, email.",
+          "Berkas tidak berisi data user yang bisa dibaca. Pastikan barisan header-nya sama dengan template.",
         )
         return
       }
 
+      const { accepted, rejected } = preflightRows(
+        parsed,
+        authorities.map((a) => a.name),
+      )
+
       setImportFileName(file.name)
-      setImportRows(parsed)
+      setSourceRows(new Map(parsed.map((r) => [r.row, r])))
+      setPreflightErrors(rejected)
+
+      // Tidak ada satu pun baris yang bisa dikirim — langsung tampilkan sebagai
+      // hasil gagal supaya berkas perbaikannya bisa diunduh saat itu juga.
+      if (accepted.length === 0) {
+        setImportErrors(rejected)
+        setImportResult({ created: 0, failed: rejected.length })
+        return
+      }
+
+      setImportRows(accepted)
     } catch {
       setImportError("Gagal membaca berkas. Pastikan formatnya Excel (.xlsx/.xls) atau CSV.")
     }
@@ -309,8 +506,12 @@ export default function MasterUserPage() {
         setImportDone(Math.min(i + IMPORT_CHUNK, importRows.length))
       }
 
-      setImportResult({ created, failed: failedRows.length })
-      setImportErrors(failedRows)
+      // Baris yang dicegat di browser ikut dilaporkan sebagai baris gagal, lalu
+      // seluruhnya diurutkan agar nomor barisnya sejajar dengan urutan di Excel.
+      const allFailed = [...preflightErrors, ...failedRows].sort((a, b) => a.row - b.row)
+
+      setImportResult({ created, failed: allFailed.length })
+      setImportErrors(allFailed)
       setImportRows(null)
       dispatch(invalidateUsers())
     } catch (err) {
@@ -332,7 +533,7 @@ export default function MasterUserPage() {
     setEditForm({
       name: row.name,
       username: row.username,
-      email: row.email,
+      email: row.email ?? "",
       no_telephone: row.no_telephone ?? "",
       authority_id: row.authority_id ?? "",
       password: "",
@@ -428,7 +629,12 @@ export default function MasterUserPage() {
     },
     {
       header: "Email",
-      cell: (row) => <span className="text-sm text-gray-500">{row.email}</span>,
+      cell: (row) =>
+        row.email ? (
+          <span className="text-sm text-gray-500">{row.email}</span>
+        ) : (
+          <span className="text-gray-400 text-xs">—</span>
+        ),
     },
     {
       header: "Otoritas",
@@ -454,17 +660,6 @@ export default function MasterUserPage() {
             className="hidden"
             onChange={handleFile}
           />
-          <Button
-            variant="outline"
-            onClick={handleExport}
-            disabled={exporting}
-            className="border-[#4ba69d] text-[#4ba69d] hover:bg-[#4ba69d]/10"
-          >
-            <Download className="h-4 w-4" />
-            {exporting
-              ? `Mengekspor… ${exportDone}${exportTotal ? `/${exportTotal}` : ""}`
-              : "Export Excel"}
-          </Button>
           <Button
             variant="outline"
             onClick={openImport}
@@ -547,13 +742,15 @@ export default function MasterUserPage() {
         <div className="space-y-4">
           <div className="rounded-lg bg-gray-50 px-4 py-3 text-sm text-gray-600">
             <p className="font-medium text-gray-700">Format berkas</p>
-            <p className="mt-1">
-              Header wajib: <span className="font-mono text-xs">name</span>,{" "}
-              <span className="font-mono text-xs">username</span>,{" "}
-              <span className="font-mono text-xs">email</span>. Opsional:{" "}
-              <span className="font-mono text-xs">no_telephone</span>,{" "}
-              <span className="font-mono text-xs">authority</span> (nama otoritas),{" "}
-              <span className="font-mono text-xs">password</span>.
+            <p className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1">
+              <span className="inline-flex items-center gap-1.5">
+                <span className="inline-block h-3 w-3 rounded-sm border border-[#bf9000] bg-[#FFE699]" />
+                Kolom wajib diisi
+              </span>
+              <span className="inline-flex items-center gap-1.5">
+                <span className="inline-block h-3 w-3 rounded-sm border border-gray-300 bg-[#F2F2F2]" />
+                Kolom opsional
+              </span>
             </p>
             <button
               type="button"
@@ -595,6 +792,13 @@ export default function MasterUserPage() {
                 diimport, dikirim {IMPORT_CHUNK} baris per batch.
               </p>
             )}
+            {preflightErrors.length > 0 && !importResult && !importing && (
+              <p className="mt-2 text-sm text-amber-700">
+                <span className="font-semibold">{preflightErrors.length}</span> baris dilewati karena
+                username-nya kembar di berkas ini atau otoritasnya tidak dikenal. Baris tersebut akan
+                muncul di daftar gagal setelah import selesai.
+              </p>
+            )}
           </div>
 
           {/* Progres nyata: bertambah tiap batch selesai dikirim. */}
@@ -623,7 +827,13 @@ export default function MasterUserPage() {
 
           {importResult && (
             <div className="space-y-2">
-              <div className="rounded-lg border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-700">
+              <div
+                className={
+                  importResult.created > 0
+                    ? "rounded-lg border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-700"
+                    : "rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700"
+                }
+              >
                 Berhasil menambahkan <span className="font-semibold">{importResult.created}</span> user.
                 {importResult.failed > 0 && (
                   <>
@@ -633,6 +843,20 @@ export default function MasterUserPage() {
                   </>
                 )}
               </div>
+              {importErrors.length > 0 && (
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <p className="text-xs text-gray-500">
+                    Perbaiki berkas baris gagal, lalu unggah ulang berkas itu langsung.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={handleDownloadFailed}
+                    className="inline-flex items-center gap-1 rounded-lg border border-[#075489] px-3 py-1.5 text-xs font-medium text-[#075489] hover:bg-[#075489]/10"
+                  >
+                    <Download className="h-3.5 w-3.5" /> Unduh {importErrors.length} baris gagal
+                  </button>
+                </div>
+              )}
               {importErrors.length > 0 && (
                 <div className="max-h-56 overflow-y-auto rounded-lg border border-gray-200">
                   <table className="w-full border-collapse text-left text-sm">
