@@ -346,6 +346,12 @@ export default function MasterUserPage() {
   // dibangun ulang lengkap dengan isinya, bukan cuma nomor baris.
   const [sourceRows, setSourceRows] = useState<Map<number, ImportRow>>(new Map())
 
+  // Syarat yang sama dengan `default_password` di server. Dihitung di sini supaya
+  // tombol import bisa ikut mati — dulu syaratnya baru muncul sebagai pesan error
+  // SETELAH tombol diklik, jadi kalau state-nya kosong tanpa disadari (mis. field
+  // diisi autofill browser) petugas cuma melihat tombol yang seperti tidak bekerja.
+  const defaultPasswordValid = defaultPassword.trim().length >= 8
+
   useEffect(() => {
     if (loaded && !dirty) return
     dispatch(fetchUsers())
@@ -482,7 +488,8 @@ export default function MasterUserPage() {
    */
   async function handleConfirmImport() {
     if (!importRows || importing) return
-    if (defaultPassword.trim().length < 8) {
+    // Tombolnya sudah mati saat syarat ini tak terpenuhi; ini jaring pengaman saja.
+    if (!defaultPasswordValid) {
       setImportError("Password default wajib diisi, minimal 8 karakter.")
       return
     }
@@ -730,7 +737,8 @@ export default function MasterUserPage() {
             {importRows && (
               <Button
                 onClick={handleConfirmImport}
-                disabled={importing}
+                disabled={importing || !defaultPasswordValid}
+                title={defaultPasswordValid ? undefined : "Isi password default minimal 8 karakter"}
                 className="bg-[#075489] hover:bg-[#075489]/90 text-white"
               >
                 {importing ? "Mengimpor..." : `Import ${importRows.length} baris`}
@@ -762,18 +770,33 @@ export default function MasterUserPage() {
           </div>
 
           <div className="space-y-1.5">
-            <Label htmlFor="import-default-password">Password default</Label>
+            <Label htmlFor="import-default-password">
+              Password default <span className="text-red-500">*</span>
+            </Label>
             <Input
               id="import-default-password"
+              name="import-default-password"
               type="password"
+              // Tanpa ini browser mengisi sendiri field password dengan kredensial
+              // login yang tersimpan. Pengisian itu tidak memicu onChange, jadi
+              // kotaknya terlihat penuh sementara state di React masih kosong dan
+              // import ditolak dengan alasan yang tak masuk akal bagi petugas.
+              autoComplete="new-password"
               value={defaultPassword}
               onChange={(e) => setDefaultPassword(e.target.value)}
               placeholder="Minimal 8 karakter"
               disabled={importing}
+              error={defaultPassword.length > 0 && !defaultPasswordValid}
             />
-            <p className="text-xs text-gray-400">
-              Dipakai untuk baris yang kolom <span className="font-mono">password</span>-nya kosong.
-            </p>
+            {defaultPassword.length > 0 && !defaultPasswordValid ? (
+              <p className="text-xs text-red-500">
+                Password default minimal 8 karakter — baru {defaultPassword.trim().length} karakter.
+              </p>
+            ) : (
+              <p className="text-xs text-gray-400">
+                Dipakai untuk baris yang kolom <span className="font-mono">password</span>-nya kosong.
+              </p>
+            )}
           </div>
 
           <div>
@@ -981,6 +1004,8 @@ export default function MasterUserPage() {
                 <Input
                   id="u-password"
                   type="password"
+                  // Cegah browser mengisi field ini dengan password admin yang login.
+                  autoComplete="new-password"
                   placeholder="Min. 8 karakter"
                   value={form.password}
                   onChange={(e) => setForm((p) => ({ ...p, password: e.target.value }))}
@@ -992,6 +1017,7 @@ export default function MasterUserPage() {
                 <Input
                   id="u-confirm"
                   type="password"
+                  autoComplete="new-password"
                   placeholder="Ulangi password"
                   value={form.password_confirmation}
                   onChange={(e) => setForm((p) => ({ ...p, password_confirmation: e.target.value }))}
@@ -1091,6 +1117,7 @@ export default function MasterUserPage() {
                 <Input
                   id="e-password"
                   type="password"
+                  autoComplete="new-password"
                   placeholder="Min. 8 karakter"
                   value={editForm.password}
                   onChange={(e) => setEditForm((p) => ({ ...p, password: e.target.value }))}
@@ -1102,6 +1129,7 @@ export default function MasterUserPage() {
                 <Input
                   id="e-confirm"
                   type="password"
+                  autoComplete="new-password"
                   placeholder="Ulangi password"
                   value={editForm.password_confirmation}
                   onChange={(e) => setEditForm((p) => ({ ...p, password_confirmation: e.target.value }))}
