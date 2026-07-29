@@ -1276,7 +1276,7 @@ export default function OrderInstrumenPage() {
             )}
 
             {/* Riwayat Peminjaman: timeline tracking order (dibuat → diterima → dipinjam → dst.) */}
-            <OrderTimeline events={detail.timeline} />
+            <OrderTimeline events={detail.timeline} scopeOrderId={detail.id} />
 
             {detail.request_items && detail.request_items.length > 0 && (
               <div>

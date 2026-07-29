@@ -15,14 +15,16 @@ export type TimelinePackagingRow = {
   petugas?: string | null
 }
 
-// Satu baris tabel Detail produksi/cleaning/steril: tanggal | nomor batch | nama |
-// jumlah (+ nama petugas bila ada, mis. tahap Steril).
+// Satu baris tabel Detail produksi/cleaning/steril: tanggal | nomor label | nomor
+// batch | nama | jumlah (+ nama petugas bila ada, mis. tahap Steril).
 export type TimelineItemLine = {
   name: string
   type: "paket" | "satuan"
   qty: number
   tanggal?: string | null
   code?: string
+  /** Nomor label kemasan bungkus steril — penanda yang sama di seluruh tahap. */
+  barcode_no?: string | null
   petugas?: string | null
 }
 
@@ -228,7 +230,11 @@ function LazyItemsTable({ items, codeLabel }: { items: TimelineItemLine[]; codeL
   const [q, setQ] = useState("")
   const query = q.trim().toLowerCase()
   const filtered = query
-    ? items.filter((it) => `${it.name} ${it.code ?? ""} ${it.petugas ?? ""}`.toLowerCase().includes(query))
+    ? items.filter((it) =>
+        `${it.name} ${it.code ?? ""} ${it.barcode_no ?? ""} ${it.petugas ?? ""}`
+          .toLowerCase()
+          .includes(query),
+      )
     : items
   // Kolom Nama Petugas hanya muncul bila datanya ada (mis. tahap Steril).
   const showPetugas = items.some((it) => it.petugas)
@@ -243,6 +249,7 @@ function LazyItemsTable({ items, codeLabel }: { items: TimelineItemLine[]; codeL
             <thead>
               <tr className="border-b border-gray-200 text-[11px] font-semibold uppercase tracking-wide text-gray-400">
                 <th className="py-2 pr-3">Tanggal</th>
+                <th className="py-2 pr-3">No. Label</th>
                 <th className="py-2 pr-3">{codeLabel}</th>
                 <th className="py-2 pr-3">Nama</th>
                 {showPetugas && <th className="py-2">Nama Petugas</th>}
@@ -252,6 +259,15 @@ function LazyItemsTable({ items, codeLabel }: { items: TimelineItemLine[]; codeL
               {filtered.map((it, i) => (
                 <tr key={i} className="border-b border-gray-100 last:border-0">
                   <td className="whitespace-nowrap py-2 pr-3 text-gray-600">{formatDateTime(it.tanggal ?? null)}</td>
+                  <td className="whitespace-nowrap py-2 pr-3">
+                    {it.barcode_no ? (
+                      <span className="font-mono text-xs font-semibold text-[#4ba69d] bg-[#4ba69d]/10 px-1.5 py-0.5 rounded">
+                        {it.barcode_no}
+                      </span>
+                    ) : (
+                      <span className="text-xs text-gray-400">—</span>
+                    )}
+                  </td>
                   <td className="whitespace-nowrap py-2 pr-3 font-mono text-xs font-semibold text-[#075489]">
                     {it.code ?? "—"}
                   </td>
@@ -322,7 +338,21 @@ const LAZY_DETAIL: Record<string, { endpoint: string; codeLabel: string }> = {
  * dari GET orders/{id}/timeline saat dirender — dipakai di Pengembalian Instrumen
  * agar tracking-nya tidak ikut dibebankan ke payload scan).
  */
-export function OrderTimeline({ events, orderId }: { events?: TimelineEvent[]; orderId?: number }) {
+export function OrderTimeline({
+  events,
+  orderId,
+  scopeOrderId,
+}: {
+  events?: TimelineEvent[]
+  orderId?: number
+  /**
+   * Order yang dipakai MENYARING rincian Detail tiap tahap — satu batch pipeline
+   * bisa berisi unit milik order lain, dan yang ingin dilacak hanya instrumen order
+   * ini. Diisi sendiri bila `events` yang dioper (mode `orderId` memakainya otomatis).
+   */
+  scopeOrderId?: number
+}) {
+  const detailOrderId = scopeOrderId ?? orderId
   const [expanded, setExpanded] = useState(false)
   const [detailEv, setDetailEv] = useState<TimelineEvent | null>(null)
 
@@ -360,7 +390,11 @@ export function OrderTimeline({ events, orderId }: { events?: TimelineEvent[]; o
   useEffect(() => {
     const d = detailEv?.detail
     if (!lazyCfg || !d) return
-    const params = isPackaging ? { ids: d.ids } : { codes: d.codes }
+    const params = {
+      ...(isPackaging ? { ids: d.ids } : { codes: d.codes }),
+      // Saring ke unit milik order ini saja (lihat OrderItem::stockIdsOfOrder).
+      ...(detailOrderId != null ? { order_id: detailOrderId } : {}),
+    }
     const identifiers = isPackaging ? d.ids : d.codes
     if (!identifiers || identifiers.length === 0) return
     let active = true
@@ -380,7 +414,7 @@ export function OrderTimeline({ events, orderId }: { events?: TimelineEvent[]; o
     return () => {
       active = false
     }
-  }, [detailEv, lazyCfg, isPackaging])
+  }, [detailEv, lazyCfg, isPackaging, detailOrderId])
 
   const data = orderId != null ? lazyEvents : events
 

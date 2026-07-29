@@ -218,22 +218,26 @@ function RackPicker({
   // atau kamera tidak tersedia (halaman non-https) → opsi scan dimatikan.
   const [camera, setCamera] = useState<"checking" | "ready" | "blocked">("checking")
   const [cameraNote, setCameraNote] = useState<string | null>(null)
-  // `denied` = izin DIBLOKIR permanen untuk situs ini. Pada keadaan ini browser
-  // tidak akan memunculkan dialog izin lagi walau getUserMedia dipanggil, jadi
-  // satu-satunya jalan adalah mengubahnya lewat setelan browser.
-  const [denied, setDenied] = useState(false)
+  // Alasan kamera tak bisa dipakai — menentukan apa yang ditawarkan ke pengguna:
+  //   denied      → izin DIBLOKIR permanen untuk situs ini; browser tak akan
+  //                 memunculkan dialog izin lagi, jadi tampilkan panduan setelan.
+  //   unavailable → halaman bukan secure context (http non-localhost), API kamera
+  //                 tidak ada sama sekali. Tak ada yang bisa dilakukan dari sini.
+  //   notfound    → tidak ada kamera di perangkat.
+  //   error       → kegagalan lain; boleh dicoba ulang.
+  const [blockReason, setBlockReason] = useState<"denied" | "unavailable" | "notfound" | "error" | null>(null)
   const guide = cameraGuide()
 
   /** Terapkan hasil pembacaan izin ke tampilan. */
   const applyPermission = useCallback((state: CameraPermission) => {
-    setDenied(state === "denied")
+    setBlockReason(state === "ok" ? null : state)
     setCamera(state === "ok" ? "ready" : "blocked")
     setCameraNote(
       state === "ok"
         ? null
         : state === "denied"
           ? "Izin kamera diblokir untuk situs ini."
-          : "Kamera tidak tersedia di browser ini. Buka halaman lewat https atau localhost.",
+          : "Kamera tidak tersedia karena halaman ini dibuka lewat http. Buka lewat https (atau localhost) agar kamera bisa dipakai — mengaktifkan izin di setelan HP tidak akan membantu.",
     )
   }, [])
 
@@ -280,11 +284,18 @@ function RackPicker({
    * seketika TANPA dialog — karena itu tombolnya disembunyikan pada keadaan itu.
    */
   async function requestCamera() {
+    // Di halaman non-secure `navigator.mediaDevices` tidak ada sama sekali —
+    // memanggilnya melempar TypeError dan pesan penyebab aslinya (http) tertimpa
+    // pesan galat umum. Hentikan di sini supaya diagnosisnya tetap benar.
+    if (!navigator.mediaDevices?.getUserMedia) {
+      applyPermission("unavailable")
+      return
+    }
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } })
       // Hentikan segera — pemindai akan membuka streamnya sendiri.
       stream.getTracks().forEach((t) => t.stop())
-      setDenied(false)
+      setBlockReason(null)
       setCamera("ready")
       setCameraNote(null)
       setScannerOpen(true)
@@ -292,13 +303,13 @@ function RackPicker({
       const name = (e as { name?: string })?.name
       setCamera("blocked")
       if (name === "NotAllowedError" || name === "SecurityError") {
-        setDenied(true)
+        setBlockReason("denied")
         setCameraNote("Izin kamera ditolak untuk situs ini.")
       } else if (name === "NotFoundError") {
-        setDenied(false)
+        setBlockReason("notfound")
         setCameraNote("Kamera tidak ditemukan di perangkat ini. Pilih rak manual dari daftar.")
       } else {
-        setDenied(false)
+        setBlockReason("error")
         setCameraNote("Kamera tidak bisa dibuka. Pilih rak manual dari daftar.")
       }
     }
@@ -343,7 +354,7 @@ function RackPicker({
           {camera === "blocked" && cameraNote && (
             <div className="space-y-2 rounded-lg bg-amber-50 px-3 py-2.5">
               <p className="text-xs font-medium text-amber-800">{cameraNote}</p>
-              {denied && (
+              {blockReason === "denied" && (
                 <>
                   <p className="text-xs font-medium text-amber-800">
                     Cara mengaktifkan di {guide.device}:
@@ -356,11 +367,14 @@ function RackPicker({
                   {guide.note && <p className="text-xs text-amber-700">{guide.note}</p>}
                 </>
               )}
-              {/* Dialog izin hanya muncul bila izinnya belum diblokir permanen. */}
-              {!denied && (
+              {/* Tombol coba lagi HANYA untuk kegagalan yang memang bisa berubah.
+                  Pada `denied` dialog izin tak akan muncul lagi, pada `unavailable`
+                  API kameranya tidak ada, pada `notfound` perangkatnya tak punya
+                  kamera — menawarkan tombol di situ cuma menyesatkan. */}
+              {blockReason === "error" && (
                 <Button type="button" size="sm" variant="outline" onClick={requestCamera}>
                   <Camera className="h-4 w-4" />
-                  Aktifkan Izin Kamera
+                  Coba Lagi
                 </Button>
               )}
             </div>
@@ -390,7 +404,11 @@ function RackPicker({
                   {camera === "checking"
                     ? "Memeriksa izin kamera..."
                     : camera === "blocked"
-                      ? "Izin kamera belum aktif"
+                      ? blockReason === "unavailable"
+                        ? "Perlu https"
+                        : blockReason === "notfound"
+                          ? "Kamera tidak ada"
+                          : "Izin kamera belum aktif"
                       : "Arahkan kamera ke label rak"}
                 </span>
               </button>

@@ -111,10 +111,19 @@ function StorageSterilPage() {
       else next.add(key)
       return next
     })
-  // Paket yang detail isinya sedang dibuka di inventaris.
+  // Jenis barang (paket/satuan) yang sedang dibuka di dalam sebuah rak.
   const [openPkt, setOpenPkt] = useState<Set<string>>(new Set())
   const togglePkt = (key: string) =>
     setOpenPkt((prev) => {
+      const next = new Set(prev)
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
+      return next
+    })
+  // Satu SET paket (satu bungkus/label) yang sedang dibuka isinya.
+  const [openSet, setOpenSet] = useState<Set<string>>(new Set())
+  const toggleSet = (key: string) =>
+    setOpenSet((prev) => {
       const next = new Set(prev)
       if (next.has(key)) next.delete(key)
       else next.add(key)
@@ -394,6 +403,86 @@ function StorageSterilPage() {
   }, [inventoryFiltered, groupBy])
 
 
+  /**
+   * Pecah isi satu rak menjadi dua tingkat.
+   *
+   * Tingkat 1 — JENIS barang: paket dikelompokkan per nama paket, satuan per nama
+   * instrumen. Jumlahnya diringkas di sini ("Kom Kecil · 5 unit", "SET PARTUS · 3 set")
+   * supaya satu rak tidak melebar jadi puluhan baris.
+   *
+   * Tingkat 2 — hanya untuk PAKET: dipecah lagi per NOMOR LABEL kemasan, karena satu
+   * label = satu bungkus steril = satu set utuh. Unit satuan tidak perlu tingkat ini —
+   * nomor labelnya ditempel langsung di baris unitnya.
+   */
+  function groupRackItems(items: StorageInventoryRow[]) {
+    type SetGroup = { key: string; barcodeNo: string | null; units: StorageInventoryRow[] }
+    type KindGroup = {
+      key: string
+      source: "satuan" | "paket"
+      name: string
+      units: StorageInventoryRow[]
+      sets: SetGroup[]
+    }
+
+    const kinds = new Map<string, KindGroup>()
+    for (const r of items) {
+      const name = r.source === "paket" ? r.package_name ?? "Paket" : r.unit.instrument ?? "Instrumen"
+      const key = `${r.source}|${name}`
+      const g = kinds.get(key) ?? { key, source: r.source, name, units: [], sets: [] }
+      g.units.push(r)
+      kinds.set(key, g)
+    }
+
+    for (const g of kinds.values()) {
+      if (g.source !== "paket") continue
+      const sets = new Map<string, SetGroup>()
+      for (const u of g.units) {
+        // Bungkus tanpa nomor label dihitung sebagai set tersendiri (tidak digabung
+        // dengan bungkus tak berlabel lain) agar jumlah setnya tidak mengecil palsu.
+        const sk = u.barcode_no ?? `tanpa-label#${u.id}`
+        const s = sets.get(sk) ?? { key: sk, barcodeNo: u.barcode_no, units: [] }
+        s.units.push(u)
+        sets.set(sk, s)
+      }
+      g.sets = [...sets.values()]
+    }
+
+    // Paket dulu baru satuan, masing-masing urut nama.
+    return [...kinds.values()].sort((a, b) =>
+      a.source === b.source
+        ? a.name.localeCompare(b.name, "id", { numeric: true })
+        : a.source === "paket"
+          ? -1
+          : 1,
+    )
+  }
+
+  /** Unit dengan kedaluwarsa paling dekat — mewakili status seluruh grup. */
+  function soonestOf(units: StorageInventoryRow[]) {
+    return units.reduce((a, u) =>
+      (u.days_to_expiry ?? Infinity) < (a.days_to_expiry ?? Infinity) ? u : a,
+    )
+  }
+
+  /** Tanggal kedaluwarsa + badge status, dipakai di kepala tiap grup. */
+  function renderExpiryMeta(units: StorageInventoryRow[]) {
+    const s = soonestOf(units)
+    return (
+      <span className="ml-auto flex items-center gap-2">
+        <span className={"text-xs " + (s.alert ? "font-semibold text-red-600" : "text-gray-500")}>
+          {formatDate(s.expiry_date)}
+        </span>
+        {s.expired ? (
+          <Badge variant="danger">Kedaluwarsa</Badge>
+        ) : s.alert ? (
+          <Badge variant="danger">{s.days_to_expiry}h lagi</Badge>
+        ) : (
+          <Badge variant="success">Di Gudang</Badge>
+        )}
+      </span>
+    )
+  }
+
   // Satu baris unit di detail inventaris (dipakai untuk satuan & isi paket).
   function renderUnitRow(r: StorageInventoryRow) {
     return (
@@ -427,9 +516,20 @@ function StorageSterilPage() {
           </span>
           <span className="truncate text-gray-700">{r.unit.instrument ?? "—"}</span>
         </div>
-        {/* Kanan: meta (rak/batch). Kedaluwarsa TIDAK diulang per unit — sama untuk
-            seluruh isi bungkus, jadi cukup tampil sekali di kepala grup. */}
+        {/* Kanan: nomor label kemasan + meta (rak/batch). Kedaluwarsa TIDAK diulang
+            per unit — sama untuk seluruh isi bungkus, jadi cukup tampil sekali di
+            kepala grup. */}
         <div className="flex flex-wrap items-center gap-2">
+          {r.barcode_no ? (
+            <span
+              title="Nomor label kemasan"
+              className="font-mono text-xs font-semibold text-[#4ba69d] bg-[#4ba69d]/10 px-1.5 py-0.5 rounded"
+            >
+              {r.barcode_no}
+            </span>
+          ) : (
+            <span className="text-xs text-gray-400">—</span>
+          )}
           {groupBy === "batch" && (
             <span className="inline-flex items-center gap-1 text-xs text-gray-500">
               <MapPin className="h-3 w-3" />
@@ -622,95 +722,89 @@ function StorageSterilPage() {
                       </button>
                       {open && (
                         <div className="border-t border-gray-100">
-                          {(() => {
-                            // Kelompokkan sesuai bentuknya saat DIPRODUKSI: paket per nama
-                            // paket, satuan per jenis instrumen — masing-masing dipisah lagi
-                            // per NOMOR LABEL kemasan, karena bungkus steril berbeda label
-                            // adalah barang berbeda meski isinya sejenis. Nama & nomor label
-                            // sama-sama bersumber dari snapshot production_item.
-                            const bundles = new Map<
-                              string,
-                              {
-                                source: "satuan" | "paket"
-                                name: string
-                                barcodeNo: string | null
-                                units: typeof g.items
-                              }
-                            >()
-                            for (const r of g.items) {
-                              const name =
-                                r.source === "paket"
-                                  ? r.package_name ?? "Paket"
-                                  : r.unit.instrument ?? "Instrumen"
-                              const key = `${r.source}|${name}|${r.barcode_no ?? ""}`
-                              const b =
-                                bundles.get(key) ??
-                                {
-                                  source: r.source,
-                                  name,
-                                  barcodeNo: r.barcode_no,
-                                  units: [] as typeof g.items,
-                                }
-                              b.units.push(r)
-                              bundles.set(key, b)
-                            }
+                          {groupRackItems(g.items).map((kind) => {
+                            const pkey = `${g.key}::${kind.key}`
+                            const popen = q ? true : openPkt.has(pkey)
+                            const isPaket = kind.source === "paket"
+                            return (
+                              <div key={pkey} className="border-b border-gray-50 last:border-0">
+                                {/* Tingkat 2 — JENIS: "SET PARTUS · 3 set" / "Kom Kecil · 5 unit" */}
+                                <button
+                                  type="button"
+                                  onClick={() => togglePkt(pkey)}
+                                  className="flex w-full flex-wrap items-center gap-x-2 gap-y-1 px-4 py-2 text-sm hover:bg-gray-50"
+                                >
+                                  {popen ? (
+                                    <ChevronDown className="h-3.5 w-3.5 shrink-0 text-gray-400" />
+                                  ) : (
+                                    <ChevronRight className="h-3.5 w-3.5 shrink-0 text-gray-400" />
+                                  )}
+                                  <Badge variant={isPaket ? "info" : "default"}>
+                                    {isPaket ? "Paket" : "Satuan"}
+                                  </Badge>
+                                  <span className="font-medium text-gray-800">{kind.name}</span>
+                                  <span className="text-xs text-gray-400">
+                                    {isPaket ? `${kind.sets.length} set` : `${kind.units.length} unit`}
+                                  </span>
+                                  {renderExpiryMeta(kind.units)}
+                                </button>
 
-                            return [...bundles.entries()].map(([key, b]) => {
-                              const pkey = `${g.key}::${key}`
-                              const popen = q ? true : openPkt.has(pkey)
-                              const isPaket = b.source === "paket"
-                              // Kedaluwarsa berlaku untuk seluruh isi bungkus → wakili dengan
-                              // unit paling awal kedaluwarsa, tampil sekali di kepala grup.
-                              const soonest = b.units.reduce((a, u) =>
-                                (u.days_to_expiry ?? Infinity) < (a.days_to_expiry ?? Infinity) ? u : a,
-                              )
-                              return (
-                                <div key={pkey} className="border-b border-gray-50 last:border-0">
-                                  <button
-                                    type="button"
-                                    onClick={() => togglePkt(pkey)}
-                                    className="flex w-full flex-wrap items-center gap-x-2 gap-y-1 px-4 py-2 text-sm hover:bg-gray-50"
-                                  >
-                                    {popen ? (
-                                      <ChevronDown className="h-3.5 w-3.5 shrink-0 text-gray-400" />
-                                    ) : (
-                                      <ChevronRight className="h-3.5 w-3.5 shrink-0 text-gray-400" />
-                                    )}
-                                    <Badge variant={isPaket ? "info" : "default"}>
-                                      {isPaket ? "Paket" : "Satuan"}
-                                    </Badge>
-                                    <span className="font-medium text-gray-800">{b.name}</span>
-                                    {b.barcodeNo ? (
-                                      <span className="font-mono text-xs font-semibold text-[#075489] bg-[#075489]/8 px-1.5 py-0.5 rounded">
-                                        {b.barcodeNo}
-                                      </span>
-                                    ) : (
-                                      <span className="text-xs text-gray-400">—</span>
-                                    )}
-                                    <span className="text-xs text-gray-400">{b.units.length} unit</span>
-                                    <span className="ml-auto flex items-center gap-2">
-                                      <span
-                                        className={
-                                          "text-xs " +
-                                          (soonest.alert ? "font-semibold text-red-600" : "text-gray-500")
-                                        }
-                                      >
-                                        {formatDate(soonest.expiry_date)}
-                                      </span>
-                                      {soonest.expired ? (
-                                        <Badge variant="danger">Kedaluwarsa</Badge>
-                                      ) : soonest.alert ? (
-                                        <Badge variant="danger">{soonest.days_to_expiry}h lagi</Badge>
-                                      ) : (
-                                        <Badge variant="success">Di Gudang</Badge>
-                                      )}
-                                    </span>
-                                  </button>
-                                  {popen && <div className="bg-gray-50/40">{b.units.map(renderUnitRow)}</div>}
-                                </div>
-                              )
-                            })
-                          })()}
+                                {popen &&
+                                  (isPaket ? (
+                                    /* Tingkat 3 — tiap SET: nama paket + nomor label kemasan.
+                                       Bisa dibuka lagi untuk melihat instrumen di dalamnya. */
+                                    <div className="bg-gray-50/40">
+                                      {kind.sets.map((set, i) => {
+                                        const skey = `${pkey}::${set.key}`
+                                        const sopen = q ? true : openSet.has(skey)
+                                        return (
+                                          <div key={skey} className="border-b border-gray-100 last:border-0">
+                                            <button
+                                              type="button"
+                                              onClick={() => toggleSet(skey)}
+                                              className="flex w-full flex-wrap items-center gap-x-2 gap-y-1 px-4 py-2 pl-8 text-sm hover:bg-gray-100/60"
+                                            >
+                                              {sopen ? (
+                                                <ChevronDown className="h-3.5 w-3.5 shrink-0 text-gray-400" />
+                                              ) : (
+                                                <ChevronRight className="h-3.5 w-3.5 shrink-0 text-gray-400" />
+                                              )}
+                                              <span className="text-gray-700">
+                                                {kind.name}
+                                                <span className="ml-1 text-xs text-gray-400">
+                                                  (set {i + 1})
+                                                </span>
+                                              </span>
+                                              {set.barcodeNo ? (
+                                                <span
+                                                  title="Nomor label kemasan"
+                                                  className="font-mono text-xs font-semibold text-[#4ba69d] bg-[#4ba69d]/10 px-1.5 py-0.5 rounded"
+                                                >
+                                                  {set.barcodeNo}
+                                                </span>
+                                              ) : (
+                                                <span className="text-xs text-gray-400">tanpa label</span>
+                                              )}
+                                              <span className="text-xs text-gray-400">
+                                                {set.units.length} unit
+                                              </span>
+                                              {renderExpiryMeta(set.units)}
+                                            </button>
+                                            {sopen && (
+                                              <div className="bg-white">{set.units.map(renderUnitRow)}</div>
+                                            )}
+                                          </div>
+                                        )
+                                      })}
+                                    </div>
+                                  ) : (
+                                    /* Satuan tidak punya tingkat set — langsung unitnya,
+                                       nomor labelnya menempel di tiap baris. */
+                                    <div className="bg-gray-50/40">{kind.units.map(renderUnitRow)}</div>
+                                  ))}
+                              </div>
+                            )
+                          })}
                         </div>
                       )}
                     </div>

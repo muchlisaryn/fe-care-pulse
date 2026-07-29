@@ -1,7 +1,8 @@
 "use client"
 
-import { useEffect, useState } from "react"
-import { Search } from "lucide-react"
+import { useEffect, useRef, useState } from "react"
+import { Download, Search, Upload } from "lucide-react"
+import * as XLSX from "xlsx"
 import { Button } from "@/components/atoms/Button"
 import { Input } from "@/components/atoms/Input"
 import { Label } from "@/components/atoms/Label"
@@ -60,6 +61,69 @@ const emptyEdit: EditForm = {
 
 const PER_PAGE = 20
 
+// Kolom berkas import/export. Urutannya juga dipakai sebagai template & header
+// yang dicocokkan saat membaca berkas (pencocokan tidak peka huruf besar/kecil).
+const IMPORT_COLUMNS = ["name", "username", "email", "no_telephone", "authority", "password"] as const
+
+// Baris dikirim ke server PER BATCH, bukan sekaligus: 1000+ baris jadi beberapa
+// request kecil sehingga tidak timeout & progresnya bisa ditampilkan. Harus ≤
+// batas IMPORT_CHUNK_MAX di UserController.
+const IMPORT_CHUNK = 100
+// Ekspor menarik daftar user halaman demi halaman dengan ukuran besar agar
+// jumlah request-nya sedikit.
+const EXPORT_PAGE_SIZE = 200
+
+type ImportRow = {
+  row: number
+  name: string
+  username: string
+  email: string
+  no_telephone: string
+  authority: string
+  password: string
+}
+
+type ImportError = { row: number; username: string | null; message: string }
+
+/**
+ * Ubah isi sheet (array of array) jadi baris import. Baris pertama dianggap header;
+ * kolom dicocokkan lewat NAMANYA, jadi urutan kolom di berkas boleh berbeda dan
+ * kolom tambahan diabaikan.
+ */
+function parseSheetRows(raw: unknown[][]): ImportRow[] {
+  if (raw.length === 0) return []
+
+  const header = (raw[0] ?? []).map((c) => String(c ?? "").trim().toLowerCase())
+  const indexOf = (name: string) => header.indexOf(name)
+  const cols = {
+    name: indexOf("name"),
+    username: indexOf("username"),
+    email: indexOf("email"),
+    no_telephone: indexOf("no_telephone"),
+    authority: indexOf("authority"),
+    password: indexOf("password"),
+  }
+  // Tanpa header yang dikenali, berkasnya bukan format yang diharapkan.
+  if (cols.name < 0 || cols.username < 0 || cols.email < 0) return []
+
+  const cell = (r: unknown[], i: number) => (i < 0 ? "" : String(r[i] ?? "").trim())
+
+  return raw
+    .slice(1)
+    .map((r, i) => ({
+      // +2: baris 1 adalah header & nomor baris spreadsheet mulai dari 1, supaya
+      // nomor pada laporan error cocok dengan yang dilihat user di Excel.
+      row: i + 2,
+      name: cell(r, cols.name),
+      username: cell(r, cols.username),
+      email: cell(r, cols.email),
+      no_telephone: cell(r, cols.no_telephone),
+      authority: cell(r, cols.authority),
+      password: cell(r, cols.password),
+    }))
+    .filter((r) => r.name || r.username || r.email)
+}
+
 export default function MasterUserPage() {
   const dispatch = useAppDispatch()
   const { items, totalItems, totalPages, page, search, loading, loaded, dirty } =
@@ -77,6 +141,23 @@ export default function MasterUserPage() {
   const [deleteTarget, setDeleteTarget] = useState<User | null>(null)
   const [deletingId, setDeletingId] = useState<number | null>(null)
 
+  // Export: menarik seluruh halaman daftar user lalu menyusun berkas di browser.
+  const [exporting, setExporting] = useState(false)
+  const [exportDone, setExportDone] = useState(0)
+  const [exportTotal, setExportTotal] = useState(0)
+
+  // Import: berkas di-parse di browser, dikirim per batch dengan progres.
+  const fileRef = useRef<HTMLInputElement>(null)
+  const [importOpen, setImportOpen] = useState(false)
+  const [importRows, setImportRows] = useState<ImportRow[] | null>(null)
+  const [importFileName, setImportFileName] = useState("")
+  const [defaultPassword, setDefaultPassword] = useState("")
+  const [importing, setImporting] = useState(false)
+  const [importDone, setImportDone] = useState(0)
+  const [importError, setImportError] = useState<string | null>(null)
+  const [importResult, setImportResult] = useState<{ created: number; failed: number } | null>(null)
+  const [importErrors, setImportErrors] = useState<ImportError[]>([])
+
   useEffect(() => {
     if (loaded && !dirty) return
     dispatch(fetchUsers())
@@ -93,6 +174,151 @@ export default function MasterUserPage() {
 
   function handlePageChange(p: number) {
     dispatch(setUserPage(p))
+  }
+
+  /**
+   * Export seluruh user ke .xlsx. Data ditarik HALAMAN DEMI HALAMAN (bukan sekali
+   * ambil semua) supaya server tidak diminta menyusun ribuan baris dalam satu
+   * response; progresnya ditampilkan di tombol.
+   */
+  async function handleExport() {
+    if (exporting) return
+    setExporting(true)
+    setExportDone(0)
+    setExportTotal(0)
+    try {
+      const rows: Record<string, string>[] = []
+      let current = 1
+      let last = 1
+      do {
+        const res = await api.get("/master/users", {
+          params: { page: current, per_page: EXPORT_PAGE_SIZE, search: search || undefined },
+        })
+        const p = res.data.data
+        last = p.last_page ?? 1
+        setExportTotal(p.total ?? 0)
+        for (const u of p.data as User[]) {
+          rows.push({
+            name: u.name ?? "",
+            username: u.username ?? "",
+            email: u.email ?? "",
+            no_telephone: u.no_telephone ?? "",
+            authority: u.authority?.name ?? "",
+          })
+        }
+        setExportDone(rows.length)
+        current += 1
+      } while (current <= last)
+
+      const sheet = XLSX.utils.json_to_sheet(rows, {
+        // Password sengaja TIDAK diekspor — hash-nya tidak berguna & tidak boleh
+        // ikut tersebar. Kolomnya tetap ada di template import.
+        header: ["name", "username", "email", "no_telephone", "authority"],
+      })
+      const wb = XLSX.utils.book_new()
+      XLSX.utils.book_append_sheet(wb, sheet, "User")
+      XLSX.writeFile(wb, `master-user-${new Date().toISOString().slice(0, 10)}.xlsx`)
+    } catch {
+      setImportError("Gagal mengekspor data user.")
+    } finally {
+      setExporting(false)
+    }
+  }
+
+  /** Unduh berkas contoh berisi header + satu baris isian. */
+  function handleDownloadTemplate() {
+    const sheet = XLSX.utils.aoa_to_sheet([
+      [...IMPORT_COLUMNS],
+      ["Budi Santoso", "budi", "budi@rsijpk.co.id", "08123456789", authorities[0]?.name ?? "Administrator", ""],
+    ])
+    const wb = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(wb, sheet, "Template")
+    XLSX.writeFile(wb, "template-import-user.xlsx")
+  }
+
+  function openImport() {
+    setImportRows(null)
+    setImportFileName("")
+    setImportError(null)
+    setImportResult(null)
+    setImportErrors([])
+    setImportDone(0)
+    setImportOpen(true)
+  }
+
+  /** Baca berkas di browser → tampilkan ringkasannya; belum dikirim ke server. */
+  async function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    // Reset input agar berkas yang sama bisa dipilih ulang.
+    e.target.value = ""
+    if (!file) return
+
+    setImportError(null)
+    setImportResult(null)
+    setImportErrors([])
+    setImportRows(null)
+    try {
+      const buf = await file.arrayBuffer()
+      const wb = XLSX.read(buf, { type: "array" })
+      const sheet = wb.Sheets[wb.SheetNames[0]]
+      const raw = XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1, blankrows: false })
+      const parsed = parseSheetRows(raw)
+
+      if (parsed.length === 0) {
+        setImportError(
+          "Berkas tidak berisi data user yang bisa dibaca. Header wajib memuat kolom: name, username, email.",
+        )
+        return
+      }
+
+      setImportFileName(file.name)
+      setImportRows(parsed)
+    } catch {
+      setImportError("Gagal membaca berkas. Pastikan formatnya Excel (.xlsx/.xls) atau CSV.")
+    }
+  }
+
+  /**
+   * Kirim baris hasil parse ke server PER BATCH. Batch berikutnya baru dikirim
+   * setelah batch sebelumnya selesai, jadi beban server rata & progresnya nyata
+   * (bukan animasi palsu). Baris yang gagal dikumpulkan tanpa menghentikan sisanya.
+   */
+  async function handleConfirmImport() {
+    if (!importRows || importing) return
+    if (defaultPassword.trim().length < 8) {
+      setImportError("Password default wajib diisi, minimal 8 karakter.")
+      return
+    }
+
+    setImporting(true)
+    setImportError(null)
+    setImportDone(0)
+    try {
+      let created = 0
+      const failedRows: ImportError[] = []
+
+      for (let i = 0; i < importRows.length; i += IMPORT_CHUNK) {
+        const chunk = importRows.slice(i, i + IMPORT_CHUNK)
+        const res = await api.post("/master/users/import", {
+          rows: chunk,
+          default_password: defaultPassword.trim(),
+        })
+        const r = res.data.data as { created: number; errors?: ImportError[] }
+        created += r.created
+        if (r.errors?.length) failedRows.push(...r.errors)
+        setImportDone(Math.min(i + IMPORT_CHUNK, importRows.length))
+      }
+
+      setImportResult({ created, failed: failedRows.length })
+      setImportErrors(failedRows)
+      setImportRows(null)
+      dispatch(invalidateUsers())
+    } catch (err) {
+      const x = err as { response?: { data?: { message?: string } } }
+      setImportError(x.response?.data?.message ?? "Gagal mengimpor berkas.")
+    } finally {
+      setImporting(false)
+    }
   }
 
   function openTambah() {
@@ -220,9 +446,38 @@ export default function MasterUserPage() {
     <div className="space-y-6">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <PageHeader title="Master User" subtitle="Kelola data pengguna sistem" />
-        <Button onClick={openTambah} className="bg-[#075489] hover:bg-[#075489]/90 text-white">
-          + Tambah User
-        </Button>
+        <div className="flex flex-col gap-2 sm:flex-row">
+          <input
+            ref={fileRef}
+            type="file"
+            accept=".xlsx,.xls,.csv"
+            className="hidden"
+            onChange={handleFile}
+          />
+          <Button
+            variant="outline"
+            onClick={handleExport}
+            disabled={exporting}
+            className="border-[#4ba69d] text-[#4ba69d] hover:bg-[#4ba69d]/10"
+          >
+            <Download className="h-4 w-4" />
+            {exporting
+              ? `Mengekspor… ${exportDone}${exportTotal ? `/${exportTotal}` : ""}`
+              : "Export Excel"}
+          </Button>
+          <Button
+            variant="outline"
+            onClick={openImport}
+            disabled={importing}
+            className="border-[#075489] text-[#075489] hover:bg-[#075489]/10"
+          >
+            <Upload className="h-4 w-4" />
+            Import Excel
+          </Button>
+          <Button onClick={openTambah} className="bg-[#075489] hover:bg-[#075489]/90 text-white">
+            + Tambah User
+          </Button>
+        </div>
       </div>
 
       <Card className="p-0">
@@ -265,6 +520,147 @@ export default function MasterUserPage() {
           onPageChange={handlePageChange}
         />
       </Card>
+
+      {/* Import Excel — berkas dibaca di browser, dikirim per batch dengan progres. */}
+      <Modal
+        open={importOpen}
+        onClose={() => !importing && setImportOpen(false)}
+        title="Import User"
+        size="md"
+        footer={
+          <>
+            <Button variant="outline" onClick={() => setImportOpen(false)} disabled={importing}>
+              {importResult ? "Tutup" : "Batal"}
+            </Button>
+            {importRows && (
+              <Button
+                onClick={handleConfirmImport}
+                disabled={importing}
+                className="bg-[#075489] hover:bg-[#075489]/90 text-white"
+              >
+                {importing ? "Mengimpor..." : `Import ${importRows.length} baris`}
+              </Button>
+            )}
+          </>
+        }
+      >
+        <div className="space-y-4">
+          <div className="rounded-lg bg-gray-50 px-4 py-3 text-sm text-gray-600">
+            <p className="font-medium text-gray-700">Format berkas</p>
+            <p className="mt-1">
+              Header wajib: <span className="font-mono text-xs">name</span>,{" "}
+              <span className="font-mono text-xs">username</span>,{" "}
+              <span className="font-mono text-xs">email</span>. Opsional:{" "}
+              <span className="font-mono text-xs">no_telephone</span>,{" "}
+              <span className="font-mono text-xs">authority</span> (nama otoritas),{" "}
+              <span className="font-mono text-xs">password</span>.
+            </p>
+            <button
+              type="button"
+              onClick={handleDownloadTemplate}
+              className="mt-2 inline-flex items-center gap-1 text-xs font-medium text-[#075489] hover:underline"
+            >
+              <Download className="h-3.5 w-3.5" /> Unduh template
+            </button>
+          </div>
+
+          <div className="space-y-1.5">
+            <Label htmlFor="import-default-password">Password default</Label>
+            <Input
+              id="import-default-password"
+              type="password"
+              value={defaultPassword}
+              onChange={(e) => setDefaultPassword(e.target.value)}
+              placeholder="Minimal 8 karakter"
+              disabled={importing}
+            />
+            <p className="text-xs text-gray-400">
+              Dipakai untuk baris yang kolom <span className="font-mono">password</span>-nya kosong.
+            </p>
+          </div>
+
+          <div>
+            <Button
+              variant="outline"
+              onClick={() => fileRef.current?.click()}
+              disabled={importing}
+              className="w-full border-dashed border-gray-300 text-gray-600 hover:bg-gray-50"
+            >
+              <Upload className="h-4 w-4" />
+              {importFileName || "Pilih berkas Excel / CSV"}
+            </Button>
+            {importRows && !importing && (
+              <p className="mt-2 text-sm text-gray-600">
+                <span className="font-semibold text-gray-800">{importRows.length}</span> baris siap
+                diimport, dikirim {IMPORT_CHUNK} baris per batch.
+              </p>
+            )}
+          </div>
+
+          {/* Progres nyata: bertambah tiap batch selesai dikirim. */}
+          {importing && importRows && (
+            <div className="space-y-1.5">
+              <div className="flex justify-between text-xs text-gray-500">
+                <span>Mengimpor…</span>
+                <span>
+                  {importDone} / {importRows.length}
+                </span>
+              </div>
+              <div className="h-2 w-full overflow-hidden rounded-full bg-gray-100">
+                <div
+                  className="h-full rounded-full bg-[#075489] transition-all duration-300"
+                  style={{ width: `${Math.round((importDone / importRows.length) * 100)}%` }}
+                />
+              </div>
+            </div>
+          )}
+
+          {importError && (
+            <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-600">
+              {importError}
+            </div>
+          )}
+
+          {importResult && (
+            <div className="space-y-2">
+              <div className="rounded-lg border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-700">
+                Berhasil menambahkan <span className="font-semibold">{importResult.created}</span> user.
+                {importResult.failed > 0 && (
+                  <>
+                    {" "}
+                    <span className="font-semibold text-red-600">{importResult.failed}</span> baris
+                    gagal.
+                  </>
+                )}
+              </div>
+              {importErrors.length > 0 && (
+                <div className="max-h-56 overflow-y-auto rounded-lg border border-gray-200">
+                  <table className="w-full border-collapse text-left text-sm">
+                    <thead className="bg-gray-50">
+                      <tr className="text-[11px] font-semibold uppercase tracking-wide text-gray-400">
+                        <th className="px-3 py-2">Baris</th>
+                        <th className="px-3 py-2">Username</th>
+                        <th className="px-3 py-2">Alasan</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {importErrors.map((e, i) => (
+                        <tr key={i} className="border-t border-gray-100">
+                          <td className="px-3 py-2 text-gray-600">{e.row}</td>
+                          <td className="px-3 py-2 text-gray-800">
+                            {e.username || <span className="text-xs text-gray-400">—</span>}
+                          </td>
+                          <td className="px-3 py-2 text-red-600">{e.message}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      </Modal>
 
       <ConfirmDialog
         open={deleteTarget !== null}

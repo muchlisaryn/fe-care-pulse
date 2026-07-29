@@ -30,8 +30,10 @@ function pickBackCamera(cameras: { id: string; label: string }[]): string | null
  * ditutup / setelah satu pindaian berhasil. Kamera yang dipakai selalu yang
  * BELAKANG (lihat urutan percobaan di dalam efek).
  *
- * Catatan: akses kamera butuh secure context (https atau localhost). Di jaringan
- * lewat http IP biasa, browser memblokir getUserMedia — jalankan `npm run dev:https`.
+ * Catatan: akses kamera butuh secure context (https atau localhost). Bila halaman
+ * dibuka lewat http biasa (IP LAN / domain produksi tanpa TLS), `mediaDevices`
+ * tidak ada sama sekali — saat pengembangan pakai `npm run dev:https`, di server
+ * pasang sertifikat di web server-nya.
  */
 export function QrScannerModal({ open, onClose, onScan, title = "Scan QR", hint }: QrScannerModalProps) {
   // Id unik & stabil per instance untuk elemen target html5-qrcode.
@@ -49,62 +51,73 @@ export function QrScannerModal({ open, onClose, onScan, title = "Scan QR", hint 
     let scanner: import("html5-qrcode").Html5Qrcode | null = null
     let stopped = false
 
-    // Import dinamis agar tak dibundel di SSR & hanya jalan di browser.
-    import("html5-qrcode")
-      .then(async ({ Html5Qrcode }) => {
-        if (stopped) return
-        setError(null)
-        scanner = new Html5Qrcode(regionId, /* verbose */ false)
-        const config = { fps: 10, qrbox: { width: 240, height: 240 } }
-        const onDecoded = (decodedText: string) => {
+    // Halaman non-secure (http selain localhost): `mediaDevices` tidak ada sama
+    // sekali, jadi pemindainya tak perlu dimuat. Penyebabnya disampaikan lewat
+    // rantai promise yang sama agar pesannya tetap satu jalur.
+    // typeof, bukan sekadar cek truthy: tipe bawaan TS menganggap `mediaDevices`
+    // selalu ada, padahal di halaman non-secure objeknya memang tidak dibuat.
+    const start = typeof navigator.mediaDevices?.getUserMedia === "function"
+      ? // Import dinamis agar tak dibundel di SSR & hanya jalan di browser.
+        import("html5-qrcode").then(async ({ Html5Qrcode }) => {
           if (stopped) return
-          stopped = true
-          onScanRef.current(decodedText)
-          // Hentikan kamera lalu tutup modal.
-          scanner?.stop().catch(() => {}).finally(() => onClose())
-        }
-        // Error per-frame (tidak menemukan kode) — abaikan, ini normal.
-        const onFrameError = () => {}
+          setError(null)
+          scanner = new Html5Qrcode(regionId, /* verbose */ false)
+          const config = { fps: 10, qrbox: { width: 240, height: 240 } }
+          const onDecoded = (decodedText: string) => {
+            if (stopped) return
+            stopped = true
+            onScanRef.current(decodedText)
+            // Hentikan kamera lalu tutup modal.
+            scanner?.stop().catch(() => {}).finally(() => onClose())
+          }
+          // Error per-frame (tidak menemukan kode) — abaikan, ini normal.
+          const onFrameError = () => {}
 
-        /**
-         * Nyalakan kamera tertentu. `true` bila berhasil. Bila modal keburu ditutup
-         * saat kamera masih menyala, kameranya langsung dimatikan lagi (cleanup efek
-         * sudah lewat sebelum start selesai).
-         */
-        const tryStart = async (camera: string | MediaTrackConstraints) => {
-          await scanner!.start(camera, config, onDecoded, onFrameError)
-          if (stopped) await scanner!.stop().catch(() => {})
-          return true
-        }
+          /**
+           * Nyalakan kamera tertentu. `true` bila berhasil. Bila modal keburu ditutup
+           * saat kamera masih menyala, kameranya langsung dimatikan lagi (cleanup efek
+           * sudah lewat sebelum start selesai).
+           */
+          const tryStart = async (camera: string | MediaTrackConstraints) => {
+            await scanner!.start(camera, config, onDecoded, onFrameError)
+            if (stopped) await scanner!.stop().catch(() => {})
+            return true
+          }
 
-        // Urutan percobaan agar kamera BELAKANG yang terpakai — bukan kamera depan:
-        // 1) `exact: "environment"` → browser WAJIB memakai kamera belakang;
-        // 2) pilih deviceId kamera belakang dari daftar kamera (lewat labelnya);
-        // 3) `facingMode: "environment"` biasa — sekadar preferensi, jalan terakhir
-        //    untuk perangkat berkamera tunggal (mis. laptop).
-        try {
-          if (await tryStart({ facingMode: { exact: "environment" } })) return
-        } catch {
-          if (stopped) return
-        }
+          // Urutan percobaan agar kamera BELAKANG yang terpakai — bukan kamera depan:
+          // 1) `exact: "environment"` → browser WAJIB memakai kamera belakang;
+          // 2) pilih deviceId kamera belakang dari daftar kamera (lewat labelnya);
+          // 3) `facingMode: "environment"` biasa — sekadar preferensi, jalan terakhir
+          //    untuk perangkat berkamera tunggal (mis. laptop).
+          try {
+            if (await tryStart({ facingMode: { exact: "environment" } })) return
+          } catch {
+            if (stopped) return
+          }
 
-        try {
-          const backId = pickBackCamera(await Html5Qrcode.getCameras())
-          if (stopped) return
-          if (backId && (await tryStart(backId))) return
-        } catch {
-          if (stopped) return
-        }
+          try {
+            const backId = pickBackCamera(await Html5Qrcode.getCameras())
+            if (stopped) return
+            if (backId && (await tryStart(backId))) return
+          } catch {
+            if (stopped) return
+          }
 
-        await tryStart({ facingMode: "environment" })
-      })
-      .catch((e: unknown) => {
-        if (stopped) return
-        const msg =
-          (e as { message?: string })?.message ??
-          "Tidak bisa mengakses kamera. Pastikan izin kamera aktif & memakai https/localhost."
-        setError(msg)
-      })
+          await tryStart({ facingMode: "environment" })
+        })
+      : Promise.reject(
+          new Error(
+            "Kamera tidak tersedia karena halaman ini dibuka lewat http. Buka lewat https (atau localhost) agar kamera bisa dipakai.",
+          ),
+        )
+
+    start.catch((e: unknown) => {
+      if (stopped) return
+      const msg =
+        (e as { message?: string })?.message ??
+        "Tidak bisa mengakses kamera. Pastikan izin kamera aktif & memakai https/localhost."
+      setError(msg)
+    })
 
     return () => {
       stopped = true
