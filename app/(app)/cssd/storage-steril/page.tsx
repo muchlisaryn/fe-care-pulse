@@ -516,10 +516,23 @@ function StorageSterilPage() {
           </span>
           <span className="truncate text-gray-700">{r.unit.instrument ?? "—"}</span>
         </div>
-        {/* Kanan: nomor label kemasan + meta (rak/batch). Kedaluwarsa TIDAK diulang
-            per unit — sama untuk seluruh isi bungkus, jadi cukup tampil sekali di
-            kepala grup. */}
+        {/* Kanan: kedaluwarsa + nomor label kemasan + meta (rak/batch). Kepala grup
+            hanya menampilkan kedaluwarsa TERDEKAT, padahal satu rak (dan satu jenis
+            satuan) bisa berisi unit dengan tanggal berbeda-beda — jadi tanggalnya
+            tetap dicantumkan per unit. */}
         <div className="flex flex-wrap items-center gap-2">
+          {r.expiry_date ? (
+            <span
+              title="Tanggal kedaluwarsa"
+              className={"text-xs " + (r.alert ? "font-semibold text-red-600" : "text-gray-500")}
+            >
+              {formatDate(r.expiry_date)}
+            </span>
+          ) : (
+            <span title="Tanpa tanggal kedaluwarsa" className="text-gray-400 text-xs">
+              —
+            </span>
+          )}
           {r.barcode_no ? (
             <span
               title="Nomor label kemasan"
@@ -735,10 +748,11 @@ function StorageSterilPage() {
                         <span className="font-semibold text-gray-800">{g.key}</span>
                         <span className="text-xs text-gray-400">{g.items.length} unit</span>
                         {g.alertCount > 0 && (
-                          <Badge variant="danger" className="ml-auto">
-                            {g.alertCount} perlu perhatian
-                          </Badge>
+                          <Badge variant="danger">{g.alertCount} perlu perhatian</Badge>
                         )}
+                        {/* Kedaluwarsa TERDEKAT di rak/batch ini — satu-satunya keterangan
+                            kedaluwarsa yang terlihat selagi grupnya masih tertutup. */}
+                        {renderExpiryMeta(g.items)}
                       </button>
                       {open && (
                         <div className="border-t border-gray-100">
