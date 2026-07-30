@@ -237,7 +237,11 @@ export default function OrderInstrumenPage() {
   const authName = useAppSelector((s) => s.auth.name)
   const [pinjamTarget, setPinjamTarget] = useState<PinjamTarget | null>(null)
   const [pinjamRoomId, setPinjamRoomId] = useState("")
-  const [pinjamBorrowedBy, setPinjamBorrowedBy] = useState("")
+  // Nama peminjam pinjam-alih SELALU user yang sedang login — tidak bisa diganti,
+  // karena yang meminta pinjam adalah akun ini sendiri (backend juga mencatat
+  // requested_by_user_id dari akun login). Diturunkan, bukan state, supaya tidak
+  // mungkin melenceng dari sesi yang aktif.
+  const pinjamBorrowedBy = authName ?? ""
   // Pinjam-alih bisa untuk pasien berbeda dari order sumber → dicatat per permintaan.
   const [pinjamMedicalRecordNo, setPinjamMedicalRecordNo] = useState("")
   const [pinjamPatientName, setPinjamPatientName] = useState("")
@@ -356,8 +360,6 @@ export default function OrderInstrumenPage() {
       })),
     })
     setPinjamRoomId("")
-    // Default nama peminjam = user yang sedang login.
-    setPinjamBorrowedBy(authName ?? "")
     // Pasien dikosongkan — peminjam baru mengisi pasien tujuan pinjam-alih.
     setPinjamMedicalRecordNo("")
     setPinjamPatientName("")
@@ -441,8 +443,8 @@ export default function OrderInstrumenPage() {
             Menunggu ACC{mine.to_room ? ` → ${mine.to_room}` : ""}
           </Badge>
           <Button
-            variant="outline"
-            className="h-8 px-3 text-xs border-red-300 text-red-600 hover:bg-red-50"
+            variant="destructive"
+            className="h-8 px-3 text-xs"
             disabled={cancellingId === mine.transfer_id}
             onClick={() => handleCancelPinjam(mine.transfer_id)}
           >
@@ -1070,13 +1072,13 @@ export default function OrderInstrumenPage() {
 
                 <div className="space-y-1">
                   <label className="text-xs font-semibold uppercase tracking-wide text-gray-400">
-                    Nama Peminjam <span className="text-red-500">*</span>
+                    Nama Peminjam
                   </label>
-                  <Input
-                    placeholder="Nama peminjam baru"
-                    value={pinjamBorrowedBy}
-                    onChange={(e) => setPinjamBorrowedBy(e.target.value)}
-                  />
+                  {/* Terkunci: yang mengajukan pinjam-alih adalah akun yang login. */}
+                  <Input value={pinjamBorrowedBy} readOnly disabled />
+                  <p className="text-xs text-gray-400">
+                    Otomatis terisi dari akun yang sedang login.
+                  </p>
                 </div>
 
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">

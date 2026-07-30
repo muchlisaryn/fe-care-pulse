@@ -13,6 +13,7 @@ import {
   ChevronRight,
   ZoomIn,
   X,
+  Asterisk,
 } from "lucide-react"
 import { Input } from "@/components/atoms/Input"
 import { Button } from "@/components/atoms/Button"
@@ -457,14 +458,35 @@ function StorageSterilPage() {
     )
   }
 
-  /** Unit dengan kedaluwarsa paling dekat — mewakili status seluruh grup. */
+  /** Unit dengan kedaluwarsa paling dekat — mewakili status satu bungkus. */
   function soonestOf(units: StorageInventoryRow[]) {
     return units.reduce((a, u) =>
       (u.days_to_expiry ?? Infinity) < (a.days_to_expiry ?? Infinity) ? u : a,
     )
   }
 
-  /** Tanggal kedaluwarsa + badge status, dipakai di kepala tiap grup. */
+  /**
+   * Penanda ringkas di kepala grup: bintang merah bila ada isi yang perlu perhatian,
+   * yaitu unit yang sudah masuk H-7 steril (termasuk yang sudah lewat) — `alert` dari
+   * server memakai ambang hari yang sama. Sengaja tanpa angka & tanpa tanggal: satu
+   * grup berisi banyak tanggal berbeda, jadi cukup penanda ada/tidak.
+   */
+  function renderAlertMark(units: StorageInventoryRow[]) {
+    if (!units.some((u) => u.alert)) return null
+    return (
+      <Asterisk
+        className="ml-auto h-4 w-4 shrink-0 text-red-600"
+        aria-label="Ada unit yang perlu perhatian (H-7 steril)"
+      />
+    )
+  }
+
+  /**
+   * Tanggal kedaluwarsa + badge status untuk satu SET/bungkus (baris bernomor label
+   * kemasan). Hanya dipakai di tingkat itu — bukan di kepala rak/batch atau jenis
+   * instrumen, karena satu rak bisa berisi banyak tanggal berbeda sehingga satu
+   * tanggal di sana menyesatkan. Di dalam satu bungkus, tanggalnya memang seragam.
+   */
   function renderExpiryMeta(units: StorageInventoryRow[]) {
     const s = soonestOf(units)
     return (
@@ -516,8 +538,8 @@ function StorageSterilPage() {
           </span>
           <span className="truncate text-gray-700">{r.unit.instrument ?? "—"}</span>
         </div>
-        {/* Kanan: kedaluwarsa + nomor label kemasan + meta (rak/batch). Kepala grup
-            hanya menampilkan kedaluwarsa TERDEKAT, padahal satu rak (dan satu jenis
+        {/* Kanan: kedaluwarsa + nomor label kemasan. Kepala grup hanya menandai
+            ada/tidaknya isi yang perlu perhatian, padahal satu rak (dan satu jenis
             satuan) bisa berisi unit dengan tanggal berbeda-beda — jadi tanggalnya
             tetap dicantumkan per unit. */}
         <div className="flex flex-wrap items-center gap-2">
@@ -543,30 +565,16 @@ function StorageSterilPage() {
           ) : (
             <span className="text-xs text-gray-400">—</span>
           )}
-          {/* Reservasi baris gudang: order_id kosong = masih pool produksi (bebas
-              dialokasikan ke order berikutnya), terisi = sudah dipesan order. */}
-          {r.order ? (
-            <span
-              title="Sudah direservasi untuk order ini"
-              className="font-mono text-xs font-semibold text-amber-700 bg-amber-100 px-1.5 py-0.5 rounded"
-            >
-              {r.order.code_transaction ?? r.order.code}
-            </span>
-          ) : (
-            <span
-              title="Belum dialokasikan ke order manapun (stok pool produksi)"
-              className="text-xs font-medium text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded"
-            >
-              Bebas
-            </span>
-          )}
+          {/* Penanda reservasi ("Bebas" / kode order) dan kode batch sterilisasi
+              sengaja tidak ditampilkan di sini. Daftar ini hanya berisi baris
+              ber-`order_id` null, jadi seluruhnya memang bebas — penandanya tak
+              menambah informasi. */}
           {groupBy === "batch" && (
             <span className="inline-flex items-center gap-1 text-xs text-gray-500">
               <MapPin className="h-3 w-3" />
               {r.rack_code}
             </span>
           )}
-          {groupBy === "rak" && r.batch && <span className="font-mono text-xs text-gray-500">{r.batch}</span>}
         </div>
       </div>
     )
@@ -747,12 +755,12 @@ function StorageSterilPage() {
                         )}
                         <span className="font-semibold text-gray-800">{g.key}</span>
                         <span className="text-xs text-gray-400">{g.items.length} unit</span>
-                        {g.alertCount > 0 && (
-                          <Badge variant="danger">{g.alertCount} perlu perhatian</Badge>
-                        )}
-                        {/* Kedaluwarsa TERDEKAT di rak/batch ini — satu-satunya keterangan
-                            kedaluwarsa yang terlihat selagi grupnya masih tertutup. */}
-                        {renderExpiryMeta(g.items)}
+                        {/* Kedaluwarsa TIDAK ditampilkan di tingkat rak/batch maupun
+                            jenis instrumen: satu rak berisi banyak tanggal berbeda,
+                            sehingga satu tanggal di sini menyesatkan. Cukup bintang
+                            merah sebagai penanda; tanggal lengkapnya ada di tiap
+                            bungkus (bernomor label) & unitnya. */}
+                        {renderAlertMark(g.items)}
                       </button>
                       {open && (
                         <div className="border-t border-gray-100">
@@ -780,7 +788,7 @@ function StorageSterilPage() {
                                   <span className="text-xs text-gray-400">
                                     {isPaket ? `${kind.sets.length} set` : `${kind.units.length} unit`}
                                   </span>
-                                  {renderExpiryMeta(kind.units)}
+                                  {renderAlertMark(kind.units)}
                                 </button>
 
                                 {popen &&

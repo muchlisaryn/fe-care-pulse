@@ -1,6 +1,6 @@
 "use client"
 
-import { Fragment, useEffect, useState } from "react"
+import { Fragment, useEffect, useMemo, useState } from "react"
 import { useRouter } from "next/navigation"
 import { ChevronRight, Plus, Minus } from "lucide-react"
 import { Button } from "@/components/atoms/Button"
@@ -15,6 +15,7 @@ import { FormSectionHeader } from "@/components/molecules/FormSectionHeader"
 import { useAppDispatch, useAppSelector } from "@/lib/store/hooks"
 import { fetchRoomOptions } from "@/lib/store/slices/roomSlice"
 import { invalidateOrders } from "@/lib/store/slices/orderSlice"
+import { useUserOptions } from "@/lib/useUserOptions"
 import api from "@/lib/axios"
 
 // Jenis instrumen (master) — dipakai untuk permintaan satuan.
@@ -69,13 +70,26 @@ export default function TambahOrderInstrumenPage() {
   const dispatch = useAppDispatch()
 
   const rooms = useAppSelector((s) => s.rooms.options)
+  // Pilihan ruangan di-cache di Redux: `optionsLoaded` baru true setelah
+  // fetchRoomOptions selesai, dan tetap true saat halaman dibuka lagi (tidak
+  // memuat ulang) — jadi dropdown hanya terkunci pada pemuatan pertama.
+  const roomLoading = useAppSelector((s) => !s.rooms.optionsLoaded)
   const roomOptions = rooms.map((r) => ({
     value: String(r.id),
     label: r.layanan ? `${r.name} · ${LAYANAN_LABEL[r.layanan]}` : r.name,
   }))
 
+  // Identitas sesi login — dipakai sebagai nilai awal "Dipinjam Oleh".
+  const authUsername = useAppSelector((s) => s.auth.username)
+  const authName = useAppSelector((s) => s.auth.name)
+
   const [roomId, setRoomId] = useState("")
+  // Berisi USERNAME peminjam terpilih, bukan nama — lihat useUserOptions. Kosong
+  // berarti "belum dipilih", dan nilai efektifnya jatuh ke user yang sedang login
+  // (lihat `borrowerUsername`). Diturunkan saat render, bukan lewat useEffect, agar
+  // tidak memicu render berantai saat sesi login selesai dimuat.
   const [borrowedBy, setBorrowedBy] = useState("")
+  const { options: userOptions, loading: userLoading, nameOf } = useUserOptions()
   const [medicalRecordNo, setMedicalRecordNo] = useState("")
   const [patientName, setPatientName] = useState("")
   const [orderDate, setOrderDate] = useState("")
@@ -140,6 +154,7 @@ export default function TambahOrderInstrumenPage() {
       .finally(() => {
         if (active) setCatalogLoading(false)
       })
+
     return () => {
       active = false
     }
@@ -154,11 +169,29 @@ export default function TambahOrderInstrumenPage() {
 
   // Order = peminjaman barang yang SUDAH STERIL. Hanya tampilkan instrumen yang
   // punya stok steril (sudah disterilkan & tersimpan di gudang steril).
+  // Peminjam efektif: pilihan petugas, atau user yang sedang login sebagai default.
+  const borrowerUsername = borrowedBy || authUsername || ""
+
+  // Yang disimpan server pada `borrowed_by` adalah NAMA, bukan username. Saat daftar
+  // user belum selesai dimuat, nama diambil dari sesi login agar nilai default tidak
+  // hilang bila petugas langsung menyimpan.
+  const borrowerName = useMemo(() => {
+    const mapped = nameOf(borrowerUsername)
+    if (mapped && mapped !== borrowerUsername) return mapped
+    if (borrowerUsername && borrowerUsername === authUsername) return authName ?? borrowerUsername
+    return borrowerUsername || null
+    // nameOf identitasnya berubah tiap render (bukan useCallback); yang menentukan
+    // hasilnya adalah userOptions, jadi itu yang dijadikan penanda perubahan.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [userOptions, borrowerUsername, authUsername, authName])
+
+  // Label pilihan: NAMA + ketersediaan saja, tanpa kode instrumen — peminjam
+  // mengenali barang dari namanya, bukan dari kode internal CSSD.
   const instrumentOptions = instruments
     .filter((i) => (i.available_sterile_count ?? 0) > 0)
     .map((i) => ({
       value: String(i.id),
-      label: `${i.code ? `${i.code} (${i.name})` : i.name} Tersedia ${i.available_sterile_count}`,
+      label: `${i.name} Tersedia ${i.available_sterile_count}`,
     }))
 
   // Hanya paket yang seluruh komponennya bisa dipenuhi dari stok steril.
@@ -166,8 +199,6 @@ export default function TambahOrderInstrumenPage() {
     .filter((c) => (c.available_sterile_sets ?? 0) > 0)
     .map((c) => ({
       value: String(c.id),
-      // Kode katalog paket praktis kembar dengan namanya (SET-PARTUS / SET PARTUS),
-      // jadi cukup nama saja — tidak seperti instrumen satuan yang kodenya berbeda.
       label: `${c.name} Tersedia ${c.available_sterile_sets} Set`,
     }))
 
@@ -279,7 +310,7 @@ export default function TambahOrderInstrumenPage() {
   // Wajib: peminjam, ruangan, tanggal + jam pinjam, minimal 1 permintaan, dan
   // (khusus rawat inap) identitas pasien. Opsional: Rencana Kembali & Catatan.
   const canSubmit =
-    borrowedBy.trim() &&
+    borrowerUsername.trim() &&
     roomId &&
     orderDate &&
     orderTime &&
@@ -310,7 +341,7 @@ export default function TambahOrderInstrumenPage() {
     try {
       await api.post("/master/orders", {
         room_id: Number(roomId),
-        borrowed_by: borrowedBy.trim() || null,
+        borrowed_by: borrowerName,
         // Identitas pasien hanya dikirim untuk layanan rawat inap.
         medical_record_no: needPatient ? medicalRecordNo.trim() || null : null,
         patient_name: needPatient ? patientName.trim() || null : null,
@@ -366,14 +397,17 @@ export default function TambahOrderInstrumenPage() {
         {/* Peminjam & ruangan */}
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <div className="space-y-1.5">
-            <Label htmlFor="dipinjam">
+            <Label>
               Dipinjam Oleh <span className="text-red-500">*</span>
             </Label>
-            <Input
-              id="dipinjam"
-              value={borrowedBy}
-              onChange={(e) => setBorrowedBy(e.target.value)}
-              placeholder="Nama peminjam"
+            <SelectSearch
+              options={userOptions}
+              value={borrowerUsername}
+              onChange={setBorrowedBy}
+              loading={userLoading}
+              disabled={userLoading}
+              placeholder="-- Pilih Peminjam --"
+              searchPlaceholder="Cari nama peminjam..."
             />
           </div>
 
@@ -385,6 +419,8 @@ export default function TambahOrderInstrumenPage() {
               options={roomOptions}
               value={roomId}
               onChange={setRoomId}
+              loading={roomLoading}
+              disabled={roomLoading}
               placeholder="-- Pilih Ruangan --"
             />
           </div>
@@ -529,8 +565,9 @@ export default function TambahOrderInstrumenPage() {
                   options={instrumentOptions}
                   value={newInstrumentId}
                   onChange={setNewInstrumentId}
+                  loading={instrumentLoading}
                   disabled={instrumentLoading}
-                  placeholder={instrumentLoading ? "Memuat instrumen..." : "-- Pilih instrumen --"}
+                  placeholder="-- Pilih instrumen --"
                 />
               </div>
             ) : (
@@ -540,8 +577,9 @@ export default function TambahOrderInstrumenPage() {
                   options={catalogOptions}
                   value={newCatalogId}
                   onChange={handleSelectCatalog}
+                  loading={catalogLoading}
                   disabled={catalogLoading}
-                  placeholder={catalogLoading ? "Memuat paket..." : "-- Pilih paket --"}
+                  placeholder="-- Pilih paket --"
                 />
               </div>
             )}

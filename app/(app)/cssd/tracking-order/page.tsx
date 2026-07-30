@@ -41,6 +41,8 @@ import {
 } from "@/lib/store/slices/monitoringSlice"
 import { fetchReadyToDistribute } from "@/lib/store/slices/distributeSlice"
 import { DistributeReady } from "@/components/molecules/DistributeReady"
+import { SelectSearch } from "@/components/atoms/SelectSearch"
+import { useUserOptions } from "@/lib/useUserOptions"
 import api from "@/lib/axios"
 import { getEcho } from "@/lib/echo"
 
@@ -386,7 +388,14 @@ function MonitoringCssd() {
   const [lookupLoading, setLookupLoading] = useState(false)
   const [returnOrder, setReturnOrder] = useState<ReturnOrder | null>(null)
   const [returnError, setReturnError] = useState<string | null>(null)
+  // Berisi USERNAME pengembali terpilih, bukan nama — lihat useUserOptions.
   const [returnedBy, setReturnedBy] = useState("")
+  const {
+    loading: userLoading,
+    nameOf: userNameOf,
+    usernameOf: userUsernameOf,
+    optionsWith: userOptionsWith,
+  } = useUserOptions()
   const [returnDate, setReturnDate] = useState("")
   const [returnCondById, setReturnCondById] = useState<Record<number, string>>({})
   const [returnSaving, setReturnSaving] = useState(false)
@@ -425,7 +434,9 @@ function MonitoringCssd() {
       } else {
         setReturnOrder(order)
         setReturnDate(order.return_actual_date?.slice(0, 10) || todayInput())
-        setReturnedBy(order.returned_by ?? order.borrowed_by ?? "")
+        // Kolomnya menyimpan NAMA; dicarikan username-nya agar dropdown menampilkan
+        // "nama (nopeg)" dan opsinya benar-benar terpilih.
+        setReturnedBy(userUsernameOf(order.returned_by ?? order.borrowed_by ?? ""))
       }
     } catch (err) {
       const x = err as { response?: { data?: { message?: string } } }
@@ -468,7 +479,7 @@ function MonitoringCssd() {
         condition_in_id: Number(returnCondById[u.id]),
       }))
       const res = await api.put(`/master/orders/${returnOrder.id}`, {
-        returned_by: returnedBy.trim() || null,
+        returned_by: userNameOf(returnedBy).trim() || null,
         return_actual_date: returnDate || null,
         items,
       })
@@ -603,7 +614,9 @@ function MonitoringCssd() {
         openReturn()
         setReturnOrder(order)
         setReturnDate(order.return_actual_date?.slice(0, 10) || todayInput())
-        setReturnedBy(order.returned_by ?? order.borrowed_by ?? "")
+        // Kolomnya menyimpan NAMA; dicarikan username-nya agar dropdown menampilkan
+        // "nama (nopeg)" dan opsinya benar-benar terpilih.
+        setReturnedBy(userUsernameOf(order.returned_by ?? order.borrowed_by ?? ""))
       } else if (order.status === "dikembalikan") {
         setScanArmed(false)
         scanBufferRef.current = ""
@@ -1396,13 +1409,15 @@ function MonitoringCssd() {
                 </p>
                 <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                   <div className="space-y-1.5">
-                    <Label htmlFor="return-by">Dikembalikan Oleh</Label>
-                    <Input
-                      id="return-by"
+                    <Label>Dikembalikan Oleh</Label>
+                    <SelectSearch
+                      options={userOptionsWith(returnedBy)}
                       value={returnedBy}
-                      onChange={(e) => setReturnedBy(e.target.value)}
-                      placeholder="Nama orang yang mengembalikan"
-                      disabled={returnOrder.status === "dikembalikan"}
+                      onChange={setReturnedBy}
+                      loading={userLoading}
+                      disabled={userLoading || returnOrder.status === "dikembalikan"}
+                      placeholder="-- Pilih Pengembali --"
+                      searchPlaceholder="Cari nama atau nopeg..."
                     />
                   </div>
                   <div className="space-y-1.5">

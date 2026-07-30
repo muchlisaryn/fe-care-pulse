@@ -1,11 +1,11 @@
-// Bunyi notifikasi saat ada order masuk baru — memutar file aset
-// `public/hidup-jokowi.mp3`.
+// Notifikasi order masuk: diucapkan lewat Web Speech API ("Ada order masuk dari
+// ruangan ...") agar petugas tahu asal ordernya tanpa melihat layar. Bila browser
+// tidak mendukung sintesis suara, jatuh ke bunyi aset `public/hidup-jokowi.mp3`.
 //
-// Browser memblokir pemutaran audio yang tidak dipicu langsung oleh gesture user
-// (kebijakan autoplay). Karena itu suara notifikasi yang dipicu otomatis (saat
-// jumlah order bertambah) bisa diam. Solusinya: `primeNotifSound()` dipanggil
-// pada gesture user pertama untuk "membuka kunci" elemen audio, sehingga
-// `playNotifSound()` setelahnya diizinkan berbunyi.
+// Browser memblokir pemutaran audio maupun sintesis suara yang tidak dipicu gesture
+// user (kebijakan autoplay). Karena itu `primeNotifSound()` dipanggil pada gesture
+// user pertama untuk "membuka kunci" keduanya, sehingga notifikasi yang dipicu
+// otomatis setelahnya diizinkan berbunyi.
 const NOTIF_SOUND_SRC = "/hidup-jokowi.mp3"
 
 let audio: HTMLAudioElement | null = null
@@ -20,11 +20,59 @@ function getAudio(): HTMLAudioElement | null {
   return audio
 }
 
-// Dipanggil dari gesture user pertama (klik / tekan tombol). Memutar audio dalam
-// keadaan bisu lalu langsung menjeda — cukup untuk membuat browser menandai
-// elemen audio sebagai "boleh diputar" tanpa benar-benar terdengar.
+function getSynth(): SpeechSynthesis | null {
+  if (typeof window === "undefined") return null
+  return window.speechSynthesis ?? null
+}
+
+/**
+ * Suara berbahasa Indonesia bila tersedia di perangkat. Daftar suara dimuat asinkron
+ * oleh browser, jadi bisa saja masih kosong saat dipanggil — biarkan null dan
+ * andalkan `utterance.lang`, bukan menunda pengucapan.
+ */
+function pickVoice(synth: SpeechSynthesis): SpeechSynthesisVoice | null {
+  return synth.getVoices().find((v) => v.lang?.toLowerCase().startsWith("id")) ?? null
+}
+
+/** Ucapkan teks. Mengembalikan false bila browser tidak mendukung sintesis suara. */
+function speak(text: string): boolean {
+  const synth = getSynth()
+  if (!synth || typeof SpeechSynthesisUtterance === "undefined") return false
+
+  try {
+    const utterance = new SpeechSynthesisUtterance(text)
+    utterance.lang = "id-ID"
+    utterance.rate = 0.95 // sedikit lebih lambat agar nama ruangan jelas terdengar
+    const voice = pickVoice(synth)
+    if (voice) utterance.voice = voice
+    // Tidak memakai cancel(): bila beberapa order masuk beruntun, pengumumannya
+    // mengantre satu per satu alih-alih saling memotong.
+    synth.speak(utterance)
+
+    return true
+  } catch {
+    return false
+  }
+}
+
+// Dipanggil dari gesture user pertama (klik / tekan tombol). Audio diputar dalam
+// keadaan bisu lalu langsung dijeda, dan sintesis suara dipancing dengan ucapan
+// kosong bervolume 0 — cukup untuk membuat browser menandai keduanya "boleh
+// dibunyikan" tanpa terdengar apa pun.
 export function primeNotifSound(): void {
   if (unlocked) return
+
+  const synth = getSynth()
+  if (synth && typeof SpeechSynthesisUtterance !== "undefined") {
+    try {
+      const warmup = new SpeechSynthesisUtterance("")
+      warmup.volume = 0
+      synth.speak(warmup)
+    } catch {
+      // Tidak didukung — nanti otomatis jatuh ke bunyi mp3.
+    }
+  }
+
   const a = getAudio()
   if (!a) return
   a.muted = true
@@ -51,4 +99,15 @@ export function playNotifSound(): void {
   } catch {
     // Audio tidak didukung — abaikan.
   }
+}
+
+/**
+ * Umumkan order masuk. `room` berasal dari payload broadcast `order.submitted`;
+ * bila kosong (ruangan terhapus / data lama), kalimatnya diringkas tanpa menyebut
+ * ruangan alih-alih mengucapkan "dari ruangan undefined".
+ */
+export function announceIncomingOrder(room?: string | null): void {
+  const name = room?.trim()
+  const text = name ? `Ada order masuk dari ruangan ${name}` : "Ada order masuk"
+  if (!speak(text)) playNotifSound()
 }

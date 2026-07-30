@@ -4,10 +4,11 @@ import { useCallback, useEffect, useState } from "react"
 import { Truck, ClipboardList, UserCheck } from "lucide-react"
 import { Button } from "@/components/atoms/Button"
 import { Badge } from "@/components/atoms/Badge"
-import { Input } from "@/components/atoms/Input"
 import { Label } from "@/components/atoms/Label"
 import { MultiSelectSearch } from "@/components/atoms/MultiSelectSearch"
+import { SelectSearch } from "@/components/atoms/SelectSearch"
 import { Modal } from "@/components/molecules/Modal"
+import { useUserOptions } from "@/lib/useUserOptions"
 import api from "@/lib/axios"
 import type { DistributeOrder } from "@/lib/store/slices/distributeSlice"
 
@@ -77,7 +78,10 @@ export function DistributeReady({
   onChanged: () => void
 }) {
   const [active, setActive] = useState<DistributeOrder | null>(null)
+  // Berisi USERNAME penerima terpilih. Bila peminjam asal order tidak cocok dengan
+  // user mana pun (order lama yang penerimanya diketik bebas), berisi nama mentahnya.
   const [recipient, setRecipient] = useState("")
+  const { loading: userLoading, nameOf, usernameOf, optionsWith } = useUserOptions()
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [modalLoading, setModalLoading] = useState(false)
@@ -111,13 +115,20 @@ export function DistributeReady({
 
   if (items.length === 0) return null
 
+  // Peminjam order lama bisa saja tidak cocok dengan user mana pun (dulu diketik
+  // bebas) — nama mentahnya tetap ditawarkan sebagai opsi lewat optionsWith().
+  const recipientOptions = optionsWith(recipient)
+  const recipientName = nameOf(recipient)
+
   function openDistribute(order: DistributeOrder) {
     setActive(order)
     setError(null)
     setRequirements([])
     setPicked({})
-    // Default nama penerima = peminjam order ("Dipinjam Oleh"); tetap bisa diubah.
-    setRecipient(order.borrowed_by ?? "")
+    // Default penerima = peminjam yang membuat order ("Dipinjam Oleh"); tetap bisa
+    // diubah. `borrowed_by` menyimpan NAMA, jadi dicarikan username-nya agar
+    // dropdown menampilkan "nama (nopeg)".
+    setRecipient(usernameOf(order.borrowed_by ?? ""))
   }
 
   function choose(req: DistributeRequirement, values: string[]) {
@@ -168,7 +179,7 @@ export function DistributeReady({
       return
     }
     if (!recipient.trim()) {
-      setError("Scan / isi ruangan atau petugas penerima (verifikasi).")
+      setError("Pilih petugas penerima (verifikasi).")
       return
     }
     setSaving(true)
@@ -177,7 +188,7 @@ export function DistributeReady({
       if (!(await stillAvailable(active.id))) return
 
       await api.post(`/master/orders/${active.id}/distribute`, {
-        recipient: recipient.trim(),
+        recipient: recipientName.trim(),
         stock_ids: selectedStockIds,
       })
       setActive(null)
@@ -341,12 +352,15 @@ export function DistributeReady({
                   Verifikasi Penerima
                 </p>
                 <div className="space-y-1.5">
-                  <Label htmlFor="dist-recipient">Nama Penerima (Ruangan/Petugas) *</Label>
-                  <Input
-                    id="dist-recipient"
+                  <Label>Nama Penerima *</Label>
+                  <SelectSearch
+                    options={recipientOptions}
                     value={recipient}
-                    onChange={(e) => setRecipient(e.target.value)}
-                    placeholder="Scan / ketik ruangan atau petugas penerima"
+                    onChange={setRecipient}
+                    loading={userLoading}
+                    disabled={userLoading}
+                    placeholder="-- Pilih Penerima --"
+                    searchPlaceholder="Cari nama atau nopeg..."
                   />
                 </div>
               </section>

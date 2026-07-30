@@ -7,7 +7,7 @@ import { Sidebar } from "@/components/molecules/Sidebar"
 import { useAppDispatch, useAppSelector } from "@/lib/store/hooks"
 import { setCredentials, fetchMe, setHydrated } from "@/lib/store/slices/authSlice"
 import { fetchIncomingCount, fetchPendingTransferCount } from "@/lib/store/slices/notifSlice"
-import { playNotifSound, primeNotifSound } from "@/lib/notifSound"
+import { announceIncomingOrder, primeNotifSound } from "@/lib/notifSound"
 import { getEcho } from "@/lib/echo"
 import { loadAuth } from "@/lib/auth"
 
@@ -15,10 +15,8 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
   const dispatch = useAppDispatch()
   const { hydrated, isAuthenticated } = useAppSelector((s) => s.auth)
   const menus = useAppSelector((s) => s.auth.menus)
-  const { incomingCount, loaded: notifLoaded } = useAppSelector((s) => s.notif)
   const router = useRouter()
   const pathname = usePathname()
-  const prevIncoming = useRef<number | null>(null)
 
   const [collapsed, setCollapsed] = useState(false)
   const [mobileOpen, setMobileOpen] = useState(false)
@@ -89,17 +87,19 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
     dispatch(fetchPendingTransferCount())
   }, [isAuthenticated, dispatch])
 
-  // Real-time: dengarkan event order baru & permintaan pinjam lewat Pusher. Saat
-  // ada event masuk, langsung tarik ulang jumlahnya — kenaikan hitungan memicu
-  // bunyi notifikasi di efek bawah (satu jalur, tidak dobel). Ini satu-satunya
-  // sumber pembaruan badge (tanpa polling), jadi env Pusher wajib terisi.
+  // Real-time: dengarkan event order baru & permintaan pinjam lewat Pusher. Ini
+  // satu-satunya sumber pembaruan badge (tanpa polling), jadi env Pusher wajib
+  // terisi. Pengumuman suara dipicu DI SINI, bukan dari kenaikan angka badge,
+  // karena hanya payload event yang membawa nama ruangan asal order — dan satu
+  // event = satu order, sehingga beberapa order beruntun tetap diumumkan semua.
   useEffect(() => {
     if (!isAuthenticated) return
     const echo = getEcho()
     if (!echo) return
     const channel = echo.channel("orders")
-    channel.listen(".order.submitted", () => {
+    channel.listen(".order.submitted", (e: { room?: string | null }) => {
       dispatch(fetchIncomingCount())
+      announceIncomingOrder(e?.room)
     })
     // Permintaan pinjam-alih baru → perbarui badge "Permintaan Pinjam".
     const transferChannel = echo.channel("transfers")
@@ -127,15 +127,6 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
       window.removeEventListener("keydown", prime)
     }
   }, [])
-
-  // Bunyikan notifikasi saat jumlah order masuk bertambah (ada order baru).
-  useEffect(() => {
-    if (!notifLoaded) return
-    if (prevIncoming.current !== null && incomingCount > prevIncoming.current) {
-      playNotifSound()
-    }
-    prevIncoming.current = incomingCount
-  }, [incomingCount, notifLoaded])
 
   function toggleSidebar() {
     setCollapsed((prev) => {
