@@ -144,6 +144,10 @@ export default function MasterInstrumenPage() {
     useAppSelector((s) => s.instruments)
   const conditions = useAppSelector((s) => s.conditions.items)
   const kondisiOptions = conditions.map((c) => ({ value: String(c.id), label: c.name }))
+  // Kondisi bawaan unit baru: "Baik" bila ada di master Kondisi, kalau tidak ketemu
+  // pakai entri pertama agar unit tetap punya kondisi (bukan null).
+  const defaultCondition =
+    conditions.find((c) => c.name.trim().toLowerCase() === "baik") ?? conditions[0] ?? null
 
   const [searchInput, setSearchInput] = useState(search)
   const [modal, setModal] = useState<"tambah" | "edit" | null>(null)
@@ -196,7 +200,13 @@ export default function MasterInstrumenPage() {
   const [stocks, setStocks] = useState<Stock[]>([])
   const [stockLoading, setStockLoading] = useState(false)
   const [stockBusy, setStockBusy] = useState(false)
-  const [newConditionId, setNewConditionId] = useState("")
+  // Tambah stok kini per JUMLAH, bukan per unit: kondisinya tidak lagi dipilih
+  // manual melainkan selalu "Baik" (unit baru memang belum terpakai).
+  const [newQty, setNewQty] = useState("1")
+  const [addStockOpen, setAddStockOpen] = useState(false)
+  // Batas 1–100 disamakan dengan validasi server.
+  const qtyValid = /^\d+$/.test(newQty) && Number(newQty) >= 1 && Number(newQty) <= 100
+  const borrowedHint = "Unit sedang dipinjam — tidak bisa diubah atau dihapus sampai dikembalikan."
   const [editingStockId, setEditingStockId] = useState<number | null>(null)
   const [editConditionId, setEditConditionId] = useState("")
   const [deleteStockTarget, setDeleteStockTarget] = useState<Stock | null>(null)
@@ -318,15 +328,19 @@ export default function MasterInstrumenPage() {
   }
 
   async function handleAddStock() {
-    if (!stockModal || stockBusy) return
+    if (!stockModal || stockBusy || !qtyValid) return
     setStockBusy(true)
     try {
+      // Satu request membuat sekaligus N unit (server membungkusnya dalam transaksi),
+      // jadi tidak ada unit setengah jadi bila gagal di tengah.
       await api.post("/master/instrument-stocks", {
         instrument_id: stockModal.id,
-        condition_id: newConditionId ? Number(newConditionId) : null,
+        condition_id: defaultCondition?.id ?? null,
         status: "tersedia",
+        quantity: Number(newQty),
       })
-      setNewConditionId("")
+      setNewQty("1")
+      setAddStockOpen(false)
       await loadStocks(stockModal.id)
       dispatch(invalidateInstruments())
     } finally {
@@ -664,6 +678,7 @@ export default function MasterInstrumenPage() {
                     <tr className="border-b border-gray-100">
                       <th className="py-3 pl-4 pr-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-400 w-10">No</th>
                       <th className="py-3 px-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-400">Kode Stock</th>
+                      <th className="py-3 px-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-400">Nama Instrumen</th>
                       <th className="py-3 px-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-400 w-44">Kondisi</th>
                       <th className="py-3 px-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-400 w-36">Status</th>
                       <th className="py-3 pl-3 pr-4 w-48" />
@@ -672,6 +687,7 @@ export default function MasterInstrumenPage() {
                   <tbody className="divide-y divide-gray-50">
                     {stocks.map((item, i) => {
                       const isEditing = editingStockId === item.id
+                      const isBorrowed = item.status === "dipinjam"
                       const kondisiName = item.condition?.name ?? "-"
                       return (
                         <tr key={item.id} className="hover:bg-gray-50 transition-colors">
@@ -681,6 +697,7 @@ export default function MasterInstrumenPage() {
                               {item.code}
                             </span>
                           </td>
+                          <td className="py-3 px-3 text-gray-700">{stockModal.name}</td>
                           <td className="py-3 px-3">
                             {isEditing ? (
                               <SelectSearch options={kondisiOptions} value={editConditionId} onChange={setEditConditionId} placeholder="-- Pilih kondisi --" />
@@ -722,8 +739,27 @@ export default function MasterInstrumenPage() {
                                 </>
                               ) : (
                                 <>
-                                  <Button size="xs" variant="outline" onClick={() => { setEditingStockId(item.id); setEditConditionId(item.condition_id ? String(item.condition_id) : "") }}>Edit</Button>
-                                  <Button size="xs" variant="destructive" onClick={() => setDeleteStockTarget(item)}>Hapus</Button>
+                                  {/* Unit yang sedang dipinjam terkunci: barangnya di tangan
+                                      peminjam & masih tertaut order aktif. Server juga
+                                      menolaknya, ini hanya lapisan pertama. */}
+                                  <Button
+                                    size="xs"
+                                    variant="outline"
+                                    disabled={isBorrowed}
+                                    title={isBorrowed ? borrowedHint : undefined}
+                                    onClick={() => { setEditingStockId(item.id); setEditConditionId(item.condition_id ? String(item.condition_id) : "") }}
+                                  >
+                                    Edit
+                                  </Button>
+                                  <Button
+                                    size="xs"
+                                    variant="destructive"
+                                    disabled={isBorrowed}
+                                    title={isBorrowed ? borrowedHint : undefined}
+                                    onClick={() => setDeleteStockTarget(item)}
+                                  >
+                                    Hapus
+                                  </Button>
                                 </>
                               )}
                             </div>
@@ -737,14 +773,17 @@ export default function MasterInstrumenPage() {
             </div>
 
             <div className="border-t border-gray-100 bg-gray-50 px-4 py-4 sm:px-6">
-              <p className="mb-3 text-xs font-bold uppercase tracking-widest text-gray-400">Tambah Stock</p>
-              <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
-                <div className="space-y-1.5 sm:w-56">
-                  <Label>Kondisi</Label>
-                  <SelectSearch options={kondisiOptions} value={newConditionId} onChange={setNewConditionId} disabled={stockBusy} placeholder="-- Pilih kondisi --" />
-                </div>
-                <Button type="button" onClick={handleAddStock} disabled={stockBusy} className="bg-[#4ba69d] hover:bg-[#4ba69d]/90 text-white min-w-[100px] shrink-0">
-                  {stockBusy ? "Menyimpan..." : "+ Tambah"}
+              {/* Form-nya dipindah ke modal tersendiri — di sini cukup pemicunya. */}
+              <div className="flex justify-end">
+                <Button
+                  type="button"
+                  onClick={() => {
+                    setNewQty("1")
+                    setAddStockOpen(true)
+                  }}
+                  className="bg-[#4ba69d] hover:bg-[#4ba69d]/90 text-white"
+                >
+                  + Tambah
                 </Button>
               </div>
             </div>
@@ -908,6 +947,42 @@ export default function MasterInstrumenPage() {
             />
           </div>
         )}
+      </Modal>
+
+      {/* Tambah stock — dirender setelah modal stock agar tampil di depannya */}
+      <Modal
+        open={addStockOpen}
+        onClose={stockBusy ? () => {} : () => setAddStockOpen(false)}
+        title="Tambah Stock"
+        size="sm"
+        footer={
+          <>
+            <Button variant="outline" onClick={() => setAddStockOpen(false)} disabled={stockBusy}>
+              Batal
+            </Button>
+            <Button
+              onClick={handleAddStock}
+              disabled={stockBusy || !qtyValid}
+              className="bg-[#4ba69d] hover:bg-[#4ba69d]/90 text-white"
+            >
+              {stockBusy ? "Menyimpan..." : "Tambah"}
+            </Button>
+          </>
+        }
+      >
+        <div className="space-y-1.5">
+          <Label htmlFor="stock-qty">Jumlah Unit</Label>
+          <Input
+            id="stock-qty"
+            type="number"
+            min={1}
+            max={100}
+            value={newQty}
+            onChange={(e) => setNewQty(e.target.value)}
+            disabled={stockBusy}
+            autoFocus
+          />
+        </div>
       </Modal>
 
       {/* Stock delete confirm — dirender setelah modal stock agar tampil di depan */}

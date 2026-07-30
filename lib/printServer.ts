@@ -79,14 +79,41 @@ function printerPayload(p: Printer) {
   }
 }
 
+/**
+ * Halaman ini dianggap "secure context" oleh browser? Panggilan ke alamat lokal
+ * (localhost) dari halaman PUBLIK yang bukan secure context diblokir Chrome lewat
+ * Private Network Access — dan blokirnya terjadi di browser, sebelum request sampai
+ * ke print server. Di JavaScript kedua kasus (server mati vs diblokir) sama-sama
+ * muncul sebagai error jaringan tanpa response, jadi konteks inilah yang dipakai
+ * untuk menebak penyebab yang paling mungkin.
+ */
+function isSecureContextPage(): boolean {
+  if (typeof window === "undefined") return true
+
+  return window.isSecureContext
+}
+
 // Ubah kegagalan axios jadi Error dengan pesan siap-tampil.
 function toPrintError(e: unknown, url: string): Error {
   if (axios.isAxiosError(e)) {
-    // Tanpa response = print server mati / tidak terjangkau dari browser.
+    if (e.response) {
+      return new Error(e.response.data?.message ?? e.message)
+    }
+
+    // Tanpa response: bisa print server mati, bisa juga diblokir browser. Halaman
+    // yang bukan secure context (http:// selain localhost) PASTI diblokir Chrome,
+    // jadi jangan menyuruh operator memeriksa XAMPP — bukan di situ masalahnya.
+    if (!isSecureContextPage()) {
+      return new Error(
+        `Browser memblokir akses ke print server (${url}) karena halaman ini dibuka lewat ` +
+          `HTTP biasa. Chrome hanya mengizinkan panggilan ke alamat lokal dari halaman ` +
+          `HTTPS. Buka aplikasi lewat HTTPS, atau minta admin memasang kebijakan Chrome ` +
+          `InsecurePrivateNetworkRequestsAllowedForUrls untuk ${window.location.origin}.`,
+      )
+    }
+
     return new Error(
-      e.response
-        ? (e.response.data?.message ?? e.message)
-        : `Tidak dapat terhubung ke print server (${url}). Pastikan XAMPP di komputer ini menyala.`,
+      `Tidak dapat terhubung ke print server (${url}). Pastikan XAMPP di komputer ini menyala.`,
     )
   }
   return e instanceof Error ? e : new Error("Gagal mencetak.")
