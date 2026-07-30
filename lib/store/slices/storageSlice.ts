@@ -108,24 +108,12 @@ const initialState: StorageState = {
 // Satu halaman hasil paginate Laravel.
 type PageResult<T> = { items: T[]; page: number; lastPage: number; total: number }
 
-/**
- * Argumen thunk: halaman ke-berapa + kata kunci pencarian (dicari di server).
- * `allocation` khusus inventaris gudang — menyaring baris yang belum direservasi
- * order (`bebas`, order_id null) atau yang sudah (`dialokasikan`).
- */
-export type StorageAllocation = "semua" | "bebas" | "dialokasikan"
-export type FetchPageArg = { page?: number; search?: string; allocation?: StorageAllocation }
+/** Argumen thunk: halaman ke-berapa + kata kunci pencarian (dicari di server). */
+export type FetchPageArg = { page?: number; search?: string }
 
-async function fetchPage<T>(
-  url: string,
-  { page = 1, search, allocation }: FetchPageArg,
-): Promise<PageResult<T>> {
+async function fetchPage<T>(url: string, { page = 1, search }: FetchPageArg): Promise<PageResult<T>> {
   const res = await api.get(url, {
-    params: {
-      page,
-      search: search || undefined,
-      allocation: allocation && allocation !== "semua" ? allocation : undefined,
-    },
+    params: { page, search: search || undefined },
   })
   const p = res.data.data
   return { items: p.data, page: p.current_page, lastPage: p.last_page, total: p.total }

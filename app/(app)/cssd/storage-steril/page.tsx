@@ -31,7 +31,6 @@ import {
   fetchStorageInventory,
   fetchStorageSummary,
   invalidateStorage,
-  type StorageAllocation,
   type StorageIncomingOrder,
   type StorageIncomingUnit,
   type StorageInventoryRow,
@@ -104,10 +103,6 @@ function StorageSterilPage() {
   const [search, setSearch] = useState("")
   // Inventaris: pengelompokan + status lipat per grup.
   const [groupBy, setGroupBy] = useState<"rak" | "batch">("rak")
-  // Penyaringan alokasi (dijalankan di SERVER, sama seperti pencarian): `bebas` =
-  // baris gudang yang order_id-nya masih kosong — stok pool produksi yang belum
-  // direservasi order manapun.
-  const [allocation, setAllocation] = useState<StorageAllocation>("semua")
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
   const toggleGroup = (key: string) =>
     setExpanded((prev) => {
@@ -171,9 +166,9 @@ function StorageSterilPage() {
       dispatch(fetchStorageIncoming({ page: 1, search }))
       dispatch(fetchProductionStorageIncoming({ page: 1, search }))
     } else {
-      dispatch(fetchStorageInventory({ page: 1, search, allocation }))
+      dispatch(fetchStorageInventory({ page: 1, search }))
     }
-  }, [dispatch, tab, search, allocation])
+  }, [dispatch, tab, search])
 
   // Ambil halaman berikutnya daftar tab aktif. Untuk tab "Perlu Disimpan" ada dua
   // sumber (order & batch produksi) — order dihabiskan dulu, baru batch produksi.
@@ -189,9 +184,9 @@ function StorageSterilPage() {
     }
     if (inventory.loading || inventory.loadingMore) return
     if (inventory.page < inventory.lastPage) {
-      dispatch(fetchStorageInventory({ page: inventory.page + 1, search, allocation }))
+      dispatch(fetchStorageInventory({ page: inventory.page + 1, search }))
     }
-  }, [dispatch, tab, search, allocation, incoming, productionIncoming, inventory])
+  }, [dispatch, tab, search, incoming, productionIncoming, inventory])
 
   // Masih ada halaman berikutnya untuk tab aktif?
   const hasMore =
@@ -244,7 +239,7 @@ function StorageSterilPage() {
   function refresh() {
     dispatch(fetchStorageIncoming({ page: 1, search }))
     dispatch(fetchProductionStorageIncoming({ page: 1, search }))
-    if (inventory.loaded) dispatch(fetchStorageInventory({ page: 1, search, allocation }))
+    if (inventory.loaded) dispatch(fetchStorageInventory({ page: 1, search }))
     dispatch(fetchStorageSummary())
   }
 
@@ -698,20 +693,10 @@ function StorageSterilPage() {
           <div className="py-16 text-center text-sm text-gray-400">Memuat data...</div>
         ) : (
           <div className="space-y-3 p-4">
-            {/* Toolbar: penyaringan alokasi + pengelompokan agar tidak menampilkan
-                terlalu banyak baris. Selalu tampil (juga saat hasilnya kosong) agar
-                penyaring yang tidak menyisakan baris masih bisa dikembalikan. */}
+            {/* Toolbar: pengelompokan agar tidak menampilkan terlalu banyak baris.
+                Selalu tampil (juga saat hasilnya kosong) agar pilihan pengelompokan
+                tetap bisa diubah. */}
             <div className="flex flex-wrap justify-end gap-2">
-              <Select
-                value={allocation}
-                onChange={(e) => setAllocation(e.target.value as StorageAllocation)}
-                className="w-auto"
-                title="Saring berdasarkan reservasi order"
-              >
-                <option value="semua">Semua Alokasi</option>
-                <option value="bebas">Belum Dialokasikan</option>
-                <option value="dialokasikan">Sudah Dialokasikan</option>
-              </Select>
               <Select
                 value={groupBy}
                 onChange={(e) => setGroupBy(e.target.value as "rak" | "batch")}
@@ -724,9 +709,7 @@ function StorageSterilPage() {
 
             {inventoryFiltered.length === 0 ? (
               <div className="py-16 text-center text-sm text-gray-400">
-                {q || allocation !== "semua"
-                  ? "Tidak ada unit yang cocok."
-                  : "Belum ada unit di gudang steril."}
+                {q ? "Tidak ada unit yang cocok." : "Belum ada unit di gudang steril."}
               </div>
             ) : (
             <div className="space-y-2">
