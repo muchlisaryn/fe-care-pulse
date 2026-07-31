@@ -82,8 +82,6 @@ type StorageState = {
   productionIncoming: LazyList<StorageIncomingOrder>
   inventory: LazyList<StorageInventoryRow>
   summary: StorageSummary
-  summaryLoaded: boolean
-  dirty: boolean
 }
 
 const emptyList = <T>(): LazyList<T> => ({
@@ -101,8 +99,6 @@ const initialState: StorageState = {
   productionIncoming: emptyList<StorageIncomingOrder>(),
   inventory: emptyList<StorageInventoryRow>(),
   summary: { total: 0, alert: 0, expired: 0 },
-  summaryLoaded: false,
-  dirty: false,
 }
 
 // Satu halaman hasil paginate Laravel.
@@ -163,14 +159,12 @@ function onRejected<T>(list: LazyList<T>) {
   list.loadingMore = false
 }
 
+// Tanpa penanda cache/`dirty`: halaman Storage Steril selalu mengambil data baru
+// dari server tiap tab dibuka, jadi tidak ada state kedaluwarsa yang perlu ditandai.
 const storageSlice = createSlice({
   name: "storage",
   initialState,
-  reducers: {
-    invalidateStorage(state) {
-      state.dirty = true
-    },
-  },
+  reducers: {},
   extraReducers: (builder) => {
     builder
       .addCase(fetchStorageIncoming.pending, (state, action) => {
@@ -178,7 +172,6 @@ const storageSlice = createSlice({
       })
       .addCase(fetchStorageIncoming.fulfilled, (state, action) => {
         onFulfilled(state.incoming, action.payload)
-        state.dirty = false
       })
       .addCase(fetchStorageIncoming.rejected, (state) => {
         onRejected(state.incoming)
@@ -188,7 +181,6 @@ const storageSlice = createSlice({
       })
       .addCase(fetchProductionStorageIncoming.fulfilled, (state, action) => {
         onFulfilled(state.productionIncoming, action.payload)
-        state.dirty = false
       })
       .addCase(fetchProductionStorageIncoming.rejected, (state) => {
         onRejected(state.productionIncoming)
@@ -198,17 +190,14 @@ const storageSlice = createSlice({
       })
       .addCase(fetchStorageInventory.fulfilled, (state, action) => {
         onFulfilled(state.inventory, action.payload)
-        state.dirty = false
       })
       .addCase(fetchStorageInventory.rejected, (state) => {
         onRejected(state.inventory)
       })
       .addCase(fetchStorageSummary.fulfilled, (state, action) => {
         state.summary = action.payload
-        state.summaryLoaded = true
       })
   },
 })
 
-export const { invalidateStorage } = storageSlice.actions
 export default storageSlice.reducer

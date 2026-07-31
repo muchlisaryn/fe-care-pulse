@@ -31,7 +31,6 @@ import {
   fetchProductionStorageIncoming,
   fetchStorageInventory,
   fetchStorageSummary,
-  invalidateStorage,
   type StorageIncomingOrder,
   type StorageIncomingUnit,
   type StorageInventoryRow,
@@ -153,23 +152,24 @@ function StorageSterilPage() {
   // jadi disaring lokal & langsung saat diketik (live search) — tanpa tombol Cari.
   const [modalSearch, setModalSearch] = useState("")
 
-  // Angka kartu statistik diambil dari endpoint ringkasan (bukan menghitung
-  // seluruh baris di klien) supaya daftarnya bisa dimuat bertahap.
-  useEffect(() => {
+  // Muat data tab yang sedang terbuka: HALAMAN PERTAMA daftarnya + angka kartu
+  // statistik (dari endpoint ringkasan, bukan menghitung baris di klien — daftarnya
+  // dimuat bertahap). Halaman berikutnya menyusul lewat pengamat scroll di dasar
+  // daftar. Tidak ada cache: isi gudang berubah oleh petugas lain, jadi tiap tab
+  // dibuka datanya selalu diambil ulang dari server.
+  const loadTab = useCallback(() => {
     dispatch(fetchStorageSummary())
-  }, [dispatch])
-
-  // LAZY LOAD: tiap tab hanya mengambil HALAMAN PERTAMA saat tab itu dibuka
-  // (atau saat kata kunci pencarian berubah). Halaman berikutnya menyusul lewat
-  // pengamat scroll di dasar daftar.
-  useEffect(() => {
     if (tab === "simpan") {
       dispatch(fetchStorageIncoming({ page: 1, search }))
       dispatch(fetchProductionStorageIncoming({ page: 1, search }))
-    } else {
-      dispatch(fetchStorageInventory({ page: 1, search }))
+      return
     }
+    dispatch(fetchStorageInventory({ page: 1, search }))
   }, [dispatch, tab, search])
+
+  useEffect(() => {
+    loadTab()
+  }, [loadTab])
 
   // Ambil halaman berikutnya daftar tab aktif. Untuk tab "Perlu Disimpan" ada dua
   // sumber (order & batch produksi) — order dihabiskan dulu, baru batch produksi.
@@ -232,16 +232,6 @@ function StorageSterilPage() {
     } finally {
       setRackOptionsLoading(false)
     }
-  }
-
-  // Dipanggil setelah menyimpan ke rak: unit pindah dari "Perlu Disimpan" ke
-  // "Inventaris". Daftar dimuat ulang dari halaman pertama + angka ringkasan;
-  // inventaris hanya bila sudah pernah dimuat (tetap malas bila belum dibuka).
-  function refresh() {
-    dispatch(fetchStorageIncoming({ page: 1, search }))
-    dispatch(fetchProductionStorageIncoming({ page: 1, search }))
-    if (inventory.loaded) dispatch(fetchStorageInventory({ page: 1, search }))
-    dispatch(fetchStorageSummary())
   }
 
   function openStore(order: StorageIncomingOrder) {
@@ -374,8 +364,10 @@ function StorageSterilPage() {
     try {
       await api.post(active.store_url ?? `/master/orders/${active.id}/store`, { items })
       closeModal()
-      dispatch(invalidateStorage())
-      refresh()
+      // Unit pindah dari "Perlu Disimpan" ke "Inventaris": muat ulang tab yang
+      // sedang terbuka. Tab satunya ikut segar sendiri karena selalu di-fetch
+      // ulang saat dibuka.
+      loadTab()
     } catch (e) {
       setError(errMsg(e))
     } finally {
@@ -383,26 +375,23 @@ function StorageSterilPage() {
     }
   }
 
-  // Penyaringan dilakukan di server (lihat efek lazy load di atas); `q` hanya
-  // penanda apakah pencarian sedang aktif untuk teks "tidak ditemukan".
+  // Penyaringan dilakukan di server (lihat loadTab di atas); `q` hanya penanda
+  // apakah pencarian sedang aktif untuk teks "tidak ditemukan".
   const q = search.trim()
-  const incomingFiltered = incomingAll
-  const inventoryFiltered = inventory.items
 
-  // Kelompokkan inventaris (per rak / per order) agar ringkas & bisa dilipat.
+  // Kelompokkan inventaris (per rak / per batch) agar ringkas & bisa dilipat.
   const inventoryGroups = useMemo(() => {
     const map = new Map<string, StorageInventoryRow[]>()
-    for (const r of inventoryFiltered) {
+    for (const r of inventory.items) {
       const key = groupBy === "rak" ? r.rack_code : r.batch ?? "Tanpa Batch"
       const arr = map.get(key) ?? []
       arr.push(r)
       map.set(key, arr)
     }
     return [...map.entries()]
-      .map(([key, items]) => ({ key, items, alertCount: items.filter((i) => i.alert).length }))
+      .map(([key, items]) => ({ key, items }))
       .sort((a, b) => a.key.localeCompare(b.key, "id", { numeric: true }))
-  }, [inventoryFiltered, groupBy])
-
+  }, [inventory.items, groupBy])
 
   /**
    * Pecah isi satu rak menjadi dua tingkat.
@@ -673,13 +662,13 @@ function StorageSterilPage() {
         {tab === "simpan" ? (
           incoming.loading || (!incoming.loaded && !productionIncoming.loaded) ? (
             <div className="py-16 text-center text-sm text-gray-400">Memuat data...</div>
-          ) : incomingFiltered.length === 0 ? (
+          ) : incomingAll.length === 0 ? (
             <div className="py-16 text-center text-sm text-gray-400">
               {q ? "Tidak ada batch yang cocok." : "Belum ada order / batch steril yang perlu disimpan."}
             </div>
           ) : (
             <div className="space-y-2 p-4">
-              {incomingFiltered.map((order) => (
+              {incomingAll.map((order) => (
                 <div
                   key={`${order.source ?? "order"}-${order.id}`}
                   className="rounded-lg border border-gray-200"
@@ -740,7 +729,7 @@ function StorageSterilPage() {
               </Select>
             </div>
 
-            {inventoryFiltered.length === 0 ? (
+            {inventory.items.length === 0 ? (
               <div className="py-16 text-center text-sm text-gray-400">
                 {q ? "Tidak ada instrumen yang cocok." : "Belum ada instrumen di gudang steril."}
               </div>
