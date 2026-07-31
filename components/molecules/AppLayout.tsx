@@ -87,6 +87,25 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
     dispatch(fetchPendingTransferCount())
   }, [isAuthenticated, dispatch])
 
+  // Selaraskan badge saat tab kembali dibuka/difokuskan. Event Pusher hanya
+  // mengabarkan order MASUK; order yang diterima/dibatalkan di perangkat atau tab
+  // lain tidak mengirim event apa pun, sehingga tanpa ini badge bisa tertinggal
+  // menghitung order yang sudah tidak ada. Endpointnya ringan (hanya angka).
+  useEffect(() => {
+    if (!isAuthenticated) return
+    const sync = () => {
+      if (document.visibilityState !== "visible") return
+      dispatch(fetchIncomingCount())
+      dispatch(fetchPendingTransferCount())
+    }
+    document.addEventListener("visibilitychange", sync)
+    window.addEventListener("focus", sync)
+    return () => {
+      document.removeEventListener("visibilitychange", sync)
+      window.removeEventListener("focus", sync)
+    }
+  }, [isAuthenticated, dispatch])
+
   // Real-time: dengarkan event order baru & permintaan pinjam lewat Pusher. Ini
   // satu-satunya sumber pembaruan badge (tanpa polling), jadi env Pusher wajib
   // terisi. Pengumuman suara dipicu DI SINI, bukan dari kenaikan angka badge,

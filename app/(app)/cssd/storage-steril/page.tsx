@@ -458,6 +458,18 @@ function StorageSterilPage() {
     )
   }
 
+  /**
+   * Jumlah instrumen pada satu kelompok (rak / batch) memakai aturan yang sama
+   * dengan halaman monitor: PAKET dihitung per set (satu bungkus = 1), instrumen
+   * SATUAN dihitung per unit. Jadi satu paket berisi 5 instrumen tetap bernilai 1.
+   */
+  function countItems(items: StorageInventoryRow[]): number {
+    return groupRackItems(items).reduce(
+      (n, kind) => n + (kind.source === "paket" ? kind.sets.length : kind.units.length),
+      0,
+    )
+  }
+
   /** Unit dengan kedaluwarsa paling dekat — mewakili status satu bungkus. */
   function soonestOf(units: StorageInventoryRow[]) {
     return units.reduce((a, u) =>
@@ -584,11 +596,11 @@ function StorageSterilPage() {
     <div className="space-y-6">
       <PageHeader
         title="Storage Steril"
-        subtitle="Penyimpanan unit steril di rak gudang + pemantauan masa kedaluwarsa"
+        subtitle="Penyimpanan instrumen steril di rak gudang + pemantauan masa kedaluwarsa"
       />
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-        <StatCard title="Unit di Gudang Steril" value={`${summary.total}`} icon={Warehouse} />
+        <StatCard title="Instrumen di Gudang Steril" value={`${summary.total}`} icon={Warehouse} />
         <StatCard title="Mendekati Kedaluwarsa" value={`${summary.alert}`} icon={CalendarClock} positive={false} />
         <StatCard title="Sudah Kedaluwarsa" value={`${summary.expired}`} icon={AlertTriangle} positive={false} />
       </div>
@@ -730,7 +742,7 @@ function StorageSterilPage() {
 
             {inventoryFiltered.length === 0 ? (
               <div className="py-16 text-center text-sm text-gray-400">
-                {q ? "Tidak ada unit yang cocok." : "Belum ada unit di gudang steril."}
+                {q ? "Tidak ada instrumen yang cocok." : "Belum ada instrumen di gudang steril."}
               </div>
             ) : (
             <div className="space-y-2">
@@ -754,7 +766,7 @@ function StorageSterilPage() {
                           <Boxes className="h-4 w-4 shrink-0 text-[#075489]" />
                         )}
                         <span className="font-semibold text-gray-800">{g.key}</span>
-                        <span className="text-xs text-gray-400">{g.items.length} unit</span>
+                        <span className="text-xs text-gray-400">{countItems(g.items)} instrumen</span>
                         {/* Kedaluwarsa TIDAK ditampilkan di tingkat rak/batch maupun
                             jenis instrumen: satu rak berisi banyak tanggal berbeda,
                             sehingga satu tanggal di sini menyesatkan. Cukup bintang
@@ -786,7 +798,7 @@ function StorageSterilPage() {
                                   </Badge>
                                   <span className="font-medium text-gray-800">{kind.name}</span>
                                   <span className="text-xs text-gray-400">
-                                    {isPaket ? `${kind.sets.length} set` : `${kind.units.length} unit`}
+                                    {isPaket ? `${kind.sets.length} set` : `${kind.units.length} instrumen`}
                                   </span>
                                   {renderAlertMark(kind.units)}
                                 </button>
@@ -828,7 +840,7 @@ function StorageSterilPage() {
                                                 <span className="text-xs text-gray-400">tanpa label</span>
                                               )}
                                               <span className="text-xs text-gray-400">
-                                                {set.units.length} unit
+                                                {set.units.length} instrumen
                                               </span>
                                               {renderExpiryMeta(set.units)}
                                             </button>

@@ -33,7 +33,7 @@ import {
   invalidateOrderTransfers,
   type OrderTransfer,
 } from "@/lib/store/slices/orderTransferSlice"
-import { fetchPendingTransferCount } from "@/lib/store/slices/notifSlice"
+import { fetchIncomingCount, fetchPendingTransferCount } from "@/lib/store/slices/notifSlice"
 import { invalidateMonitoring } from "@/lib/store/slices/monitoringSlice"
 import { fetchRoomOptions } from "@/lib/store/slices/roomSlice"
 import api from "@/lib/axios"
@@ -620,6 +620,10 @@ export default function OrderInstrumenPage() {
       const res = await api.put(`/master/orders/${detail.id}`, { status: to })
       setDetail(res.data.data)
       dispatch(invalidateOrders())
+      // Order keluar dari status `diajukan` (mis. dibatalkan) → badge order masuk
+      // di sidebar ikut turun, tanpa menunggu halaman di-refresh.
+      dispatch(fetchIncomingCount())
+      dispatch(invalidateMonitoring())
     } finally {
       setStatusBusy(false)
     }
@@ -631,6 +635,9 @@ export default function OrderInstrumenPage() {
     try {
       await api.delete(`/master/orders/${deleteTarget.id}`)
       dispatch(invalidateOrders())
+      // Order yang dihapus tidak boleh tetap terhitung di badge order masuk.
+      dispatch(fetchIncomingCount())
+      dispatch(invalidateMonitoring())
       setDeleteTarget(null)
     } finally {
       setDeletingId(null)

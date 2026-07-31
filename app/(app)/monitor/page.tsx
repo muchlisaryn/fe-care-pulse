@@ -128,7 +128,7 @@ export default function MonitorRoomsPage() {
                   <div className="text-3xl font-extrabold leading-none text-[#075489]">
                     {rooms.reduce((s, r) => s + r.borrowed_count, 0)}
                   </div>
-                  <div className="mt-1.5 text-xs text-gray-500">Unit Dipinjam</div>
+                  <div className="mt-1.5 text-xs text-gray-500">Instrumen Dipinjam</div>
                 </div>
               </div>
             </div>
@@ -162,12 +162,12 @@ export default function MonitorRoomsPage() {
                   </div>
                   <div className="rounded-xl bg-white/15 px-2 py-3 text-center">
                     <div className="text-3xl font-extrabold leading-none">{room.borrowed_count}</div>
-                    <div className="mt-1.5 text-xs text-white/80">Unit Dipinjam</div>
+                    <div className="mt-1.5 text-xs text-white/80">Instrumen Dipinjam</div>
                   </div>
                 </div>
                 {room.ready_count > 0 && (
                   <div className="relative mt-2 inline-flex items-center gap-1.5 rounded-full bg-teal-400/25 px-3 py-1 text-xs font-medium text-teal-50">
-                    {room.ready_count} unit siap diantar
+                    {room.ready_count} instrumen siap diantar
                   </div>
                 )}
               </div>
