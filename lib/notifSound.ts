@@ -1,24 +1,14 @@
 // Notifikasi order masuk: diucapkan lewat Web Speech API ("Ada order masuk dari
-// ruangan ...") agar petugas tahu asal ordernya tanpa melihat layar. Bila browser
-// tidak mendukung sintesis suara, jatuh ke bunyi aset `public/hidup-jokowi.mp3`.
+// ruangan ...") agar petugas tahu asal ordernya tanpa melihat layar. Browser yang
+// tidak mendukung sintesis suara tidak berbunyi apa pun — badge di sidebar tetap
+// menjadi penanda visualnya.
 //
-// Browser memblokir pemutaran audio maupun sintesis suara yang tidak dipicu gesture
-// user (kebijakan autoplay). Karena itu `primeNotifSound()` dipanggil pada gesture
-// user pertama untuk "membuka kunci" keduanya, sehingga notifikasi yang dipicu
-// otomatis setelahnya diizinkan berbunyi.
-const NOTIF_SOUND_SRC = "/hidup-jokowi.mp3"
+// Browser memblokir sintesis suara yang tidak dipicu gesture user (kebijakan
+// autoplay). Karena itu `primeNotifSound()` dipanggil pada gesture user pertama
+// untuk "membuka kunci", sehingga notifikasi yang dipicu otomatis setelahnya
+// diizinkan berbunyi.
 
-let audio: HTMLAudioElement | null = null
 let unlocked = false
-
-function getAudio(): HTMLAudioElement | null {
-  if (typeof window === "undefined") return null
-  if (!audio) {
-    audio = new Audio(NOTIF_SOUND_SRC)
-    audio.preload = "auto"
-  }
-  return audio
-}
 
 function getSynth(): SpeechSynthesis | null {
   if (typeof window === "undefined") return null
@@ -55,49 +45,22 @@ function speak(text: string): boolean {
   }
 }
 
-// Dipanggil dari gesture user pertama (klik / tekan tombol). Audio diputar dalam
-// keadaan bisu lalu langsung dijeda, dan sintesis suara dipancing dengan ucapan
-// kosong bervolume 0 — cukup untuk membuat browser menandai keduanya "boleh
+// Dipanggil dari gesture user pertama (klik / tekan tombol). Sintesis suara dipancing
+// dengan ucapan kosong bervolume 0 — cukup untuk membuat browser menandainya "boleh
 // dibunyikan" tanpa terdengar apa pun.
 export function primeNotifSound(): void {
   if (unlocked) return
 
   const synth = getSynth()
-  if (synth && typeof SpeechSynthesisUtterance !== "undefined") {
-    try {
-      const warmup = new SpeechSynthesisUtterance("")
-      warmup.volume = 0
-      synth.speak(warmup)
-    } catch {
-      // Tidak didukung — nanti otomatis jatuh ke bunyi mp3.
-    }
-  }
+  if (!synth || typeof SpeechSynthesisUtterance === "undefined") return
 
-  const a = getAudio()
-  if (!a) return
-  a.muted = true
-  a.play()
-    .then(() => {
-      a.pause()
-      a.currentTime = 0
-      a.muted = false
-      unlocked = true
-    })
-    .catch(() => {
-      a.muted = false
-    })
-}
-
-export function playNotifSound(): void {
-  const a = getAudio()
-  if (!a) return
   try {
-    a.currentTime = 0
-    void a.play().catch(() => {
-      // Masih diblokir (belum ada gesture user) — abaikan.
-    })
+    const warmup = new SpeechSynthesisUtterance("")
+    warmup.volume = 0
+    synth.speak(warmup)
+    unlocked = true
   } catch {
-    // Audio tidak didukung — abaikan.
+    // Tidak didukung — notifikasi cukup tampil sebagai badge, tanpa suara.
   }
 }
 
@@ -108,6 +71,5 @@ export function playNotifSound(): void {
  */
 export function announceIncomingOrder(room?: string | null): void {
   const name = room?.trim()
-  const text = name ? `Ada order masuk dari ruangan ${name}` : "Ada order masuk"
-  if (!speak(text)) playNotifSound()
+  speak(name ? `Ada order masuk dari ruangan ${name}` : "Ada order masuk")
 }
