@@ -74,30 +74,76 @@ export type ReturnedOrder = {
   return_plan_date: string | null
   returned_at: string | null
   total_units: number
+  /** Jumlah SET paket pada order (paket dihitung per set, bukan per unit isinya). */
+  total_sets: number
+  /** Jumlah UNIT instrumen satuan pada order. */
+  total_satuan: number
+}
+
+// Angka KETIGA kartu statistik halaman Tracking Order — dihitung di server, bukan
+// dari daftar ruangan yang dimuat penuh (lihat monitoring/borrowed-summary).
+export type BorrowedSummary = {
+  /** Set paket + unit satuan — angka yang dipajang kartu. */
+  borrowed: number
+  sets: number
+  units: number
+  /** Jumlah order yang masih punya unit belum dikembalikan. */
+  orders: number
+  /** Instrumen yang rencana kembalinya sudah lewat (aturan set/unit yang sama). */
+  overdue: number
+}
+
+// Angka badge tiap tab — murni count() di server, tanpa memuat daftarnya.
+export type MonitoringCounts = {
+  masuk: number
+  siap_distribusi: number
+  dipinjam: number
+  dikembalikan: number
+}
+
+// Satu kartu "Distribusi per Ruangan": angka saja, tanpa daftar instrumennya.
+// Daftar instrumen per ruangan baru diambil saat kartunya diklik (lihat `rooms`).
+export type RoomSummary = {
+  id: number
+  code: string | null
+  name: string
+  borrowed_count: number
+  overdue_count: number
 }
 
 // ── State ───────────────────────────────────────────────────────────────────
 
 type MonitoringState = {
+  /** Daftar ruangan LENGKAP dengan instrumennya — berat, hanya dimuat saat dibutuhkan. */
   rooms: MonitoredRoom[]
+  roomsSummary: RoomSummary[]
   incoming: IncomingOrder[]
   returned: ReturnedOrder[]
+  borrowedSummary: BorrowedSummary
+  counts: MonitoringCounts
   roomsLoading: boolean
+  roomsSummaryLoading: boolean
   incomingLoading: boolean
   returnedLoading: boolean
   roomsLoaded: boolean
+  roomsSummaryLoaded: boolean
   incomingLoaded: boolean
   returnedLoaded: boolean
 }
 
 const initialState: MonitoringState = {
   rooms: [],
+  roomsSummary: [],
   incoming: [],
   returned: [],
+  borrowedSummary: { borrowed: 0, sets: 0, units: 0, orders: 0, overdue: 0 },
+  counts: { masuk: 0, siap_distribusi: 0, dipinjam: 0, dikembalikan: 0 },
   roomsLoading: false,
+  roomsSummaryLoading: false,
   incomingLoading: false,
   returnedLoading: false,
   roomsLoaded: false,
+  roomsSummaryLoaded: false,
   incomingLoaded: false,
   returnedLoaded: false,
 }
@@ -129,6 +175,32 @@ export const fetchMonitoringReturned = createAsyncThunk("monitoring/returned", (
   fetchAllPages<ReturnedOrder>("/master/monitoring/returned"),
 )
 
+// Angka kartu statistik — dihitung di server dengan aturan yang sama seperti kartu
+// "Instrumen di Gudang Steril": paket per SET, satuan per UNIT.
+export const fetchBorrowedSummary = createAsyncThunk("monitoring/borrowedSummary", async () => {
+  const res = await api.get("/master/monitoring/borrowed-summary")
+  return res.data.data as BorrowedSummary
+})
+
+// Angka badge tab. `from`/`to` mengikuti filter rentang tanggal halaman supaya
+// angkanya selalu sama dengan isi daftar yang tampil.
+export const fetchMonitoringCounts = createAsyncThunk(
+  "monitoring/counts",
+  async (range: { from?: string; to?: string } = {}) => {
+    const res = await api.get("/master/monitoring/counts", {
+      params: { from: range.from || undefined, to: range.to || undefined },
+    })
+    return res.data.data as MonitoringCounts
+  },
+)
+
+// Kartu "Distribusi per Ruangan" — angka per ruangan saja (bukan agregat paginated),
+// jadi cukup satu permintaan ringan.
+export const fetchMonitoringRoomsSummary = createAsyncThunk("monitoring/roomsSummary", async () => {
+  const res = await api.get("/master/monitoring/rooms-summary")
+  return res.data.data as RoomSummary[]
+})
+
 const monitoringSlice = createSlice({
   name: "monitoring",
   initialState,
@@ -137,6 +209,7 @@ const monitoringSlice = createSlice({
     // sehingga di-fetch ulang saat halaman monitoring dibuka berikutnya.
     invalidateMonitoring(state) {
       state.roomsLoaded = false
+      state.roomsSummaryLoaded = false
       state.incomingLoaded = false
       state.returnedLoaded = false
     },
@@ -175,6 +248,23 @@ const monitoringSlice = createSlice({
       })
       .addCase(fetchMonitoringReturned.rejected, (state) => {
         state.returnedLoading = false
+      })
+      .addCase(fetchMonitoringRoomsSummary.pending, (state) => {
+        state.roomsSummaryLoading = true
+      })
+      .addCase(fetchMonitoringRoomsSummary.fulfilled, (state, action) => {
+        state.roomsSummary = action.payload
+        state.roomsSummaryLoading = false
+        state.roomsSummaryLoaded = true
+      })
+      .addCase(fetchMonitoringRoomsSummary.rejected, (state) => {
+        state.roomsSummaryLoading = false
+      })
+      .addCase(fetchBorrowedSummary.fulfilled, (state, action) => {
+        state.borrowedSummary = action.payload
+      })
+      .addCase(fetchMonitoringCounts.fulfilled, (state, action) => {
+        state.counts = action.payload
       })
   },
 })

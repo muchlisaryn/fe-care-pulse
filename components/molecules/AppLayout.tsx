@@ -111,14 +111,16 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
   // terisi. Pengumuman suara dipicu DI SINI, bukan dari kenaikan angka badge,
   // karena hanya payload event yang membawa nama ruangan asal order — dan satu
   // event = satu order, sehingga beberapa order beruntun tetap diumumkan semua.
+  // `id` order ikut dikirim agar order yang sama tidak diumumkan berulang, berapa
+  // pun jumlah instrumen di dalamnya (lihat announceIncomingOrder).
   useEffect(() => {
     if (!isAuthenticated) return
     const echo = getEcho()
     if (!echo) return
     const channel = echo.channel("orders")
-    channel.listen(".order.submitted", (e: { room?: string | null }) => {
+    channel.listen(".order.submitted", (e: { id?: number | null; room?: string | null }) => {
       dispatch(fetchIncomingCount())
-      announceIncomingOrder(e?.room)
+      announceIncomingOrder(e?.room, e?.id)
     })
     // Permintaan pinjam-alih baru → perbarui badge "Permintaan Pinjam".
     const transferChannel = echo.channel("transfers")

@@ -28,6 +28,8 @@ export type OrderItem = {
   condition_out_id: number | null
   condition_in_id: number | null
   is_returned: boolean
+  /** Nomor label kemasan bungkus steril (satu label = satu bungkus = satu set). */
+  barcode_no?: string | null
   instrument_stock?: {
     id: number
     code: string

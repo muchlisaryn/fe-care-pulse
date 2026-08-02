@@ -64,12 +64,39 @@ export function primeNotifSound(): void {
   }
 }
 
+// SATU ORDER = SATU PENGUMUMAN, berapa pun jumlah instrumen yang dipesan di dalamnya.
+// Id order yang sudah diumumkan diingat sebentar supaya event `order.submitted` yang
+// sampai lebih dari sekali ke tab yang sama (langganan channel ganda, event dikirim
+// ulang oleh Pusher) tidak berbunyi berkali-kali. Catatannya kedaluwarsa sendiri agar
+// tidak tumbuh terus selama tab dibuka seharian.
+const announcedAt = new Map<number, number>()
+const ANNOUNCE_TTL_MS = 60_000
+
+function shouldAnnounce(orderId?: number | null): boolean {
+  // Tanpa id (payload lama) tidak bisa disaring — umumkan apa adanya.
+  if (orderId == null) return true
+
+  const now = Date.now()
+  for (const [id, at] of announcedAt) {
+    if (now - at > ANNOUNCE_TTL_MS) announcedAt.delete(id)
+  }
+  if (announcedAt.has(orderId)) return false
+
+  announcedAt.set(orderId, now)
+
+  return true
+}
+
 /**
- * Umumkan order masuk. `room` berasal dari payload broadcast `order.submitted`;
- * bila kosong (ruangan terhapus / data lama), kalimatnya diringkas tanpa menyebut
- * ruangan alih-alih mengucapkan "dari ruangan undefined".
+ * Umumkan order masuk. `room` & `orderId` berasal dari payload broadcast
+ * `order.submitted`; bila ruangan kosong (ruangan terhapus / data lama), kalimatnya
+ * diringkas tanpa menyebut ruangan alih-alih mengucapkan "dari ruangan undefined".
+ *
+ * Order yang sama tidak diumumkan dua kali — lihat `shouldAnnounce`.
  */
-export function announceIncomingOrder(room?: string | null): void {
+export function announceIncomingOrder(room?: string | null, orderId?: number | null): void {
+  if (!shouldAnnounce(orderId)) return
+
   const name = room?.trim()
   speak(name ? `Ada order masuk dari ruangan ${name}` : "Ada order masuk")
 }

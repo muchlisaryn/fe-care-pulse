@@ -38,6 +38,17 @@ import { invalidateMonitoring } from "@/lib/store/slices/monitoringSlice"
 import { fetchRoomOptions } from "@/lib/store/slices/roomSlice"
 import api from "@/lib/axios"
 
+// Satu BUNGKUS fisik pada modal Detail Order: satu nomor label kemasan (barcode_no).
+// Paket 2 set → 2 grup; instrumen satuan sejenis dalam satu bungkus → satu grup.
+type DetailUnitGroup = {
+  key: string
+  source: "satuan" | "paket"
+  /** Nama paket (untuk paket) atau nama instrumen (untuk satuan). */
+  name: string
+  barcodeNo: string | null
+  units: OrderItem[]
+}
+
 // Unit yang dipilih untuk dipinjam-alih dari satu order yang sedang dipinjam.
 type PinjamUnit = {
   stockId: number
@@ -568,34 +579,46 @@ export default function OrderInstrumenPage() {
     })
   }
 
-  function toggleUnitPaket(name: string) {
+  // Buka/tutup isi satu bungkus (grup label) pada daftar Instrumen Dipinjam.
+  function toggleUnitPaket(key: string) {
     setExpandedUnitPaket((prev) => {
       const next = new Set(prev)
-      if (next.has(name)) next.delete(name)
-      else next.add(name)
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
       return next
     })
   }
 
-  // Kelompokkan unit instrumen di modal detail: paket → per nama paket, satuan → per unit.
-  const detailUnitGroups = useMemo(() => {
-    const items = detail?.items ?? []
-    const paket = new Map<string, OrderItem[]>()
-    const satuan: OrderItem[] = []
-    for (const it of items) {
-      if (it.source === "paket") {
-        const name = it.package_name ?? "Paket"
-        const arr = paket.get(name) ?? []
-        arr.push(it)
-        paket.set(name, arr)
-      } else {
-        satuan.push(it)
+  // Kelompokkan instrumen dipinjam di modal detail per BUNGKUS fisik: satu nomor
+  // label kemasan (barcode_no) = satu bungkus = satu set. Paket 2 set tampil sebagai
+  // 2 grup terpisah, bukan satu grup berisi seluruh unitnya. Unit tanpa label (data
+  // lama sebelum tahap packaging) berdiri sebagai grup sendiri.
+  const detailUnitGroups = useMemo<DetailUnitGroup[]>(() => {
+    const map = new Map<string, DetailUnitGroup>()
+    for (const it of detail?.items ?? []) {
+      const name =
+        it.source === "paket"
+          ? (it.package_name ?? "Paket")
+          : (it.instrument_stock?.instrument?.name ?? "Instrumen Satuan")
+      const key = `${it.source}|${name}|${it.barcode_no ?? `__tanpa-label#${it.id}`}`
+      const g = map.get(key) ?? {
+        key,
+        source: it.source,
+        name,
+        barcodeNo: it.barcode_no ?? null,
+        units: [],
       }
+      g.units.push(it)
+      map.set(key, g)
     }
-    return {
-      paketGroups: [...paket.entries()].map(([name, units]) => ({ name, units })),
-      satuanUnits: satuan,
-    }
+    // Paket dulu baru satuan, masing-masing urut nama — sama seperti Inventaris Gudang.
+    return [...map.values()].sort((a, b) =>
+      a.source === b.source
+        ? a.name.localeCompare(b.name, "id", { numeric: true })
+        : a.source === "paket"
+          ? -1
+          : 1,
+    )
   }, [detail])
 
   async function openDetail(row: Order) {
@@ -1317,7 +1340,8 @@ export default function OrderInstrumenPage() {
                                 {r.package_name ?? r.catalog?.name ?? "Paket"}
                               </span>
                             </div>
-                            <span className="text-xs text-gray-500">{r.quantity} paket</span>
+                            {/* Paket diminta dalam satuan SET (satu set = satu bungkus). */}
+                            <span className="text-xs text-gray-500">{r.quantity} set</span>
                           </button>
                         ) : (
                           <div className="flex items-center justify-between gap-2 px-3 py-2">
@@ -1363,28 +1387,42 @@ export default function OrderInstrumenPage() {
 
             <div>
               <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-400">
-                Unit Instrumen
+                Instrumen Dipinjam
               </p>
               {detail.items && detail.items.length > 0 ? (
                 <div className="space-y-2">
-                  {/* Paket: dikelompokkan per nama paket, klik untuk lihat rincian unit */}
-                  {detailUnitGroups.paketGroups.map((g) => {
-                    const open = expandedUnitPaket.has(g.name)
+                  {/* Satu baris = satu BUNGKUS (nomor label kemasan); klik untuk melihat
+                      instrumen di dalamnya. Jumlah setnya terbaca dari banyaknya baris. */}
+                  {detailUnitGroups.map((g) => {
+                    const open = expandedUnitPaket.has(g.key)
+                    const isPaket = g.source === "paket"
                     return (
-                      <div key={`paket-${g.name}`} className="rounded-lg border border-gray-200">
+                      <div key={g.key} className="rounded-lg border border-gray-200">
                         <button
                           type="button"
-                          onClick={() => toggleUnitPaket(g.name)}
-                          className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left"
+                          onClick={() => toggleUnitPaket(g.key)}
+                          className="flex w-full flex-wrap items-center gap-x-2 gap-y-1 px-3 py-2 text-left"
                         >
-                          <div className="flex items-center gap-2">
-                            <ChevronRight
-                              className={"h-4 w-4 text-gray-400 transition-transform " + (open ? "rotate-90" : "")}
-                            />
-                            <Badge variant="info">Paket</Badge>
-                            <span className="text-sm font-medium text-gray-800">{g.name}</span>
-                          </div>
-                          <span className="text-xs text-gray-500">{g.units.length} unit</span>
+                          <ChevronRight
+                            className={
+                              "h-4 w-4 shrink-0 text-gray-400 transition-transform " +
+                              (open ? "rotate-90" : "")
+                            }
+                          />
+                          <Badge variant={isPaket ? "info" : "default"}>
+                            {isPaket ? "Paket" : "Satuan"}
+                          </Badge>
+                          <span className="truncate text-sm font-medium text-gray-800">{g.name}</span>
+                          {g.barcodeNo ? (
+                            <span className="shrink-0 rounded bg-[#075489]/8 px-1.5 py-0.5 font-mono text-xs font-semibold text-[#075489]">
+                              {g.barcodeNo}
+                            </span>
+                          ) : (
+                            <span className="shrink-0 text-xs text-gray-400">tanpa label</span>
+                          )}
+                          <span className="ml-auto shrink-0 text-xs text-gray-500">
+                            {g.units.length} instrumen
+                          </span>
                         </button>
 
                         {open && (
@@ -1397,13 +1435,6 @@ export default function OrderInstrumenPage() {
                       </div>
                     )
                   })}
-
-                  {/* Satuan: ditampilkan per unit */}
-                  {detailUnitGroups.satuanUnits.map((u) => (
-                    <div key={`satuan-${u.id}`} className="rounded-lg border border-gray-200">
-                      <DetailUnitRow unit={u} satuan />
-                    </div>
-                  ))}
                 </div>
               ) : (
                 <div className="py-6 text-center text-sm text-gray-400">
@@ -1419,23 +1450,14 @@ export default function OrderInstrumenPage() {
 }
 
 // Satu baris unit instrumen di modal detail (lihat-saja). `indent` untuk unit
-// di dalam grup paket; `satuan` menambahkan badge "Satuan".
-function DetailUnitRow({
-  unit,
-  indent = false,
-  satuan = false,
-}: {
-  unit: OrderItem
-  indent?: boolean
-  satuan?: boolean
-}) {
+// di dalam grup bungkus. Jenis (paket/satuan) sudah ditandai di kepala grupnya.
+function DetailUnitRow({ unit, indent = false }: { unit: OrderItem; indent?: boolean }) {
   const name = unit.instrument_stock?.instrument?.name ?? `Instrumen #${unit.instrument_stock_id}`
   const pad = indent ? "pl-6" : ""
   return (
     <div className="px-3 py-2">
       {/* Baris 1: identitas unit — nama muat penuh (badge status pindah ke bawah). */}
       <div className={"flex min-w-0 items-center gap-2 " + pad}>
-        {satuan && <Badge variant="default">Satuan</Badge>}
         <span className="shrink-0 font-mono text-xs font-semibold text-[#4ba69d] bg-[#4ba69d]/10 px-2 py-0.5 rounded">
           {unit.instrument_stock?.code ?? "—"}
         </span>

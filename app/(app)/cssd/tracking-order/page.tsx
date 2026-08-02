@@ -30,10 +30,12 @@ import { fetchIncomingCount } from "@/lib/store/slices/notifSlice"
 import { fetchConditions } from "@/lib/store/slices/conditionSlice"
 import {
   fetchMonitoringRooms,
+  fetchMonitoringRoomsSummary,
   fetchMonitoringIncoming,
   fetchMonitoringReturned,
+  fetchBorrowedSummary,
+  fetchMonitoringCounts,
   type MonitoredInstrument,
-  type MonitoredRoom,
   type IncomingStatus,
   type IncomingItem,
   type IncomingOrder,
@@ -93,6 +95,40 @@ function todayInput(): string {
   return d.toISOString().slice(0, 10)
 }
 
+/** Tanggal `n` hari lalu (lokal), format "YYYY-MM-DD" — nilai awal filter rentang. */
+function daysAgoInput(n: number): string {
+  const d = new Date()
+  d.setDate(d.getDate() - n)
+  d.setMinutes(d.getMinutes() - d.getTimezoneOffset())
+  return d.toISOString().slice(0, 10)
+}
+
+/**
+ * Tanggal LOKAL sebuah nilai dari API dalam format "YYYY-MM-DD" — dasar pembanding
+ * filter rentang. Sengaja memakai zona waktu lokal (bukan potong string ISO) supaya
+ * hasil saringan sama persis dengan tanggal yang tertulis di kartu (`formatDate`).
+ */
+function dateKey(value: string | null): string | null {
+  if (!value) return null
+  const d = new Date(value)
+  if (Number.isNaN(d.getTime())) return value.slice(0, 10)
+  d.setMinutes(d.getMinutes() - d.getTimezoneOffset())
+  return d.toISOString().slice(0, 10)
+}
+
+/**
+ * Apakah tanggal sebuah baris masuk rentang filter (inklusif di kedua ujung)?
+ * Baris tanpa tanggal (data lama) sengaja TETAP ditampilkan — menyembunyikannya
+ * berarti pekerjaan yang belum selesai bisa hilang dari layar tanpa disadari.
+ */
+function inDateRange(value: string | null, from: string, to: string): boolean {
+  const key = dateKey(value)
+  if (!key) return true
+  if (from && key < from) return false
+  if (to && key > to) return false
+  return true
+}
+
 // Order + unit hasil scan untuk pengembalian.
 type ReturnUnit = {
   id: number
@@ -134,13 +170,36 @@ function titleCodes(order: ReturnOrder) {
 }
 
 // Ringkasan jumlah pinjaman pada kartu order: PAKET dihitung per SET, instrumen
-// lepas per UNIT fisik — mis. "2 set · 3 unit". `fallbackUnits` dipakai bila
-// jumlah set belum tersedia (data monitoring lama) agar kartu tidak tampil "0".
+// lepas per UNIT fisik — mis. "2 set paket · 10 unit satuan". Satuannya ditulis
+// lengkap supaya jelas mana yang set paket & mana yang unit satuan.
+// `fallbackUnits` dipakai bila jumlah set belum tersedia (data monitoring lama)
+// agar kartu tidak tampil "0".
 function qtySummary(sets: number, units: number, fallbackUnits: number): string {
   const parts: string[] = []
-  if (sets > 0) parts.push(`${sets} set`)
-  if (units > 0) parts.push(`${units} unit`)
+  if (sets > 0) parts.push(`${sets} set paket`)
+  if (units > 0) parts.push(`${units} unit satuan`)
   return parts.length > 0 ? parts.join(" · ") : `${fallbackUnits} unit`
+}
+
+// Satu grup unit pada modal Pengembalian & Riwayat Pengembalian = satu BUNGKUS fisik.
+type ReturnGroup = { key: string; name: string | null; barcodeNo: string | null; units: ReturnUnit[] }
+
+// Kelompokkan unit order per NOMOR LABEL kemasan (barcode_no): satu label = satu
+// bungkus steril = satu set. Paket 2 set tampil sebagai 2 grup terpisah dengan
+// labelnya masing-masing, bukan satu grup berisi dua label — jadi jumlah setnya
+// terbaca langsung dari banyaknya grup, tak perlu ditulis lagi.
+// Nama paket/satuan tetap ikut jadi kunci agar unit tanpa label (data lama) tidak
+// tercampur antar jenis.
+function buildReturnGroups(items: ReturnUnit[]): ReturnGroup[] {
+  const map = new Map<string, ReturnGroup>()
+  for (const u of items) {
+    const name = u.source === "paket" ? (u.package_name ?? "Paket") : null
+    const key = `${name ?? "__satuan__"}|${u.barcode_no ?? "__tanpa-label__"}`
+    const g = map.get(key) ?? { key, name, barcodeNo: u.barcode_no, units: [] }
+    g.units.push(u)
+    map.set(key, g)
+  }
+  return [...map.values()]
 }
 
 function formatDate(value: string | null) {
@@ -162,6 +221,53 @@ function isOverdue(returnPlanDate: string | null): boolean {
   const d = new Date(returnPlanDate)
   d.setHours(0, 0, 0, 0)
   return d.getTime() < startOfToday()
+}
+
+// Satu BUNGKUS fisik di dalam kartu order: satu nomor label kemasan (barcode_no).
+// Paket 2 set → 2 grup terpisah; satuan sejenis dalam satu bungkus → satu grup.
+type LabelGroup = {
+  key: string
+  source: "satuan" | "paket"
+  /** Nama paket (untuk paket) atau nama instrumen (untuk satuan). */
+  name: string
+  barcodeNo: string | null
+  units: {
+    stockId: number | null
+    code: string | null
+    instrumentCode: string | null
+    instrumentName: string | null
+  }[]
+}
+
+// Ratakan baris monitoring (per katalog instrumen) menjadi grup per nomor label
+// kemasan — dasar tampilan rincian saat kartu order dibuka. Unit tanpa label (data
+// lama sebelum tahap packaging) berdiri sebagai grup sendiri agar tidak tercampur.
+function buildLabelGroups(rows: MonitoredInstrument[]): LabelGroup[] {
+  const map = new Map<string, LabelGroup>()
+  for (const r of rows) {
+    const name =
+      r.source === "paket" ? (r.package_name ?? "Paket") : (r.instrument?.name ?? "Instrumen")
+    for (const u of r.units) {
+      const label = u.barcode_no ?? `__tanpa-label#${u.instrument_stock_id ?? u.code}`
+      const key = `${r.source}|${name}|${label}`
+      const g = map.get(key) ?? { key, source: r.source, name, barcodeNo: u.barcode_no, units: [] }
+      g.units.push({
+        stockId: u.instrument_stock_id,
+        code: u.code,
+        instrumentCode: r.instrument?.code ?? null,
+        instrumentName: r.instrument?.name ?? null,
+      })
+      map.set(key, g)
+    }
+  }
+  // Paket dulu baru satuan, masing-masing urut nama — sama seperti Inventaris Gudang.
+  return [...map.values()].sort((a, b) =>
+    a.source === b.source
+      ? a.name.localeCompare(b.name, "id", { numeric: true })
+      : a.source === "paket"
+        ? -1
+        : 1,
+  )
 }
 
 // Grup tampilan: per order (peminjam) → di dalamnya per paket / satuan.
@@ -245,10 +351,22 @@ function MonitoringCssd() {
   // Data monitoring disimpan di Redux global. Hanya di-fetch saat store masih
   // kosong (mis. halaman di-refresh / dibuka pertama kali), bukan tiap kali
   // berpindah antar halaman.
+  // Daftar ruangan LENGKAP (beserta seluruh unit dipinjam) — payload terberat di
+  // halaman ini, jadi hanya diambil saat benar-benar dipakai: tab Distribution &
+  // Tracking dibuka, atau kartu ruangan diklik.
   const rooms = useAppSelector((s) => s.monitoring.rooms)
+  // Kartu "Distribusi per Ruangan" cukup angkanya — endpoint ringkas tersendiri.
+  const roomsSummary = useAppSelector((s) => s.monitoring.roomsSummary)
   const incoming = useAppSelector((s) => s.monitoring.incoming)
   const returned = useAppSelector((s) => s.monitoring.returned)
+  // Angka ketiga kartu statistik — dihitung di server (paket per set, satuan per
+  // unit), bukan dari daftar ruangan yang dimuat penuh.
+  const borrowedSummary = useAppSelector((s) => s.monitoring.borrowedSummary)
+  // Angka badge tab — count() murni di server, dipakai untuk tab yang datanya
+  // memang belum dimuat.
+  const counts = useAppSelector((s) => s.monitoring.counts)
   const loading = useAppSelector((s) => s.monitoring.roomsLoading)
+  const roomsSummaryLoading = useAppSelector((s) => s.monitoring.roomsSummaryLoading)
   const incomingLoading = useAppSelector((s) => s.monitoring.incomingLoading)
   const returnedLoading = useAppSelector((s) => s.monitoring.returnedLoading)
   const roomsLoaded = useAppSelector((s) => s.monitoring.roomsLoaded)
@@ -264,21 +382,47 @@ function MonitoringCssd() {
     parseTab(searchParams.get("tab")),
   )
 
-  // Distribusi per Ruangan (data rooms): pakai cache — hanya di-fetch saat store
-  // masih kosong (refresh halaman / pertama dibuka), TIDAK saat kembali ke menu.
-  // Refetch hanya dipicu terima pesanan (refreshMonitoring) atau event real-time.
-  useEffect(() => {
-    if (!roomsLoaded) dispatch(fetchMonitoringRooms())
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  // Filter rentang tanggal tab "Distribution & Tracking" — default H-7 s/d hari ini.
+  // Dideklarasikan di sini (sebelum efek pemuatan) karena ikut jadi parameter
+  // endpoint angka badge.
+  const [dateFrom, setDateFrom] = useState(() => daysAgoInput(7))
+  const [dateTo, setDateTo] = useState(() => todayInput())
 
-  // Daftar Order (order masuk + dikembalikan): selalu muat ulang tiap halaman
-  // dibuka, termasuk saat user kembali ke menu ini — dengan loading.
+  // Tab & rentang tanggal terkini untuk dibaca listener real-time. Listener-nya
+  // sengaja didaftarkan sekali saja; tanpa ref, ia akan memasang ulang langganan
+  // Pusher tiap kali filter berubah.
+  const activeTabRef = useRef(activeTab)
+  const rangeRef = useRef({ from: dateFrom, to: dateTo })
   useEffect(() => {
-    dispatch(fetchMonitoringIncoming())
-    dispatch(fetchMonitoringReturned())
-    dispatch(fetchReadyToDistribute())
+    activeTabRef.current = activeTab
+    rangeRef.current = { from: dateFrom, to: dateTo }
+  }, [activeTab, dateFrom, dateTo])
+
+  // Yang SELALU dimuat saat halaman dibuka hanyalah angka-angkanya: kartu statistik
+  // & ringkasan per ruangan. Keduanya endpoint hitung, bukan daftar — jadi ringan.
+  useEffect(() => {
+    dispatch(fetchBorrowedSummary())
+    dispatch(fetchMonitoringRoomsSummary())
   }, [dispatch])
+
+  // Badge tab diambil dari endpoint count() (bukan dari panjang daftar), mengikuti
+  // rentang tanggal yang sedang aktif supaya angkanya sama dengan isi daftar.
+  useEffect(() => {
+    dispatch(fetchMonitoringCounts({ from: dateFrom, to: dateTo }))
+  }, [dispatch, dateFrom, dateTo])
+
+  // Daftar order dimuat PER TAB — tab yang tidak dibuka tidak pernah ditarik
+  // datanya. Tab Distribusi butuh tiga sumber: order siap distribusi, unit yang
+  // sedang dipinjam (dari daftar ruangan), dan riwayat pengembalian.
+  useEffect(() => {
+    if (activeTab === "masuk") {
+      dispatch(fetchMonitoringIncoming())
+      return
+    }
+    dispatch(fetchReadyToDistribute())
+    dispatch(fetchMonitoringRooms())
+    dispatch(fetchMonitoringReturned())
+  }, [activeTab, dispatch])
 
   // Real-time: segarkan daftar monitoring/tracking saat ada order baru atau
   // permintaan pinjam-alih masuk — lewat Pusher, tanpa polling. Memakai
@@ -288,13 +432,21 @@ function MonitoringCssd() {
     const echo = getEcho()
     if (!echo) return
     const onOrderSubmitted = () => {
-      dispatch(fetchMonitoringIncoming()) // daftar "Order Masuk" muncul seketika
+      // Daftar "Order Masuk" hanya ditarik ulang bila tabnya memang sedang dibuka;
+      // selain itu cukup angkanya yang disegarkan.
+      if (activeTabRef.current === "masuk") dispatch(fetchMonitoringIncoming())
+      dispatch(fetchMonitoringCounts({ from: rangeRef.current.from, to: rangeRef.current.to }))
       dispatch(fetchIncomingCount()) // badge sidebar ikut sinkron
     }
     const onTransferResponded = () => {
       // Pinjam-alih di-ACC → unit pindah ruangan, nama peminjam terbaru berubah.
-      dispatch(fetchMonitoringRooms())
-      dispatch(fetchMonitoringReturned())
+      dispatch(fetchBorrowedSummary())
+      dispatch(fetchMonitoringRoomsSummary())
+      dispatch(fetchMonitoringCounts({ from: rangeRef.current.from, to: rangeRef.current.to }))
+      if (activeTabRef.current === "distribusi") {
+        dispatch(fetchMonitoringRooms())
+        dispatch(fetchMonitoringReturned())
+      }
     }
     const ordersChannel = echo.channel("orders")
     ordersChannel.listen(".order.submitted", onOrderSubmitted)
@@ -306,10 +458,18 @@ function MonitoringCssd() {
     }
   }, [dispatch])
 
-  // Paksa muat ulang seluruh data monitoring (dipakai setelah proses/pengembalian).
+  // Muat ulang data setelah aksi yang mengubahnya (terima order, distribusi,
+  // pengembalian). Angka statistik & badge selalu disegarkan; daftarnya hanya untuk
+  // tab yang sedang dibuka — tab lain akan menariknya sendiri saat dibuka.
   const refreshMonitoring = () => {
+    dispatch(fetchBorrowedSummary())
+    dispatch(fetchMonitoringRoomsSummary())
+    dispatch(fetchMonitoringCounts({ from: dateFrom, to: dateTo }))
+    if (activeTab === "masuk") {
+      dispatch(fetchMonitoringIncoming())
+      return
+    }
     dispatch(fetchMonitoringRooms())
-    dispatch(fetchMonitoringIncoming())
     dispatch(fetchMonitoringReturned())
     dispatch(fetchReadyToDistribute())
   }
@@ -330,11 +490,14 @@ function MonitoringCssd() {
     }
   }
 
+  // `*Input` = draft yang sedang diketik/dipilih; nilai di sebelahnya = yang sudah
+  // DITERAPKAN. Keduanya baru disamakan saat tombol Cari ditekan — mengetik atau
+  // mengubah tanggal tidak menarik data apa pun.
   const [searchInput, setSearchInput] = useState("")
   const [searchQuery, setSearchQuery] = useState("")
+  const [dateFromInput, setDateFromInput] = useState(dateFrom)
+  const [dateToInput, setDateToInput] = useState(dateTo)
   const [page, setPage] = useState(1)
-  // Pencarian manual dengan debounce sedang berlangsung (indikator visual).
-  const [searching, setSearching] = useState(false)
   // Mode scan pada kolom pencarian Daftar Order: saat aktif, kolom TIDAK bisa
   // diketik manual & tombol Cari nonaktif — kolom hanya menampilkan hasil pindaian
   // barcode (scanner berperilaku sebagai keyboard, ditangkap listener global).
@@ -353,7 +516,9 @@ function MonitoringCssd() {
   const [expandedRoomPaket, setExpandedRoomPaket] = useState<Set<string>>(new Set())
   const [roomDetailSearch, setRoomDetailSearch] = useState("")
 
-  const [detailRoom, setDetailRoom] = useState<MonitoredRoom | null>(null)
+  // Modal "Alat Dipinjam" per ruangan menyimpan ID-nya saja; isinya diambil dari
+  // daftar ruangan lengkap yang baru dimuat saat kartunya diklik.
+  const [detailRoomId, setDetailRoomId] = useState<number | null>(null)
   const [roomsModalOpen, setRoomsModalOpen] = useState(false)
   const [roomSearch, setRoomSearch] = useState("")
 
@@ -558,27 +723,40 @@ function MonitoringCssd() {
     }
   }
 
+  // Tombol Cari = satu-satunya pemicu: terapkan kata kunci + rentang tanggal, lalu
+  // tarik ulang data tab yang sedang dibuka. Perubahan angka badge menyusul sendiri
+  // lewat efek yang mengawasi rentang tanggal.
   function handleSearch(e: React.FormEvent) {
     e.preventDefault()
     if (scanArmed) return // mode scan: pencarian manual dimatikan
-    setSearchQuery(searchInput.trim())
-    setPage(1)
+    applyFilter(searchInput.trim(), dateFromInput, dateToInput)
   }
 
-  // Pencarian dengan debounce: setelah berhenti mengetik ~1 detik, terapkan filter.
-  // Tidak berlaku saat mode scan — hasil pindaian tidak dipakai sebagai filter.
-  useEffect(() => {
-    if (scanArmed) return
-    const q = searchInput.trim()
-    if (q === searchQuery) return
-    setSearching(true)
-    const t = setTimeout(() => {
-      setSearchQuery(q)
-      setPage(1)
-      setSearching(false)
-    }, 1000)
-    return () => clearTimeout(t)
-  }, [searchInput, searchQuery, scanArmed])
+  // Terapkan filter + muat ulang daftar tab aktif.
+  function applyFilter(query: string, from: string, to: string) {
+    setSearchQuery(query)
+    setDateFrom(from)
+    setDateTo(to)
+    setPage(1)
+    if (activeTab === "masuk") {
+      dispatch(fetchMonitoringIncoming())
+      return
+    }
+    dispatch(fetchReadyToDistribute())
+    dispatch(fetchMonitoringRooms())
+    dispatch(fetchMonitoringReturned())
+  }
+
+  // Reset = kembali ke rentang bawaan (7 hari terakhir) tanpa kata kunci, langsung
+  // diterapkan — tombolnya sendiri sudah merupakan aksi.
+  function resetFilter() {
+    setSearchInput("")
+    const from = daysAgoInput(7)
+    const to = todayInput()
+    setDateFromInput(from)
+    setDateToInput(to)
+    applyFilter("", from, to)
+  }
 
   // Nyalakan/matikan mode scan. Saat dinyalakan, kolom pencarian dikosongkan dan
   // filter aktif dilepas supaya tampilan tidak menyesatkan.
@@ -689,25 +867,18 @@ function MonitoringCssd() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scanArmed, searchInput])
 
-  // Hanya ruangan yang punya alat dipinjam, urut terbanyak.
+  // Kartu "Distribusi per Ruangan" — angkanya langsung dari server (sudah urut
+  // terbanyak & hanya ruangan yang sedang meminjam), tanpa memuat daftar unitnya.
   const roomSummary = useMemo(
     () =>
-      rooms
-        .filter((r) => r.borrowed_count > 0)
-        .map((r) => {
-          const terlambat = r.instruments
-            .filter((i) => isOverdue(i.return_plan_date))
-            .reduce((sum, i) => sum + i.qty, 0)
-          return {
-            room: r,
-            ruangan: r.name,
-            total: r.borrowed_count,
-            dipinjam: r.borrowed_count - terlambat,
-            terlambat,
-          }
-        })
-        .sort((a, b) => b.total - a.total),
-    [rooms]
+      roomsSummary.map((r) => ({
+        id: r.id,
+        ruangan: r.name,
+        total: r.borrowed_count,
+        dipinjam: r.borrowed_count - r.overdue_count,
+        terlambat: r.overdue_count,
+      })),
+    [roomsSummary],
   )
   const visibleRooms = roomSummary.slice(0, 6)
 
@@ -769,37 +940,75 @@ function MonitoringCssd() {
 
   // Tab "Distribution & Tracking": order yang terdistribusi ke ruangan (sedang
   // dipinjam) + riwayat yang sudah dikembalikan.
-  const distribusiRows = useMemo<CombinedRow[]>(
-    () => [
-      ...orderGroups.map((group) => ({ kind: "borrowed" as const, group })),
-      ...returnedFiltered.map((order) => ({ kind: "returned" as const, order })),
-    ],
-    [orderGroups, returnedFiltered],
+  //
+  // Rentang tanggal dibandingkan dengan tanggal AKTIVITAS TERAKHIR tiap baris:
+  // order dipinjam pakai tanggal pinjam, order selesai pakai tanggal pengembalian.
+  // Dengan begitu order lama yang baru saja dikembalikan tetap terlihat pada rentang
+  // "7 hari terakhir" — kalau memakai tanggal pinjam, riwayatnya langsung hilang.
+  const borrowedRows = useMemo<CombinedRow[]>(
+    () =>
+      orderGroups
+        .filter((g) => inDateRange(g.order_date, dateFrom, dateTo))
+        .map((group) => ({ kind: "borrowed" as const, group })),
+    [orderGroups, dateFrom, dateTo],
   )
 
-  // Order siap distribusi (status digudang) — disaring kata kunci yang sama.
-  const readyDistributeFiltered = useMemo(() => {
-    if (!q) return readyToDistribute
-    return readyToDistribute.filter(
-      (o) =>
-        o.code.toLowerCase().includes(q) ||
-        (o.code_transaction ?? "").toLowerCase().includes(q) ||
-        (o.borrowed_by ?? "").toLowerCase().includes(q) ||
-        (o.room?.name ?? "").toLowerCase().includes(q),
-    )
-  }, [readyToDistribute, q])
+  const returnedRows = useMemo<CombinedRow[]>(
+    () =>
+      returnedFiltered
+        .filter((o) => inDateRange(o.returned_at ?? o.order_date, dateFrom, dateTo))
+        .map((order) => ({ kind: "returned" as const, order })),
+    [returnedFiltered, dateFrom, dateTo],
+  )
 
-  // Jumlah per tab (total) untuk badge angka di label tab.
-  const masukCount = incomingFiltered.length
+  const distribusiRows = useMemo<CombinedRow[]>(
+    () => [...borrowedRows, ...returnedRows],
+    [borrowedRows, returnedRows],
+  )
+
+  // Order siap distribusi (status digudang) — disaring kata kunci & rentang tanggal
+  // yang sama (tanggalnya = saat order diterima CSSD / siap diantar).
+  const readyDistributeFiltered = useMemo(
+    () =>
+      readyToDistribute.filter(
+        (o) =>
+          inDateRange(o.processed_at, dateFrom, dateTo) &&
+          (!q ||
+            o.code.toLowerCase().includes(q) ||
+            (o.code_transaction ?? "").toLowerCase().includes(q) ||
+            (o.borrowed_by ?? "").toLowerCase().includes(q) ||
+            (o.room?.name ?? "").toLowerCase().includes(q)),
+      ),
+    [readyToDistribute, q, dateFrom, dateTo],
+  )
+
   // Pagination tab Distribusi hanya atas borrowed+returned; "Siap Distribusi"
   // ditampilkan terpisah di atas (tidak dipaginasi).
   const distribusiCount = distribusiRows.length
-  const distribusiBadge = distribusiCount + readyDistributeFiltered.length
+
+  // Badge tab = PEKERJAAN YANG BELUM SELESAI saja: order siap distribusi (belum
+  // diantar) + order yang masih dipinjam. Order yang sudah dikembalikan tidak
+  // dihitung — riwayatnya tetap tampil di daftar, tapi bukan lagi tugas berjalan.
+  //
+  // Untuk tab yang sedang dibuka angkanya dihitung dari baris yang benar-benar
+  // tampil (sudah kena filter pencarian); tab yang datanya belum dimuat memakai
+  // angka dari endpoint count() — supaya membuka halaman tidak perlu menarik daftar
+  // tab yang tidak dilihat hanya demi sebuah angka.
+  const masukBadge = activeTab === "masuk" ? incomingFiltered.length : counts.masuk
+  const distribusiBadge =
+    activeTab === "distribusi"
+      ? readyDistributeFiltered.length + borrowedRows.length
+      : counts.siap_distribusi + counts.dipinjam
 
   const tabCount: Record<MonitoringTab, number> = {
-    masuk: masukCount,
+    masuk: incomingFiltered.length,
     distribusi: distribusiCount,
   }
+
+  // Sedang memuat daftar tab yang terbuka — dipakai indikator di kolom cari dan
+  // status "Memuat data..." pada daftarnya.
+  const listLoading =
+    activeTab === "masuk" ? incomingLoading : loading || returnedLoading || distributeLoading
 
   // Pindah tab → kembali ke halaman 1 & simpan tab ke URL (?tab=...).
   function changeTab(tab: MonitoringTab) {
@@ -815,6 +1024,13 @@ function MonitoringCssd() {
   const pageStart = (page - 1) * ITEMS_PER_PAGE
   const pagedIncoming = incomingFiltered.slice(pageStart, pageStart + ITEMS_PER_PAGE)
   const pagedDistribusi = distribusiRows.slice(pageStart, pageStart + ITEMS_PER_PAGE)
+
+  // Ruangan yang sedang dibuka modalnya — diambil dari daftar ruangan lengkap.
+  // `null` selama data itu masih dimuat (lihat openRoomDetail).
+  const detailRoom = useMemo(
+    () => (detailRoomId === null ? null : (rooms.find((r) => r.id === detailRoomId) ?? null)),
+    [rooms, detailRoomId],
+  )
 
   // Modal "Alat Dipinjam" per ruangan: saring lalu kelompokkan dengan pola yang sama.
   const roomOrderGroups = useMemo(() => {
@@ -853,18 +1069,15 @@ function MonitoringCssd() {
   const toggleRoomOrder = toggle(setExpandedRoomOrder)
   const toggleRoomPaket = toggle(setExpandedRoomPaket)
 
-  function openRoomDetail(room: MonitoredRoom) {
+  // Klik kartu ruangan = aksi yang memicu pemuatan daftar unit dipinjam (payload
+  // terberat). Selama belum ada di store, modal menampilkan "Memuat data...".
+  function openRoomDetail(roomId: number) {
     setExpandedRoomOrder(new Set())
     setExpandedRoomPaket(new Set())
     setRoomDetailSearch("")
-    setDetailRoom(room)
+    setDetailRoomId(roomId)
+    if (!roomsLoaded) dispatch(fetchMonitoringRooms())
   }
-
-  const totalUnit = allRows.reduce((sum, r) => sum + r.qty, 0)
-  const totalOrder = new Set(allRows.map((r) => r.order_code)).size
-  const totalTerlambat = allRows
-    .filter((r) => isOverdue(r.return_plan_date))
-    .reduce((sum, r) => sum + r.qty, 0)
 
   return (
     <div className="space-y-6">
@@ -874,14 +1087,21 @@ function MonitoringCssd() {
       />
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        <StatCard title="Total Unit Dipinjam" value={`${totalUnit}`} icon={Package} />
-        <StatCard title="Order Aktif" value={`${totalOrder}`} icon={ArrowLeftRight} />
-        <StatCard title="Unit Terlambat" value={`${totalTerlambat}`} icon={AlertTriangle} positive={false} />
+        {/* Ketiga angka dihitung di server (satu permintaan ringkasan), bukan dari
+            daftar ruangan yang dimuat penuh lalu dijumlah di klien. */}
+        <StatCard title="Instrumen Sedang Dipinjam" value={`${borrowedSummary.borrowed}`} icon={Package} />
+        <StatCard title="Order Aktif" value={`${borrowedSummary.orders}`} icon={ArrowLeftRight} />
+        <StatCard
+          title="Instrumen Terlambat"
+          value={`${borrowedSummary.overdue}`}
+          icon={AlertTriangle}
+          positive={false}
+        />
       </div>
 
       <div>
         <h2 className="mb-3 text-sm font-semibold text-gray-700">Distribusi per Ruangan</h2>
-        {loading ? (
+        {roomsSummaryLoading ? (
           <div className="py-10 text-center text-sm text-gray-400">Memuat data...</div>
         ) : roomSummary.length === 0 ? (
           <Card>
@@ -894,12 +1114,12 @@ function MonitoringCssd() {
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
               {visibleRooms.map((r) => (
                 <RoomDistributionCard
-                  key={r.room.id}
+                  key={r.id}
                   ruangan={r.ruangan}
                   total={r.total}
                   dipinjam={r.dipinjam}
                   terlambat={r.terlambat}
-                  onClick={() => openRoomDetail(r.room)}
+                  onClick={() => openRoomDetail(r.id)}
                 />
               ))}
             </div>
@@ -933,7 +1153,7 @@ function MonitoringCssd() {
           <div className="flex gap-5 overflow-x-auto border-b border-gray-200 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
             {(
               [
-                { key: "masuk", label: "Order Masuk", count: masukCount },
+                { key: "masuk", label: "Order Masuk", count: masukBadge },
                 { key: "distribusi", label: "Distribution & Tracking", count: distribusiBadge },
               ] as { key: MonitoringTab; label: string; count: number }[]
             ).map((t) => {
@@ -965,9 +1185,16 @@ function MonitoringCssd() {
             })}
           </div>
 
-          <form onSubmit={handleSearch} className="flex gap-2 w-full">
-            <div className="relative flex-1">
-              {searching || scanLoading ? (
+          {/* Satu baris filter — tata letaknya disamakan dengan halaman Order
+              Instrumen: kolom cari melar, rentang tanggal lebar tetap, aksi di ujung. */}
+          <form
+            onSubmit={handleSearch}
+            className="flex flex-col gap-3 lg:flex-row lg:flex-wrap lg:items-end"
+          >
+            <div className="min-w-[220px] flex-1 space-y-1.5">
+              <Label htmlFor="monitoring-search">Cari</Label>
+              <div className="relative">
+              {listLoading || scanLoading ? (
                 <Loader2 className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 animate-spin text-[#075489] pointer-events-none" />
               ) : (
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 pointer-events-none" />
@@ -1007,14 +1234,60 @@ function MonitoringCssd() {
               >
                 <ScanLine className="h-4 w-4" />
               </button>
+              </div>
             </div>
-            <Button
-              type="submit"
-              disabled={scanArmed}
-              className="bg-[#075489] hover:bg-[#075489]/90 text-white shrink-0"
-            >
-              Cari
-            </Button>
+
+            {/* Rentang tanggal — hanya untuk tab Distribution & Tracking. Tab
+                "Order Masuk" sengaja tidak disaring: order yang belum diterima harus
+                selalu terlihat, setua apa pun tanggalnya. */}
+            {activeTab === "distribusi" && (
+              <>
+                <div className="space-y-1.5">
+                  <Label htmlFor="tracking-date-from">Dari Tanggal</Label>
+                  <Input
+                    id="tracking-date-from"
+                    type="date"
+                    value={dateFromInput}
+                    max={dateToInput || undefined}
+                    onChange={(e) => setDateFromInput(e.target.value)}
+                    className="sm:w-44"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="tracking-date-to">Sampai Tanggal</Label>
+                  <Input
+                    id="tracking-date-to"
+                    type="date"
+                    value={dateToInput}
+                    min={dateFromInput || undefined}
+                    onChange={(e) => setDateToInput(e.target.value)}
+                    className="sm:w-44"
+                  />
+                </div>
+              </>
+            )}
+
+            {/* Aksi */}
+            <div className="flex justify-end gap-2">
+              <Button
+                type="submit"
+                disabled={scanArmed}
+                className="bg-[#075489] hover:bg-[#075489]/90 text-white shrink-0"
+              >
+                Cari
+              </Button>
+              {activeTab === "distribusi" && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={resetFilter}
+                  className="shrink-0"
+                  title="Kembalikan ke 7 hari terakhir"
+                >
+                  Reset
+                </Button>
+              )}
+            </div>
           </form>
 
           {scanArmed && (
@@ -1044,7 +1317,7 @@ function MonitoringCssd() {
           </div>
         )}
 
-        {loading || incomingLoading || returnedLoading || distributeLoading ? (
+        {listLoading ? (
           <div className="py-16 text-center text-sm text-gray-400">Memuat data...</div>
         ) : activeCount === 0 &&
           !(activeTab === "distribusi" && readyDistributeFiltered.length > 0) ? (
@@ -1053,7 +1326,7 @@ function MonitoringCssd() {
               ? "Tidak ada order yang cocok dengan pencarian."
               : activeTab === "masuk"
                 ? "Belum ada order masuk."
-                : "Belum ada order yang terdistribusi."}
+                : "Tidak ada order pada rentang tanggal ini."}
           </div>
         ) : (
           <div className="space-y-2 p-4">
@@ -1105,19 +1378,22 @@ function MonitoringCssd() {
         />
       </Card>
 
-      {/* Detail unit dipinjam di ruangan terpilih */}
+      {/* Detail unit dipinjam di ruangan terpilih — daftarnya baru diambil saat
+          kartu ruangan diklik, jadi bisa sempat menampilkan status memuat. */}
       <Modal
-        open={detailRoom !== null}
-        onClose={() => setDetailRoom(null)}
-        title={`Alat Dipinjam — ${detailRoom?.name ?? ""}`}
+        open={detailRoomId !== null}
+        onClose={() => setDetailRoomId(null)}
+        title={`Alat Dipinjam — ${detailRoom?.name ?? roomSummary.find((r) => r.id === detailRoomId)?.ruangan ?? ""}`}
         size="lg"
         footer={
-          <Button variant="outline" onClick={() => setDetailRoom(null)}>
+          <Button variant="outline" onClick={() => setDetailRoomId(null)}>
             Tutup
           </Button>
         }
       >
-        {!detailRoom || detailRoom.instruments.length === 0 ? (
+        {loading && !detailRoom ? (
+          <div className="py-10 text-center text-sm text-gray-400">Memuat data...</div>
+        ) : !detailRoom || detailRoom.instruments.length === 0 ? (
           <div className="py-10 text-center text-sm text-gray-400">
             Tidak ada alat yang sedang dipinjam di ruangan ini.
           </div>
@@ -1183,14 +1459,14 @@ function MonitoringCssd() {
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                 {filteredRooms.map((r) => (
                   <RoomDistributionCard
-                    key={r.room.id}
+                    key={r.id}
                     ruangan={r.ruangan}
                     total={r.total}
                     dipinjam={r.dipinjam}
                     terlambat={r.terlambat}
                     onClick={() => {
                       setRoomsModalOpen(false)
-                      openRoomDetail(r.room)
+                      openRoomDetail(r.id)
                     }}
                   />
                 ))}
@@ -1449,15 +1725,7 @@ function MonitoringCssd() {
                     })
                   : returnOrder.items
 
-                const groupMap = new Map<string, { name: string | null; units: ReturnUnit[] }>()
-                for (const u of visibleUnits) {
-                  const name = u.source === "paket" ? (u.package_name ?? "Paket") : null
-                  const key = name ?? "__satuan__"
-                  const g = groupMap.get(key) ?? { name, units: [] }
-                  g.units.push(u)
-                  groupMap.set(key, g)
-                }
-                const groups = [...groupMap.values()]
+                const groups = buildReturnGroups(visibleUnits)
 
                 const readonly = returnOrder.status === "dikembalikan"
                 const condIdByName = (n: string) => {
@@ -1499,10 +1767,7 @@ function MonitoringCssd() {
                             pending.length > 0 &&
                             pending.every((u) => returnCondById[u.id] === baikId)
                           return (
-                            <div
-                              key={g.name ?? "__satuan__"}
-                              className="overflow-hidden rounded-lg border border-gray-200"
-                            >
+                            <div key={g.key} className="overflow-hidden rounded-lg border border-gray-200">
                               {/* Kepala grup: nama paket + progres kembali + aksi massal */}
                               <div className="flex items-center justify-between gap-3 border-b border-gray-200 bg-gray-50 px-3 py-2">
                                 <div className="flex min-w-0 items-center gap-2">
@@ -1514,17 +1779,12 @@ function MonitoringCssd() {
                                   <span className="truncate text-sm font-semibold text-gray-800">
                                     {g.name ?? "Instrumen Satuan"}
                                   </span>
-                                  {/* Nomor label fisik (barcode_no) grup ini — menggantikan
-                                      kode produksi (lebih dari satu bila dari beberapa label). */}
-                                  {[...new Set(g.units.map((u) => u.barcode_no).filter(Boolean))].map(
-                                    (bc) => (
-                                      <span
-                                        key={bc}
-                                        className="shrink-0 rounded bg-[#075489]/8 px-1.5 py-0.5 font-mono text-xs font-semibold text-[#075489]"
-                                      >
-                                        {bc}
-                                      </span>
-                                    ),
+                                  {/* Nomor label fisik (barcode_no) bungkus ini — dasar
+                                      pengelompokan, jadi selalu tepat satu per grup. */}
+                                  {g.barcodeNo && (
+                                    <span className="shrink-0 rounded bg-[#075489]/8 px-1.5 py-0.5 font-mono text-xs font-semibold text-[#075489]">
+                                      {g.barcodeNo}
+                                    </span>
                                   )}
                                 </div>
                                 {!readonly && !!baikId && pending.length > 0 && (
@@ -1798,18 +2058,21 @@ function MonitoringCssd() {
               <DetailField label="No. Transaksi" value={historyOrder.code_transaction} />
               <DetailField label="Ruangan / Unit" value={historyOrder.room?.name} />
               <DetailField label="Dipinjam Oleh" value={historyOrder.borrowed_by} />
+              {/* Periode NYATA: tanggal pinjam → tanggal saat CSSD menerima
+                  pengembaliannya (return_actual_date), bukan rencana kembali —
+                  order ini memang sudah selesai. */}
               <DetailField
                 label="Periode"
-                value={`${formatDate(historyOrder.order_date)} → ${formatDate(historyOrder.return_plan_date)}`}
+                value={`${formatDate(historyOrder.order_date)} → ${formatDate(historyOrder.return_actual_date)}`}
               />
+              <DetailField label="Dikembalikan Oleh" value={historyOrder.returned_by} />
             </div>
 
             {/* Tautan RM pasien (traceability loop) — bila alat sempat didistribusikan ke pasien */}
             {(historyOrder.medical_record_no || historyOrder.patient_name) && (
-              <div className="grid grid-cols-1 gap-4 rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 sm:grid-cols-3">
+              <div className="grid grid-cols-1 gap-4 rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 sm:grid-cols-2">
                 <DetailField label="No. RM Pasien" value={historyOrder.medical_record_no} />
                 <DetailField label="Nama Pasien" value={historyOrder.patient_name} />
-                <DetailField label="Diterima" value={historyOrder.distributed_to} />
               </div>
             )}
 
@@ -1819,22 +2082,11 @@ function MonitoringCssd() {
             {/* Grouping sama seperti Pengembalian: per paket/satuan + header nama &
                 barcode_no; read-only (kondisi keluar → masuk + status). */}
             {(() => {
-              const groupMap = new Map<string, { name: string | null; units: ReturnUnit[] }>()
-              for (const u of historyOrder.items) {
-                const name = u.source === "paket" ? (u.package_name ?? "Paket") : null
-                const key = name ?? "__satuan__"
-                const g = groupMap.get(key) ?? { name, units: [] }
-                g.units.push(u)
-                groupMap.set(key, g)
-              }
-              const groups = [...groupMap.values()]
+              const groups = buildReturnGroups(historyOrder.items)
               return (
                 <div className="space-y-3">
                   {groups.map((g) => (
-                    <div
-                      key={g.name ?? "__satuan__"}
-                      className="overflow-hidden rounded-lg border border-gray-200"
-                    >
+                    <div key={g.key} className="overflow-hidden rounded-lg border border-gray-200">
                       {/* Kepala grup: nama paket / satuan + barcode_no */}
                       <div className="flex items-center gap-2 border-b border-gray-200 bg-gray-50 px-3 py-2">
                         {g.name ? (
@@ -1845,14 +2097,13 @@ function MonitoringCssd() {
                         <span className="truncate text-sm font-semibold text-gray-800">
                           {g.name ?? "Instrumen Satuan"}
                         </span>
-                        {[...new Set(g.units.map((u) => u.barcode_no).filter(Boolean))].map((bc) => (
-                          <span
-                            key={bc}
-                            className="shrink-0 rounded bg-[#075489]/8 px-1.5 py-0.5 font-mono text-xs font-semibold text-[#075489]"
-                          >
-                            {bc}
+                        {/* Nomor label fisik (barcode_no) bungkus ini — dasar
+                            pengelompokan, jadi selalu tepat satu per grup. */}
+                        {g.barcodeNo && (
+                          <span className="shrink-0 rounded bg-[#075489]/8 px-1.5 py-0.5 font-mono text-xs font-semibold text-[#075489]">
+                            {g.barcodeNo}
                           </span>
-                        ))}
+                        )}
                       </div>
 
                       {/* Baris unit: kode + nama, kondisi keluar → masuk, status */}
@@ -2013,52 +2264,71 @@ function OrderGroupCard({
               )}
             </div>
 
-            {/* Level 2: detail per paket (bisa di-expand) + satuan */}
+            {/* Level 2: rincian per BUNGKUS (nomor label kemasan) — satu label = satu
+                bungkus = satu set, jadi paket 2 set tampil sebagai 2 baris yang
+                masing-masing bisa dibuka untuk melihat instrumen di dalamnya. */}
             {orderOpen && (
               <div className="space-y-2 border-t border-gray-100 bg-gray-50/40 px-3 py-2.5">
-                {o.paketGroups.map((g) => {
-                  const key = `${o.order_code}::${g.name}`
-                  const paketOpen = expandedPaket.has(key)
-                  const paketQty = g.instruments.reduce((s, i) => s + i.qty, 0)
+                {buildLabelGroups([
+                  ...o.paketGroups.flatMap((g) => g.instruments),
+                  ...o.satuanInstruments,
+                ]).map((g) => {
+                  const key = `${o.order_code}::${g.key}`
+                  const groupOpen = expandedPaket.has(key)
+                  const isPaket = g.source === "paket"
                   return (
                     <div key={key} className="rounded-lg border border-gray-200 bg-white">
                       <button
                         type="button"
                         onClick={() => togglePaket(key)}
-                        className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left"
+                        className="flex w-full flex-wrap items-center gap-x-2 gap-y-1 px-3 py-2 text-left"
                       >
-                        <div className="flex items-center gap-2">
-                          <ChevronRight
-                            className={
-                              "h-4 w-4 text-gray-400 transition-transform " + (paketOpen ? "rotate-90" : "")
-                            }
-                          />
-                          <Badge variant="info">Paket</Badge>
-                          <span className="text-sm font-medium text-gray-800">{g.name}</span>
-                        </div>
-                        {/* Paket selalu dihitung per SET (bukan unit fisiknya). */}
-                        <span className="shrink-0 text-xs text-gray-500">
-                          {g.sets > 0 ? `${g.sets} set` : `${paketQty} unit`}
+                        <ChevronRight
+                          className={
+                            "h-4 w-4 shrink-0 text-gray-400 transition-transform " +
+                            (groupOpen ? "rotate-90" : "")
+                          }
+                        />
+                        <Badge variant={isPaket ? "info" : "default"}>
+                          {isPaket ? "Paket" : "Satuan"}
+                        </Badge>
+                        <span className="truncate text-sm font-medium text-gray-800">{g.name}</span>
+                        {g.barcodeNo ? (
+                          <span className="shrink-0 rounded bg-[#075489]/8 px-1.5 py-0.5 font-mono text-xs font-semibold text-[#075489]">
+                            {g.barcodeNo}
+                          </span>
+                        ) : (
+                          <span className="shrink-0 text-xs text-gray-400">tanpa label</span>
+                        )}
+                        <span className="ml-auto shrink-0 text-xs text-gray-500">
+                          {g.units.length} instrumen
                         </span>
                       </button>
 
-                      {paketOpen && (
+                      {groupOpen && (
                         <div className="divide-y divide-gray-50 border-t border-gray-100 bg-gray-50/60">
-                          {g.instruments.map((i) => (
-                            <MonInstrumentRow key={`${g.name}-${i.instrument?.id}`} row={i} indent />
+                          {g.units.map((u) => (
+                            <div
+                              key={u.stockId ?? u.code}
+                              className="flex flex-wrap items-center gap-x-2 gap-y-1 px-3 py-2 pl-9"
+                            >
+                              <span className="shrink-0 rounded bg-[#4ba69d]/10 px-2 py-0.5 font-mono text-xs font-semibold text-[#4ba69d]">
+                                {u.instrumentCode ?? "—"}
+                              </span>
+                              <span className="truncate text-sm text-gray-700">
+                                {u.instrumentName ?? "—"}
+                              </span>
+                              {/* Kode unit fisik yang dipinjam. */}
+                              <span className="ml-auto shrink-0 rounded bg-gray-100 px-1.5 py-0.5 font-mono text-[11px] text-gray-600">
+                                {u.code ?? "—"}
+                              </span>
+                            </div>
                           ))}
                         </div>
                       )}
                     </div>
                   )
                 })}
-
-                {/* Satuan: per instrumen */}
-                {o.satuanInstruments.map((i) => (
-                  <div key={`satuan-${i.instrument?.id}`} className="rounded-lg border border-gray-200 bg-white">
-                    <MonInstrumentRow row={i} satuan />
-                  </div>
-                ))}
               </div>
             )}
           </div>
@@ -2208,11 +2478,13 @@ function ReturnedOrderCard({
 }) {
   return (
     <div className={"rounded-lg border border-gray-200 border-l-4 " + STATUS_BORDER.dikembalikan}>
-      <div className="flex flex-col px-1 sm:flex-row sm:items-start sm:gap-1">
+      {/* sm:items-center → tombol Riwayat sejajar tengah kartu, bukan menempel atas */}
+      <div className="flex flex-col px-1 sm:flex-row sm:items-center sm:gap-1">
+        {/* items-center → keterangan jumlah sejajar tengah, selurus tombol Riwayat */}
         <button
           type="button"
           onClick={onToggle}
-          className="flex min-w-0 flex-1 items-start justify-between gap-2 px-2 py-2.5 text-left"
+          className="flex min-w-0 flex-1 items-center justify-between gap-2 px-2 py-2.5 text-left"
         >
           <div className="flex min-w-0 items-start gap-2">
             <ChevronRight
@@ -2235,18 +2507,20 @@ function ReturnedOrderCard({
               </div>
             </div>
           </div>
-          <span className="shrink-0 text-xs text-gray-500">{order.total_units} unit</span>
+          {/* Aturan yang sama dengan kartu order aktif: paket per SET, satuan per UNIT. */}
+          <span className="shrink-0 text-xs text-gray-500">
+            {qtySummary(order.total_sets, order.total_satuan, order.total_units)}
+          </span>
         </button>
-        <div className="flex border-t border-gray-100 px-2 py-2 sm:mt-1.5 sm:shrink-0 sm:border-0 sm:px-0 sm:py-0 sm:pr-1">
+        <div className="flex justify-center border-t border-gray-100 px-2 py-2 sm:shrink-0 sm:items-center sm:border-0 sm:px-0 sm:py-0 sm:pr-1">
           <button
             type="button"
             onClick={onHistory}
             title="Riwayat peminjaman"
-            aria-label="Riwayat peminjaman"
-            className="flex flex-1 items-center justify-center gap-1.5 rounded-md border border-[#075489] px-3 py-1.5 text-xs font-medium text-[#075489] hover:bg-[#075489]/10 sm:flex-none sm:px-1.5"
+            className="flex flex-1 items-center justify-center gap-1.5 rounded-md border border-[#075489] px-4 py-1.5 text-xs font-medium text-[#075489] hover:bg-[#075489]/10 sm:flex-none"
           >
             <History className="h-4 w-4" />
-            <span className="sm:hidden">Riwayat</span>
+            Riwayat
           </button>
         </div>
       </div>
@@ -2264,57 +2538,46 @@ function ReturnedOrderCard({
   )
 }
 
-// Rincian unit order dikembalikan, dikelompokkan per paket / satuan (mirip order aktif).
+// Rincian unit order dikembalikan — dikelompokkan per BUNGKUS (nomor label kemasan),
+// sama seperti modal Pengembalian & Riwayat: paket 2 set tampil sebagai 2 kartu.
 function ReturnedUnitsDetail({ order }: { order: ReturnOrder }) {
   if (order.items.length === 0) {
     return <p className="py-2 text-center text-xs text-gray-400">Tidak ada unit.</p>
   }
-  const paket = new Map<string, ReturnUnit[]>()
-  const satuan: ReturnUnit[] = []
-  for (const it of order.items) {
-    if (it.source === "paket") {
-      const name = it.package_name ?? "Paket"
-      const arr = paket.get(name) ?? []
-      arr.push(it)
-      paket.set(name, arr)
-    } else {
-      satuan.push(it)
-    }
-  }
   return (
     <>
-      {[...paket.entries()].map(([name, units]) => (
-        <div key={name} className="rounded-lg border border-gray-200 bg-white">
-          <div className="flex items-center gap-2 border-b border-gray-100 px-3 py-2">
-            <Badge variant="info">Paket</Badge>
-            <span className="text-sm font-medium text-gray-800">{name}</span>
-            <span className="ml-auto text-xs text-gray-500">{units.length} unit</span>
+      {buildReturnGroups(order.items).map((g) => (
+        <div key={g.key} className="rounded-lg border border-gray-200 bg-white">
+          <div className="flex flex-wrap items-center gap-2 border-b border-gray-100 px-3 py-2">
+            <Badge variant={g.name ? "info" : "default"}>{g.name ? "Paket" : "Satuan"}</Badge>
+            <span className="truncate text-sm font-medium text-gray-800">
+              {g.name ?? "Instrumen Satuan"}
+            </span>
+            {g.barcodeNo && (
+              <span className="shrink-0 rounded bg-[#075489]/8 px-1.5 py-0.5 font-mono text-xs font-semibold text-[#075489]">
+                {g.barcodeNo}
+              </span>
+            )}
+            <span className="ml-auto shrink-0 text-xs text-gray-500">{g.units.length} instrumen</span>
           </div>
           <div className="divide-y divide-gray-50">
-            {units.map((u) => (
+            {g.units.map((u) => (
               <ReturnedUnitRow key={u.id} unit={u} />
             ))}
           </div>
         </div>
       ))}
-      {satuan.length > 0 && (
-        <div className="divide-y divide-gray-50 rounded-lg border border-gray-200 bg-white">
-          {satuan.map((u) => (
-            <ReturnedUnitRow key={u.id} unit={u} satuan />
-          ))}
-        </div>
-      )}
     </>
   )
 }
 
 // Satu baris unit pada rincian order dikembalikan: kode + nama + kondisi keluar → masuk.
-function ReturnedUnitRow({ unit, satuan = false }: { unit: ReturnUnit; satuan?: boolean }) {
+// Jenis (paket/satuan) sudah ditandai di kepala grupnya, jadi baris ini tanpa badge.
+function ReturnedUnitRow({ unit }: { unit: ReturnUnit }) {
   return (
     <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1.5 px-3 py-2">
-      {/* Kiri: identitas unit (badge + kode + nama) */}
+      {/* Kiri: identitas unit (kode + nama) */}
       <div className="flex min-w-0 items-center gap-2">
-        {satuan && <Badge variant="default">Satuan</Badge>}
         <span className="shrink-0 font-mono text-xs font-semibold text-[#4ba69d] bg-[#4ba69d]/10 px-2 py-0.5 rounded">
           {unit.instrument_stock?.code ?? "—"}
         </span>
@@ -2330,47 +2593,6 @@ function ReturnedUnitRow({ unit, satuan = false }: { unit: ReturnUnit; satuan?: 
   )
 }
 
-// Satu baris instrumen di tabel monitoring: kode + nama + qty + daftar unit.
-// `indent` untuk instrumen di dalam grup paket; `satuan` menambahkan badge "Satuan".
-function MonInstrumentRow({
-  row,
-  indent = false,
-  satuan = false,
-}: {
-  row: MonitoredInstrument
-  indent?: boolean
-  satuan?: boolean
-}) {
-  const pad = indent ? "pl-6" : ""
-  return (
-    <div className="px-3 py-2">
-      <div className="flex items-center justify-between gap-3">
-        <div className={"flex min-w-0 items-center gap-2 " + pad}>
-          {satuan && <Badge variant="default">Satuan</Badge>}
-          <span className="shrink-0 font-mono text-xs font-semibold text-[#4ba69d] bg-[#4ba69d]/10 px-2 py-0.5 rounded">
-            {row.instrument?.code ?? "—"}
-          </span>
-          <span className="truncate text-sm text-gray-700">{row.instrument?.name ?? "—"}</span>
-        </div>
-        <span className="shrink-0 text-xs font-semibold text-gray-600">
-          {row.qty} <span className="font-normal text-gray-400">unit</span>
-        </span>
-      </div>
-      {row.units.length > 0 && (
-        <div className={"mt-1.5 flex flex-wrap gap-1.5 " + pad}>
-          {row.units.map((u) => (
-            <span
-              key={u.instrument_stock_id ?? u.code}
-              className="font-mono text-[11px] text-gray-600 bg-gray-100 px-1.5 py-0.5 rounded"
-            >
-              {u.code ?? "—"}
-            </span>
-          ))}
-        </div>
-      )}
-    </div>
-  )
-}
 
 function DetailField({ label, value }: { label: string; value: string | null | undefined }) {
   return (

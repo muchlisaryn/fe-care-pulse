@@ -24,6 +24,7 @@ import { StatCard } from "@/components/molecules/StatCard"
 import { PageHeader } from "@/components/molecules/PageHeader"
 import { Modal } from "@/components/molecules/Modal"
 import { LoadMoreSentinel } from "@/components/molecules/LoadMoreSentinel"
+import { ExpiryCard } from "@/components/molecules/ExpiryCard"
 import { RackPickerModal } from "@/components/molecules/RackPickerModal"
 import { useAppDispatch, useAppSelector } from "@/lib/store/hooks"
 import {
@@ -492,16 +493,15 @@ function StorageSterilPage() {
     const s = soonestOf(units)
     return (
       <span className="ml-auto flex items-center gap-2">
-        <span className={"text-xs " + (s.alert ? "font-semibold text-red-600" : "text-gray-500")}>
-          {formatDate(s.expiry_date)}
-        </span>
-        {s.expired ? (
-          <Badge variant="danger">Kedaluwarsa</Badge>
-        ) : s.alert ? (
-          <Badge variant="danger">{s.days_to_expiry}h lagi</Badge>
-        ) : (
-          <Badge variant="success">Di Gudang</Badge>
-        )}
+        {/* Sudah/mendekati kedaluwarsa → kartu merah berisi tanggal + sisa hari;
+            selebihnya tanggal biasa + badge "Di Gudang". */}
+        <ExpiryCard
+          date={s.expiry_date}
+          daysToExpiry={s.days_to_expiry}
+          expired={s.expired}
+          alert={s.alert}
+        />
+        {!s.alert && !s.expired && <Badge variant="success">Di Gudang</Badge>}
       </span>
     )
   }
@@ -544,18 +544,12 @@ function StorageSterilPage() {
             satuan) bisa berisi unit dengan tanggal berbeda-beda — jadi tanggalnya
             tetap dicantumkan per unit. */}
         <div className="flex flex-wrap items-center gap-2">
-          {r.expiry_date ? (
-            <span
-              title="Tanggal kedaluwarsa"
-              className={"text-xs " + (r.alert ? "font-semibold text-red-600" : "text-gray-500")}
-            >
-              {formatDate(r.expiry_date)}
-            </span>
-          ) : (
-            <span title="Tanpa tanggal kedaluwarsa" className="text-gray-400 text-xs">
-              —
-            </span>
-          )}
+          <ExpiryCard
+            date={r.expiry_date}
+            daysToExpiry={r.days_to_expiry}
+            expired={r.expired}
+            alert={r.alert}
+          />
           {r.barcode_no ? (
             <span
               title="Nomor label kemasan"
