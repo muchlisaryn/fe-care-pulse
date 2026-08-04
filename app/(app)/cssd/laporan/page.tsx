@@ -8,8 +8,10 @@ import { Button } from "@/components/atoms/Button"
 import { Badge } from "@/components/atoms/Badge"
 import { Card } from "@/components/molecules/Card"
 import { PageHeader } from "@/components/molecules/PageHeader"
+import { DateRangeFields } from "@/components/molecules/DateRangeFields"
 import { Pagination } from "@/components/molecules/Pagination"
 import api from "@/lib/axios"
+import { downloadCsv } from "@/lib/csv"
 
 // Detail per aset (unit) di dalam satu grup.
 type ReportUnit = {
@@ -151,36 +153,24 @@ export default function LaporanPerAlatPage() {
         "Tanggal Steril",
         "Kedaluwarsa",
       ]
-      const escape = (v: string) => `"${v.replace(/"/g, '""')}"`
       // CSV tetap per aset (per unit): grup paket diuraikan jadi baris-baris unitnya.
       let n = 0
-      const lines = data.flatMap((g) =>
-        g.units.map((u) =>
-          [
-            ++n,
-            g.type === "paket" ? g.name ?? "" : "",
-            u.name ?? "",
-            g.batch_code ?? "",
-            statusLabel[g.status ?? ""] ?? g.status ?? "",
-            methodLabel[g.method ?? ""] ?? g.method ?? "",
-            g.machine ?? "",
-            g.operator ?? "",
-            u.condition ?? "",
-            formatDate(g.sterilized_at),
-            formatDate(g.expiry_date),
-          ]
-            .map((c) => escape(String(c)))
-            .join(","),
-        ),
+      const rows = data.flatMap((g) =>
+        g.units.map((u) => [
+          ++n,
+          g.type === "paket" ? g.name ?? "" : "",
+          u.name ?? "",
+          g.batch_code ?? "",
+          statusLabel[g.status ?? ""] ?? g.status ?? "",
+          methodLabel[g.method ?? ""] ?? g.method ?? "",
+          g.machine ?? "",
+          g.operator ?? "",
+          u.condition ?? "",
+          formatDate(g.sterilized_at),
+          formatDate(g.expiry_date),
+        ]),
       )
-      const csv = [headers.map(escape).join(","), ...lines].join("\n")
-      const blob = new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8" })
-      const url = URL.createObjectURL(blob)
-      const a = document.createElement("a")
-      a.href = url
-      a.download = `laporan-cssd-per-alat-${new Date().toISOString().slice(0, 10)}.csv`
-      a.click()
-      URL.revokeObjectURL(url)
+      downloadCsv(`laporan-cssd-per-alat-${new Date().toISOString().slice(0, 10)}.csv`, headers, rows)
     } finally {
       setExporting(false)
     }
@@ -234,23 +224,12 @@ export default function LaporanPerAlatPage() {
               </Select>
             </div>
 
-            <div className="space-y-1">
-              <label className="text-xs font-semibold uppercase tracking-wide text-gray-400">Tanggal Awal</label>
-              <Input
-                type="date"
-                value={form.dateFrom}
-                onChange={(e) => setForm((f) => ({ ...f, dateFrom: e.target.value }))}
-              />
-            </div>
-
-            <div className="space-y-1">
-              <label className="text-xs font-semibold uppercase tracking-wide text-gray-400">Tanggal Akhir</label>
-              <Input
-                type="date"
-                value={form.dateTo}
-                onChange={(e) => setForm((f) => ({ ...f, dateTo: e.target.value }))}
-              />
-            </div>
+            <DateRangeFields
+              from={form.dateFrom}
+              to={form.dateTo}
+              onFromChange={(v) => setForm((f) => ({ ...f, dateFrom: v }))}
+              onToChange={(v) => setForm((f) => ({ ...f, dateTo: v }))}
+            />
           </div>
 
           <div className="mt-4 flex flex-col-reverse gap-2 sm:flex-row sm:flex-wrap sm:justify-end">

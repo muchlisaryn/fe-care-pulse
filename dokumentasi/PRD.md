@@ -89,6 +89,7 @@ Aturan wajib (`AGENTS.md`): semua halaman menyusun UI dari `components/atoms/` d
 | `kedaluwarsa` | batch steril yang akan/sudah kadaluarsa |
 | `monitoring` | monitoring order/ruangan realtime |
 | `laporan` | laporan CSSD per alat |
+| `laporan-transaksi` | laporan transaksi peminjaman — satu baris per label kemasan |
 
 Halaman `monitor` (`/monitor`, `/monitor/all`, `/monitor/[ruangan_id]`) adalah papan display fullscreen berbasis realtime.
 
