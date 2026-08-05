@@ -50,13 +50,23 @@ const TYPE_OPTIONS = [
   { value: "paket", label: "Set" },
 ]
 
-function todayInput(): string {
-  return new Date().toISOString().slice(0, 10)
+/**
+ * Tanggal untuk <input type="date"> (YYYY-MM-DD), digeser `offsetDays` hari dari
+ * hari ini. Sengaja dirakit dari komponen tanggal LOKAL, bukan `toISOString()`
+ * yang memakai UTC — di WIB (UTC+7) cara itu memundurkan tanggal sehari setiap
+ * kali halaman dibuka sebelum pukul 07.00.
+ */
+function dateInput(offsetDays = 0): string {
+  const d = new Date()
+  d.setDate(d.getDate() + offsetDays)
+  const pad = (n: number) => String(n).padStart(2, "0")
+
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
 }
 
-/** Default: transaksi hari ini. Filter lain kosong. */
+/** Default: 30 hari terakhir (H-30 s.d. hari ini). Filter lain kosong. */
 function defaultFilters() {
-  return { search: "", roomId: "", type: "", dateFrom: todayInput(), dateTo: todayInput() }
+  return { search: "", roomId: "", type: "", dateFrom: dateInput(-30), dateTo: dateInput() }
 }
 
 type Filters = ReturnType<typeof defaultFilters>
@@ -177,7 +187,7 @@ export default function LaporanTransaksiInstrumenPage() {
         r.room ?? "",
       ])
 
-      const filename = `laporan-transaksi-instrumen-${todayInput()}.${format}`
+      const filename = `laporan-transaksi-instrumen-${dateInput()}.${format}`
       if (format === "xlsx") {
         downloadXlsx(filename, "Laporan Transaksi", EXPORT_HEADERS, exportRows)
       } else {
@@ -190,9 +200,9 @@ export default function LaporanTransaksiInstrumenPage() {
 
   const roomOptions = rooms.map((r) => ({ value: String(r.id), label: r.name }))
 
-  // Reset muncul hanya kalau ada yang menyimpang dari default (tanggal = hari ini,
-  // sisanya kosong). Draft form ikut dicek supaya tombolnya sudah tampil saat user
-  // mengubah filter tapi belum menekan Cari.
+  // Reset muncul hanya kalau ada yang menyimpang dari default (tanggal = 30 hari
+  // terakhir, sisanya kosong). Draft form ikut dicek supaya tombolnya sudah tampil
+  // saat user mengubah filter tapi belum menekan Cari.
   const hasActiveFilter = !isDefaultFilters(form) || !isDefaultFilters(filters)
 
   return (
@@ -254,7 +264,7 @@ export default function LaporanTransaksiInstrumenPage() {
               <div className="relative flex-1">
                 <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
                 <Input
-                  placeholder="Scan barcode atau ketik nama instrumen / set..."
+                  placeholder="Masukkan barcode atau nama instrumen / set..."
                   value={form.search}
                   onChange={(e) => setForm((f) => ({ ...f, search: e.target.value }))}
                   className="pl-9"
