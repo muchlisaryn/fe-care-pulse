@@ -32,9 +32,10 @@ import {
   fetchMonitoringRooms,
   fetchMonitoringRoomsSummary,
   fetchMonitoringIncoming,
-  fetchMonitoringReturned,
+  fetchMonitoringTracking,
   fetchBorrowedSummary,
   fetchMonitoringCounts,
+  TRACKING_PER_PAGE,
   type MonitoredInstrument,
   type IncomingStatus,
   type IncomingItem,
@@ -63,13 +64,11 @@ function parseTab(value: string | null): MonitoringTab {
   return MONITORING_TABS.includes(value as MonitoringTab) ? (value as MonitoringTab) : MONITORING_TABS[0]
 }
 
+// Tab "Order Masuk": daftarnya dimuat sekaligus lalu dipotong di klien.
 const ITEMS_PER_PAGE = 20
 
 // Tipe data monitoring (MonitoredRoom, IncomingOrder, ReturnedOrder, dll.)
 // kini tinggal di lib/store/slices/monitoringSlice dan di-impor di atas.
-
-// Baris tabel = grup katalog + nama ruangannya.
-type Row = MonitoredInstrument & { room: string }
 
 const incomingStatusLabel: Record<IncomingStatus, string> = {
   diajukan: "Diajukan",
@@ -358,7 +357,12 @@ function MonitoringCssd() {
   // Kartu "Distribusi per Ruangan" cukup angkanya — endpoint ringkas tersendiri.
   const roomsSummary = useAppSelector((s) => s.monitoring.roomsSummary)
   const incoming = useAppSelector((s) => s.monitoring.incoming)
-  const returned = useAppSelector((s) => s.monitoring.returned)
+  // Tab Distribution & Tracking: SATU halaman baris siap pakai dari server —
+  // pencarian, rentang tanggal, dan potongan halamannya dikerjakan di sana.
+  const tracking = useAppSelector((s) => s.monitoring.tracking)
+  const trackingLoading = useAppSelector((s) => s.monitoring.trackingLoading)
+  const trackingTotalPages = useAppSelector((s) => s.monitoring.trackingTotalPages)
+  const trackingTotalItems = useAppSelector((s) => s.monitoring.trackingTotalItems)
   // Angka ketiga kartu statistik — dihitung di server (paket per set, satuan per
   // unit), bukan dari daftar ruangan yang dimuat penuh.
   const borrowedSummary = useAppSelector((s) => s.monitoring.borrowedSummary)
@@ -368,7 +372,6 @@ function MonitoringCssd() {
   const loading = useAppSelector((s) => s.monitoring.roomsLoading)
   const roomsSummaryLoading = useAppSelector((s) => s.monitoring.roomsSummaryLoading)
   const incomingLoading = useAppSelector((s) => s.monitoring.incomingLoading)
-  const returnedLoading = useAppSelector((s) => s.monitoring.returnedLoading)
   const roomsLoaded = useAppSelector((s) => s.monitoring.roomsLoaded)
   const readyToDistribute = useAppSelector((s) => s.distribute.items)
   const distributeLoading = useAppSelector((s) => s.distribute.loading)
@@ -393,6 +396,10 @@ function MonitoringCssd() {
   // Pusher tiap kali filter berubah.
   const activeTabRef = useRef(activeTab)
   const rangeRef = useRef({ from: dateFrom, to: dateTo })
+  // Parameter halaman tracking yang sedang tampil — supaya listener bisa menarik
+  // ulang HALAMAN YANG SAMA, bukan melompat ke halaman 1. Diisi oleh efek di bawah;
+  // `page` & `searchQuery` baru dideklarasikan setelah blok ini.
+  const trackingParamsRef = useRef({ page: 1, search: "" })
   useEffect(() => {
     activeTabRef.current = activeTab
     rangeRef.current = { from: dateFrom, to: dateTo }
@@ -412,16 +419,15 @@ function MonitoringCssd() {
   }, [dispatch, dateFrom, dateTo])
 
   // Daftar order dimuat PER TAB — tab yang tidak dibuka tidak pernah ditarik
-  // datanya. Tab Distribusi butuh tiga sumber: order siap distribusi, unit yang
-  // sedang dipinjam (dari daftar ruangan), dan riwayat pengembalian.
+  // datanya. Grup "Siap Distribusi" tampil terpisah di atas daftar (tidak
+  // dipaginasi), jadi ia tetap dimuat sekaligus saat tab dibuka; baris daftarnya
+  // sendiri ditarik per halaman oleh efek di bawah (lihat fetchMonitoringTracking).
   useEffect(() => {
     if (activeTab === "masuk") {
       dispatch(fetchMonitoringIncoming())
       return
     }
     dispatch(fetchReadyToDistribute())
-    dispatch(fetchMonitoringRooms())
-    dispatch(fetchMonitoringReturned())
   }, [activeTab, dispatch])
 
   // Real-time: segarkan daftar monitoring/tracking saat ada order baru atau
@@ -444,8 +450,14 @@ function MonitoringCssd() {
       dispatch(fetchMonitoringRoomsSummary())
       dispatch(fetchMonitoringCounts({ from: rangeRef.current.from, to: rangeRef.current.to }))
       if (activeTabRef.current === "distribusi") {
-        dispatch(fetchMonitoringRooms())
-        dispatch(fetchMonitoringReturned())
+        dispatch(
+          fetchMonitoringTracking({
+            page: trackingParamsRef.current.page,
+            search: trackingParamsRef.current.search,
+            from: rangeRef.current.from,
+            to: rangeRef.current.to,
+          }),
+        )
       }
     }
     const ordersChannel = echo.channel("orders")
@@ -469,9 +481,12 @@ function MonitoringCssd() {
       dispatch(fetchMonitoringIncoming())
       return
     }
-    dispatch(fetchMonitoringRooms())
-    dispatch(fetchMonitoringReturned())
+    // Halaman yang sedang dilihat ditarik ulang dengan parameter yang sama.
+    dispatch(fetchMonitoringTracking({ page, search: searchQuery, from: dateFrom, to: dateTo }))
     dispatch(fetchReadyToDistribute())
+    // Daftar ruangan lengkap hanya menyuplai modal "Alat Dipinjam"; disegarkan
+    // hanya kalau modal itu memang pernah dibuka (datanya sudah dimuat).
+    if (roomsLoaded) dispatch(fetchMonitoringRooms())
   }
 
   // Batalkan order masuk (status → dibatalkan). Hanya untuk order yang belum
@@ -726,13 +741,28 @@ function MonitoringCssd() {
   // Tombol Cari = satu-satunya pemicu: terapkan kata kunci + rentang tanggal, lalu
   // tarik ulang data tab yang sedang dibuka. Perubahan angka badge menyusul sendiri
   // lewat efek yang mengawasi rentang tanggal.
+  // Satu halaman tab Distribution & Tracking = satu permintaan. Halaman, kata kunci,
+  // dan rentang tanggal semuanya PARAMETER API, jadi berpindah halaman atau menekan
+  // Cari otomatis menarik potongan yang tepat dari server — tidak ada lagi seluruh
+  // daftar yang ditarik lalu dipotong di klien.
+  useEffect(() => {
+    if (activeTab !== "distribusi") return
+    dispatch(fetchMonitoringTracking({ page, search: searchQuery, from: dateFrom, to: dateTo }))
+  }, [activeTab, dispatch, page, searchQuery, dateFrom, dateTo])
+
+  useEffect(() => {
+    trackingParamsRef.current = { page, search: searchQuery }
+  }, [page, searchQuery])
+
   function handleSearch(e: React.FormEvent) {
     e.preventDefault()
     if (scanArmed) return // mode scan: pencarian manual dimatikan
     applyFilter(searchInput.trim(), dateFromInput, dateToInput)
   }
 
-  // Terapkan filter + muat ulang daftar tab aktif.
+  // Terapkan filter + muat ulang daftar tab aktif. Tab Distribusi tidak perlu
+  // dispatch di sini: kata kunci & rentang tanggalnya adalah parameter API, jadi
+  // perubahan state-nya sudah memicu efek pemuatan halaman di atas.
   function applyFilter(query: string, from: string, to: string) {
     setSearchQuery(query)
     setDateFrom(from)
@@ -743,8 +773,6 @@ function MonitoringCssd() {
       return
     }
     dispatch(fetchReadyToDistribute())
-    dispatch(fetchMonitoringRooms())
-    dispatch(fetchMonitoringReturned())
   }
 
   // Reset = kembali ke rentang bawaan (7 hari terakhir) tanpa kata kunci, langsung
@@ -882,37 +910,7 @@ function MonitoringCssd() {
   )
   const visibleRooms = roomSummary.slice(0, 6)
 
-  // Ratakan jadi daftar unit untuk tabel.
-  const allRows = useMemo<Row[]>(
-    () => rooms.flatMap((r) => r.instruments.map((i) => ({ ...i, room: r.name }))),
-    [rooms]
-  )
-
   const q = searchQuery.toLowerCase()
-  const filtered = useMemo(
-    () =>
-      allRows.filter(
-        (r) =>
-          !q ||
-          (r.instrument?.code ?? "").toLowerCase().includes(q) ||
-          (r.instrument?.name ?? "").toLowerCase().includes(q) ||
-          // Kode unit fisik & nomor label bungkus (barcode) — agar hasil scan
-          // label paket langsung menemukan order yang harus dikembalikan.
-          r.units.some(
-            (u) =>
-              (u.code ?? "").toLowerCase().includes(q) ||
-              (u.barcode_no ?? "").toLowerCase().includes(q),
-          ) ||
-          r.room.toLowerCase().includes(q) ||
-          (r.borrowed_by ?? "").toLowerCase().includes(q) ||
-          r.order_code.toLowerCase().includes(q) ||
-          (r.code_transaction ?? "").toLowerCase().includes(q)
-      ),
-    [allRows, q]
-  )
-
-  // Tabel utama: kelompokkan baris dipinjam per order (peminjam), lalu per paket / satuan.
-  const orderGroups = useMemo(() => buildOrderGroups(filtered), [filtered])
 
   // Order masuk (belum dipinjam) ikut disaring dengan kata kunci pencarian yang sama.
   const incomingFiltered = useMemo(() => {
@@ -926,44 +924,25 @@ function MonitoringCssd() {
     )
   }, [incoming, q])
 
-  // Order dikembalikan (riwayat) ikut disaring dengan kata kunci yang sama.
-  const returnedFiltered = useMemo(() => {
-    if (!q) return returned
-    return returned.filter(
-      (o) =>
-        o.code.toLowerCase().includes(q) ||
-        (o.code_transaction ?? "").toLowerCase().includes(q) ||
-        (o.borrowed_by ?? "").toLowerCase().includes(q) ||
-        (o.room?.name ?? "").toLowerCase().includes(q),
-    )
-  }, [returned, q])
-
-  // Tab "Distribution & Tracking": order yang terdistribusi ke ruangan (sedang
-  // dipinjam) + riwayat yang sudah dikembalikan.
+  // Tab "Distribution & Tracking": satu halaman baris dari server — order yang masih
+  // dipinjam lebih dulu, lalu riwayat yang sudah dikembalikan. Pencarian, rentang
+  // tanggal (dibandingkan dengan tanggal AKTIVITAS TERAKHIR tiap baris), urutan, dan
+  // potongan halamannya sudah dikerjakan endpoint monitoring/tracking.
   //
-  // Rentang tanggal dibandingkan dengan tanggal AKTIVITAS TERAKHIR tiap baris:
-  // order dipinjam pakai tanggal pinjam, order selesai pakai tanggal pengembalian.
-  // Dengan begitu order lama yang baru saja dikembalikan tetap terlihat pada rentang
-  // "7 hari terakhir" — kalau memakai tanggal pinjam, riwayatnya langsung hilang.
-  const borrowedRows = useMemo<CombinedRow[]>(
-    () =>
-      orderGroups
-        .filter((g) => inDateRange(g.order_date, dateFrom, dateTo))
-        .map((group) => ({ kind: "borrowed" as const, group })),
-    [orderGroups, dateFrom, dateTo],
-  )
-
-  const returnedRows = useMemo<CombinedRow[]>(
-    () =>
-      returnedFiltered
-        .filter((o) => inDateRange(o.returned_at ?? o.order_date, dateFrom, dateTo))
-        .map((order) => ({ kind: "returned" as const, order })),
-    [returnedFiltered, dateFrom, dateTo],
-  )
-
+  // Baris "dipinjam" datang RATA lalu dikelompokkan di sini dengan pengelompok yang
+  // sama dengan modal per-ruangan — supaya kartu order di kedua tempat identik.
   const distribusiRows = useMemo<CombinedRow[]>(
-    () => [...borrowedRows, ...returnedRows],
-    [borrowedRows, returnedRows],
+    () =>
+      tracking.flatMap((row): CombinedRow[] => {
+        if (row.kind === "returned") return [{ kind: "returned", order: row.order }]
+        const group = buildOrderGroups(
+          row.instruments.map((i) => ({ ...i, room: i.room ?? undefined })),
+        )[0]
+        // Order yang seluruh unitnya tidak punya master instrumen tidak bisa
+        // digambarkan sebagai kartu — dilewati, bukan dirender kosong.
+        return group ? [{ kind: "borrowed", group }] : []
+      }),
+    [tracking],
   )
 
   // Order siap distribusi (status digudang) — disaring kata kunci & rentang tanggal
@@ -982,23 +961,20 @@ function MonitoringCssd() {
     [readyToDistribute, q, dateFrom, dateTo],
   )
 
-  // Pagination tab Distribusi hanya atas borrowed+returned; "Siap Distribusi"
-  // ditampilkan terpisah di atas (tidak dipaginasi).
-  const distribusiCount = distribusiRows.length
+  // Jumlah SELURUH baris tab Distribusi (bukan cuma yang tampil di halaman ini) —
+  // langsung dari server. "Siap Distribusi" tidak ikut: grup itu tampil terpisah di
+  // atas daftar dan tidak dipaginasi.
+  const distribusiCount = trackingTotalItems
 
   // Badge tab = PEKERJAAN YANG BELUM SELESAI saja: order siap distribusi (belum
   // diantar) + order yang masih dipinjam. Order yang sudah dikembalikan tidak
   // dihitung — riwayatnya tetap tampil di daftar, tapi bukan lagi tugas berjalan.
   //
-  // Untuk tab yang sedang dibuka angkanya dihitung dari baris yang benar-benar
-  // tampil (sudah kena filter pencarian); tab yang datanya belum dimuat memakai
-  // angka dari endpoint count() — supaya membuka halaman tidak perlu menarik daftar
-  // tab yang tidak dilihat hanya demi sebuah angka.
+  // Angka tab Distribusi selalu dari endpoint count() (sudah mengikuti rentang
+  // tanggal): daftarnya kini dipaginasi server, jadi baris yang tampil hanya satu
+  // halaman dan tidak bisa lagi dipakai menghitung totalnya.
   const masukBadge = activeTab === "masuk" ? incomingFiltered.length : counts.masuk
-  const distribusiBadge =
-    activeTab === "distribusi"
-      ? readyDistributeFiltered.length + borrowedRows.length
-      : counts.siap_distribusi + counts.dipinjam
+  const distribusiBadge = counts.siap_distribusi + counts.dipinjam
 
   const tabCount: Record<MonitoringTab, number> = {
     masuk: incomingFiltered.length,
@@ -1008,7 +984,7 @@ function MonitoringCssd() {
   // Sedang memuat daftar tab yang terbuka — dipakai indikator di kolom cari dan
   // status "Memuat data..." pada daftarnya.
   const listLoading =
-    activeTab === "masuk" ? incomingLoading : loading || returnedLoading || distributeLoading
+    activeTab === "masuk" ? incomingLoading : trackingLoading || distributeLoading
 
   // Pindah tab → kembali ke halaman 1 & simpan tab ke URL (?tab=...).
   function changeTab(tab: MonitoringTab) {
@@ -1020,10 +996,14 @@ function MonitoringCssd() {
   }
 
   const activeCount = tabCount[activeTab]
-  const totalPages = Math.ceil(activeCount / ITEMS_PER_PAGE)
+  // Tab Masuk masih dipotong di klien; tab Distribusi memakai jumlah halaman dari
+  // server — barisnya SUDAH merupakan potongan halaman ini, jadi tidak dipotong lagi.
+  const perPage = activeTab === "distribusi" ? TRACKING_PER_PAGE : ITEMS_PER_PAGE
+  const totalPages =
+    activeTab === "distribusi" ? trackingTotalPages : Math.ceil(activeCount / ITEMS_PER_PAGE)
   const pageStart = (page - 1) * ITEMS_PER_PAGE
   const pagedIncoming = incomingFiltered.slice(pageStart, pageStart + ITEMS_PER_PAGE)
-  const pagedDistribusi = distribusiRows.slice(pageStart, pageStart + ITEMS_PER_PAGE)
+  const pagedDistribusi = distribusiRows
 
   // Ruangan yang sedang dibuka modalnya — diambil dari daftar ruangan lengkap.
   // `null` selama data itu masih dimuat (lihat openRoomDetail).
@@ -1373,7 +1353,7 @@ function MonitoringCssd() {
           currentPage={page}
           totalPages={totalPages}
           totalItems={activeCount}
-          itemsPerPage={ITEMS_PER_PAGE}
+          itemsPerPage={perPage}
           onPageChange={setPage}
         />
       </Card>

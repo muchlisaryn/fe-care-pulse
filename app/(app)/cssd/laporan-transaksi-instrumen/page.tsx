@@ -28,20 +28,36 @@ type LaporanRow = {
   type: "paket" | "satuan"
   name: string | null
   borrowed_by: string | null
+  /** Tanggal peminjaman — diambil dari saat batch produksi unit ini dimulai. */
+  borrowed_date: string | null
   room: string | null
+  medical_record_no: string | null
+  patient_name: string | null
+  returned_by: string | null
+  /** Tanggal pengembalian (`order.return_actual_date`) — tanpa jam. */
+  return_date: string | null
+  /** Momen persis pengembalian dari event timeline; null pada order lama. */
+  returned_at: string | null
 }
 
 const PER_PAGE = 20
 
+// Urutan kolom ini adalah SATU-SATUNYA acuan: tabel desktop, kartu mobile, dan
+// export Excel/CSV harus mengikuti urutan yang sama supaya hasil unduhan bisa
+// dibaca sejajar dengan yang tampil di layar.
 const EXPORT_HEADERS = [
-  "No",
   "Tgl Transaksi",
   "No Invoice",
-  "Nama Instrumen / Set",
-  "Jenis",
-  "Barcode",
-  "Peminjam",
+  "No. RM Pasien",
+  "Nama Pasien",
   "Ruangan",
+  "Nama Instrumen / Set",
+  "Barcode",
+  "Jenis",
+  "Peminjam",
+  "Tgl Peminjaman",
+  "Dikembalikan",
+  "Waktu Kembali",
 ] as const
 
 const TYPE_OPTIONS = [
@@ -77,11 +93,50 @@ function isDefaultFilters(f: Filters): boolean {
   return (Object.keys(d) as (keyof Filters)[]).every((k) => f[k] === d[k])
 }
 
+/**
+ * Baca nilai tanggal/waktu dari API. Kolom laporan ini diambil lewat query builder
+ * mentah, jadi nilai datetime-nya berbentuk "YYYY-MM-DD HH:MM:SS" (pakai spasi, bukan
+ * "T"). Bentuk berspasi itu di luar spesifikasi `Date` dan tidak dijamin sama di semua
+ * browser — disamakan dulu agar konsisten dibaca sebagai waktu LOKAL. Nilai
+ * tanggal-saja tidak terpengaruh.
+ */
+function parseApiDate(value: string): Date {
+  return new Date(value.includes("T") ? value : value.replace(" ", "T"))
+}
+
 function formatDate(value: string | null): string {
   if (!value) return "—"
-  const d = new Date(value)
+  const d = parseApiDate(value)
   if (Number.isNaN(d.getTime())) return value
   return d.toLocaleDateString("id-ID", { day: "2-digit", month: "short", year: "numeric" })
+}
+
+function formatDateTime(value: string | null): string {
+  if (!value) return "—"
+  const d = parseApiDate(value)
+  if (Number.isNaN(d.getTime())) return value
+  return d.toLocaleString("id-ID", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  })
+}
+
+/**
+ * Waktu pengembalian yang ditampilkan: momen persis dari event timeline bila ada,
+ * kalau tidak jatuh ke tanggalnya saja (`return_actual_date` memang hanya DATE,
+ * dan order lama belum tentu punya event). "—" bila keduanya kosong.
+ */
+function returnedAtLabel(row: LaporanRow): string {
+  if (row.returned_at) return formatDateTime(row.returned_at)
+  return formatDate(row.return_date)
+}
+
+/** Apakah baris ini punya informasi waktu pengembalian sama sekali. */
+function hasReturnedAt(row: LaporanRow): boolean {
+  return Boolean(row.returned_at || row.return_date)
 }
 
 function Empty() {
@@ -176,15 +231,19 @@ export default function LaporanTransaksiInstrumenPage() {
       })
       const data: LaporanRow[] = res.data.data.data
 
-      const exportRows = data.map((r, i) => [
-        i + 1,
+      const exportRows = data.map((r) => [
         r.transaction_date ? formatDate(r.transaction_date) : "",
         r.invoice_no ?? "",
-        r.name ?? "",
-        r.type === "paket" ? "Set" : "Satuan",
-        r.barcode_no ?? "",
-        r.borrowed_by ?? "",
+        r.medical_record_no ?? "",
+        r.patient_name ?? "",
         r.room ?? "",
+        r.name ?? "",
+        r.barcode_no ?? "",
+        r.type === "paket" ? "Set" : "Satuan",
+        r.borrowed_by ?? "",
+        r.borrowed_date ? formatDateTime(r.borrowed_date) : "",
+        r.returned_by ?? "",
+        hasReturnedAt(r) ? returnedAtLabel(r) : "",
       ])
 
       const filename = `laporan-transaksi-instrumen-${dateInput()}.${format}`
@@ -316,29 +375,38 @@ export default function LaporanTransaksiInstrumenPage() {
           <>
             {/* Mobile: tiap baris jadi kartu (label : nilai) agar tak terpotong. */}
             <div className="space-y-3 p-4 md:hidden">
-              {rows.map((row, i) => (
-                <LaporanCard key={row.key} row={row} no={(page - 1) * PER_PAGE + i + 1} />
+              {rows.map((row) => (
+                <LaporanCard key={row.key} row={row} />
               ))}
             </div>
 
-            {/* Desktop: tabel penuh (scroll horizontal bila perlu). */}
+            {/* Desktop: tabel penuh. Kolomnya banyak, jadi tabel diberi lebar minimum
+                dan pembungkusnya scroll horizontal — lebih baik digeser daripada
+                kolom terhimpit sampai teksnya terpotong. `whitespace-nowrap` menjaga
+                judul & nilai pendek tetap satu baris; hanya kolom nama instrumen dan
+                nama pasien yang boleh membungkus. */}
             <div className="hidden overflow-x-auto md:block">
-              <table className="w-full text-sm">
+              <table className="w-full min-w-[1180px] text-sm">
                 <thead>
                   <tr className="border-b border-gray-100 bg-gray-50 text-xs font-semibold uppercase tracking-wide text-gray-400">
-                    <th className="w-12 py-2.5 px-4 text-left">No</th>
-                    <th className="w-32 py-2.5 px-4 text-left">Tgl Transaksi</th>
-                    <th className="py-2.5 px-4 text-left">No Invoice</th>
-                    <th className="py-2.5 px-4 text-left">Nama Instrumen / Set</th>
-                    <th className="w-24 py-2.5 px-4 text-left">Jenis</th>
-                    <th className="py-2.5 px-4 text-left">Barcode</th>
-                    <th className="py-2.5 px-4 text-left">Peminjam</th>
-                    <th className="py-2.5 px-4 text-left">Ruangan</th>
+                    <th className="w-32 whitespace-nowrap py-2.5 px-4 text-left">Tgl Transaksi</th>
+                    <th className="whitespace-nowrap py-2.5 px-4 text-left">No Invoice</th>
+                    <th className="whitespace-nowrap py-2.5 px-4 text-left">No. RM Pasien</th>
+                    <th className="whitespace-nowrap py-2.5 px-4 text-left">Nama Pasien</th>
+                    <th className="whitespace-nowrap py-2.5 px-4 text-left">Ruangan</th>
+                    {/* Kolom utama laporan — diberi porsi lebar paling besar. */}
+                    <th className="min-w-[260px] py-2.5 px-4 text-left">Nama Instrumen / Set</th>
+                    <th className="whitespace-nowrap py-2.5 px-4 text-left">Barcode</th>
+                    <th className="w-24 whitespace-nowrap py-2.5 px-4 text-left">Jenis</th>
+                    <th className="whitespace-nowrap py-2.5 px-4 text-left">Peminjam</th>
+                    <th className="whitespace-nowrap py-2.5 px-4 text-left">Tgl Peminjaman</th>
+                    <th className="whitespace-nowrap py-2.5 px-4 text-left">Dikembalikan</th>
+                    <th className="whitespace-nowrap py-2.5 px-4 text-left">Waktu Kembali</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-50">
-                  {rows.map((row, i) => (
-                    <LaporanRowView key={row.key} row={row} no={(page - 1) * PER_PAGE + i + 1} />
+                  {rows.map((row) => (
+                    <LaporanRowView key={row.key} row={row} />
                   ))}
                 </tbody>
               </table>
@@ -366,48 +434,63 @@ function JenisBadge({ type }: { type: LaporanRow["type"] }) {
 
 function BarcodeCell({ value }: { value: string | null }) {
   if (!value) return <Empty />
-  return <span className="font-mono text-xs text-gray-700">{value}</span>
+  // Monospace supaya deretan angka barcode mudah dibandingkan — ukuran hurufnya
+  // tetap sama dengan sel lain.
+  return <span className="font-mono text-gray-700">{value}</span>
 }
 
-function LaporanRowView({ row, no }: { row: LaporanRow; no: number }) {
+function LaporanRowView({ row }: { row: LaporanRow }) {
   return (
     <tr>
-      <td className="py-2.5 px-4 text-gray-400">{no}</td>
-      <td className="py-2.5 px-4 text-gray-600">{formatDate(row.transaction_date)}</td>
-      <td className="py-2.5 px-4 font-mono text-xs text-gray-700">
+      <td className="whitespace-nowrap py-2.5 px-4 text-gray-600">{formatDate(row.transaction_date)}</td>
+      <td className="whitespace-nowrap py-2.5 px-4 font-mono text-gray-700">
         <Text value={row.invoice_no} />
       </td>
-      <td className="py-2.5 px-4 font-medium text-gray-900">
+      <td className="whitespace-nowrap py-2.5 px-4 font-mono text-gray-700">
+        <Text value={row.medical_record_no} />
+      </td>
+      <td className="py-2.5 px-4 text-gray-700">
+        <Text value={row.patient_name} />
+      </td>
+      <td className="whitespace-nowrap py-2.5 px-4 text-gray-700">
+        <Text value={row.room} />
+      </td>
+      {/* Kolom utama — ditonjolkan lewat LEBAR kolomnya saja; ukuran & ketebalan
+          teksnya sengaja sama dengan kolom lain. */}
+      <td className="min-w-[260px] py-2.5 px-4 text-gray-900">
         <Text value={row.name} />
+      </td>
+      <td className="whitespace-nowrap py-2.5 px-4">
+        <BarcodeCell value={row.barcode_no} />
       </td>
       <td className="py-2.5 px-4">
         <JenisBadge type={row.type} />
       </td>
-      <td className="py-2.5 px-4">
-        <BarcodeCell value={row.barcode_no} />
-      </td>
-      <td className="py-2.5 px-4 text-gray-700">
+      <td className="whitespace-nowrap py-2.5 px-4 text-gray-700">
         <Text value={row.borrowed_by} />
       </td>
-      <td className="py-2.5 px-4 text-gray-700">
-        <Text value={row.room} />
+      <td className="whitespace-nowrap py-2.5 px-4 text-gray-600">{formatDateTime(row.borrowed_date)}</td>
+      <td className="whitespace-nowrap py-2.5 px-4 text-gray-700">
+        <Text value={row.returned_by} />
+      </td>
+      <td className="whitespace-nowrap py-2.5 px-4 text-gray-600">
+        {hasReturnedAt(row) ? returnedAtLabel(row) : <Empty />}
       </td>
     </tr>
   )
 }
 
-function LaporanCard({ row, no }: { row: LaporanRow; no: number }) {
+function LaporanCard({ row }: { row: LaporanRow }) {
   return (
     <div className="overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm">
       <div className="flex items-start gap-2 px-4 py-3">
         <div className="min-w-0 flex-1 space-y-1">
           <JenisBadge type={row.type} />
-          <div className="font-medium text-gray-900">
+          <div className="text-sm text-gray-900">
             <Text value={row.name} />
           </div>
           <BarcodeCell value={row.barcode_no} />
         </div>
-        <span className="shrink-0 text-xs font-medium text-gray-400">No {no}</span>
       </div>
 
       <dl className="divide-y divide-gray-50 border-t border-gray-100">
@@ -415,11 +498,24 @@ function LaporanCard({ row, no }: { row: LaporanRow; no: number }) {
         <Field label="No Invoice">
           <Text value={row.invoice_no} />
         </Field>
-        <Field label="Peminjam">
-          <Text value={row.borrowed_by} />
+        <Field label="No. RM Pasien">
+          <Text value={row.medical_record_no} />
+        </Field>
+        <Field label="Nama Pasien">
+          <Text value={row.patient_name} />
         </Field>
         <Field label="Ruangan">
           <Text value={row.room} />
+        </Field>
+        <Field label="Peminjam">
+          <Text value={row.borrowed_by} />
+        </Field>
+        <Field label="Tgl Peminjaman">{formatDateTime(row.borrowed_date)}</Field>
+        <Field label="Dikembalikan">
+          <Text value={row.returned_by} />
+        </Field>
+        <Field label="Waktu Kembali">
+          {hasReturnedAt(row) ? returnedAtLabel(row) : <Empty />}
         </Field>
       </dl>
     </div>
@@ -430,7 +526,7 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
   return (
     <div className="flex items-start justify-between gap-4 px-4 py-2">
       <dt className="shrink-0 text-[11px] font-medium uppercase tracking-wide text-gray-400">{label}</dt>
-      <dd className="min-w-0 text-right text-sm font-medium text-gray-800">{children}</dd>
+      <dd className="min-w-0 text-right text-sm text-gray-800">{children}</dd>
     </div>
   )
 }

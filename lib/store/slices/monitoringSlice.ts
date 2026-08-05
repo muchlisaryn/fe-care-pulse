@@ -80,6 +80,19 @@ export type ReturnedOrder = {
   total_satuan: number
 }
 
+// Satu baris tab "Distribution & Tracking" (endpoint monitoring/tracking): order
+// yang sedang dipinjam ATAU riwayat order yang sudah dikembalikan. Server yang
+// menentukan urutan & potongan halamannya — lihat fetchMonitoringTracking.
+export type TrackingRow =
+  | {
+      kind: "borrowed"
+      order_id: number
+      order_code: string
+      /** Baris unit RATA — bentuknya sama dengan `monitoring/rooms` agar pengelompoknya bisa dipakai ulang. */
+      instruments: (MonitoredInstrument & { room: string | null })[]
+    }
+  | { kind: "returned"; order_id: number; order_code: string; order: ReturnedOrder }
+
 // Angka KETIGA kartu statistik halaman Tracking Order — dihitung di server, bukan
 // dari daftar ruangan yang dimuat penuh (lihat monitoring/borrowed-summary).
 export type BorrowedSummary = {
@@ -113,18 +126,33 @@ export type RoomSummary = {
 
 // ── State ───────────────────────────────────────────────────────────────────
 
+/**
+ * Baris per halaman tab Distribution & Tracking. HARUS sama dengan default
+ * `TRACKING_PER_PAGE` di MonitoringController — nilainya tetap dikirim eksplisit
+ * sebagai `per_page` supaya jumlah halaman dari server cocok dengan yang dipakai
+ * komponen Pagination.
+ */
+export const TRACKING_PER_PAGE = 30
+
 type MonitoringState = {
   /** Daftar ruangan LENGKAP dengan instrumennya — berat, hanya dimuat saat dibutuhkan. */
   rooms: MonitoredRoom[]
   roomsSummary: RoomSummary[]
   incoming: IncomingOrder[]
   returned: ReturnedOrder[]
+  /** Baris tab Distribution & Tracking — HANYA satu halaman (dipaginasi server). */
+  tracking: TrackingRow[]
+  trackingPage: number
+  trackingPerPage: number
+  trackingTotalPages: number
+  trackingTotalItems: number
   borrowedSummary: BorrowedSummary
   counts: MonitoringCounts
   roomsLoading: boolean
   roomsSummaryLoading: boolean
   incomingLoading: boolean
   returnedLoading: boolean
+  trackingLoading: boolean
   roomsLoaded: boolean
   roomsSummaryLoaded: boolean
   incomingLoaded: boolean
@@ -136,12 +164,18 @@ const initialState: MonitoringState = {
   roomsSummary: [],
   incoming: [],
   returned: [],
+  tracking: [],
+  trackingPage: 1,
+  trackingPerPage: TRACKING_PER_PAGE,
+  trackingTotalPages: 1,
+  trackingTotalItems: 0,
   borrowedSummary: { borrowed: 0, sets: 0, units: 0, orders: 0, overdue: 0 },
   counts: { masuk: 0, siap_distribusi: 0, dipinjam: 0, dikembalikan: 0 },
   roomsLoading: false,
   roomsSummaryLoading: false,
   incomingLoading: false,
   returnedLoading: false,
+  trackingLoading: false,
   roomsLoaded: false,
   roomsSummaryLoaded: false,
   incomingLoaded: false,
@@ -173,6 +207,35 @@ export const fetchMonitoringIncoming = createAsyncThunk("monitoring/incoming", (
 
 export const fetchMonitoringReturned = createAsyncThunk("monitoring/returned", () =>
   fetchAllPages<ReturnedOrder>("/master/monitoring/returned"),
+)
+
+/**
+ * Satu HALAMAN daftar tab Distribution & Tracking. Berbeda dari thunk lain di file
+ * ini yang menarik seluruh halaman lalu menggabungkannya (fetchAllPages): di sini
+ * pencarian, rentang tanggal, dan potongan halaman dikerjakan server, jadi cukup
+ * satu permintaan per halaman.
+ */
+export const fetchMonitoringTracking = createAsyncThunk(
+  "monitoring/tracking",
+  async (args: { page?: number; search?: string; from?: string; to?: string } = {}) => {
+    const res = await api.get("/master/monitoring/tracking", {
+      params: {
+        page: args.page ?? 1,
+        per_page: TRACKING_PER_PAGE,
+        search: args.search || undefined,
+        from: args.from || undefined,
+        to: args.to || undefined,
+      },
+    })
+    const p = res.data.data
+    return {
+      rows: p.data as TrackingRow[],
+      page: p.current_page as number,
+      totalPages: p.last_page as number,
+      totalItems: p.total as number,
+      perPage: p.per_page as number,
+    }
+  },
 )
 
 // Angka kartu statistik — dihitung di server dengan aturan yang sama seperti kartu
@@ -237,6 +300,23 @@ const monitoringSlice = createSlice({
       })
       .addCase(fetchMonitoringIncoming.rejected, (state) => {
         state.incomingLoading = false
+      })
+      // Halaman tracking TIDAK ditandai "loaded": isinya bergantung pada halaman,
+      // pencarian, dan rentang tanggal, jadi tidak ada satu keadaan yang bisa
+      // dianggap cache valid — halaman selalu diminta ulang saat parameternya berubah.
+      .addCase(fetchMonitoringTracking.pending, (state) => {
+        state.trackingLoading = true
+      })
+      .addCase(fetchMonitoringTracking.fulfilled, (state, action) => {
+        state.tracking = action.payload.rows
+        state.trackingPage = action.payload.page
+        state.trackingPerPage = action.payload.perPage
+        state.trackingTotalPages = action.payload.totalPages
+        state.trackingTotalItems = action.payload.totalItems
+        state.trackingLoading = false
+      })
+      .addCase(fetchMonitoringTracking.rejected, (state) => {
+        state.trackingLoading = false
       })
       .addCase(fetchMonitoringReturned.pending, (state) => {
         state.returnedLoading = true
