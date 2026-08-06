@@ -13,6 +13,7 @@ import { PageHeader } from "@/components/molecules/PageHeader"
 import { DataTable, type Column } from "@/components/molecules/DataTable"
 import { Modal } from "@/components/molecules/Modal"
 import { ConfirmDialog } from "@/components/molecules/ConfirmDialog"
+import { ResultDialog } from "@/components/molecules/ResultDialog"
 import { Pagination } from "@/components/molecules/Pagination"
 import { OrderTimeline, type TimelineEvent } from "@/components/molecules/OrderTimeline"
 import { OrderStatusTracker, OrderStatusBadge } from "@/components/molecules/OrderStatusTracker"
@@ -36,6 +37,8 @@ import {
 import { fetchIncomingCount, fetchPendingTransferCount } from "@/lib/store/slices/notifSlice"
 import { invalidateMonitoring } from "@/lib/store/slices/monitoringSlice"
 import { fetchRoomOptions } from "@/lib/store/slices/roomSlice"
+import { apiErrorMessage } from "@/lib/apiError"
+import { takeOrderFlash } from "@/lib/orderFlash"
 import api from "@/lib/axios"
 
 // Satu BUNGKUS fisik pada modal Detail Order: satu nomor label kemasan (barcode_no).
@@ -88,24 +91,9 @@ const ORDER_FILTER_STATUSES: OrderStatus[] = [
   "dibatalkan",
 ]
 
-// Tombol aksi status berikutnya:
-// diajukan → (Terima & Distribusi via Monitoring) → digudang → dipinjam → dikembalikan
-// Order minta barang yang sudah steril, jadi langsung disiapkan distribusi (bukan
-// lewat pipeline produksi). Di sini hanya order "diajukan" yang masih bisa dibatalkan.
-const nextActions: Record<OrderStatus, { label: string; to: OrderStatus; variant: "primary" | "danger" }[]> = {
-  diajukan: [
-    { label: "Batalkan", to: "dibatalkan", variant: "danger" },
-  ],
-  pencucian: [],
-  pengemasan: [],
-  selesai: [],
-  sterilisasi: [],
-  steril: [],
-  digudang: [],
-  dipinjam: [],
-  dikembalikan: [],
-  dibatalkan: [],
-}
+// Modal detail bersifat LIHAT-SAJA: tidak ada tombol ubah status di sini.
+// Perpindahan status order dijalankan dari Monitoring (terima & distribusi),
+// sedangkan order yang belum diproses dibatalkan lewat tombol hapus di daftar.
 
 const dash = <span className="text-gray-400 text-xs">—</span>
 
@@ -222,13 +210,22 @@ export default function OrderInstrumenPage() {
   const [deleteTarget, setDeleteTarget] = useState<Order | null>(null)
   const [deletingId, setDeletingId] = useState<number | null>(null)
 
+  // Hasil aksi yang MENGUBAH daftar order: buat order (pesannya dititipkan dari
+  // halaman Tambah) dan hapus order. Aksi lain (ubah status, permintaan pinjam)
+  // sengaja tidak memunculkan popup — hasilnya sudah terlihat langsung di layar.
+  const [result, setResult] = useState<{ variant: "success" | "error"; description: string } | null>(
+    null,
+  )
+  const showSuccess = (description: string) => setResult({ variant: "success", description })
+  const showError = (err: unknown, fallback: string) =>
+    setResult({ variant: "error", description: apiErrorMessage(err, fallback) })
+
   const [detail, setDetail] = useState<Order | null>(null)
   const [detailLoading, setDetailLoading] = useState(false)
   // Baris permintaan paket yang sedang dibuka (menampilkan isi paket) di modal detail.
   const [expandedReq, setExpandedReq] = useState<Set<number>>(new Set())
   // Paket yang sedang dibuka di tabel Unit Instrumen modal detail.
   const [expandedUnitPaket, setExpandedUnitPaket] = useState<Set<string>>(new Set())
-  const [statusBusy, setStatusBusy] = useState(false)
 
   // Modal "Instrumen Dipinjam": dikelompokkan per order (peminjam + tanggal),
   // lalu di dalamnya per paket / satuan.
@@ -274,6 +271,15 @@ export default function OrderInstrumenPage() {
     if (loaded && !dirty) return
     dispatch(fetchOrders())
   }, [loaded, dirty, dispatch])
+
+  // Pesan sukses dari halaman Tambah Order (dititipkan sebelum redirect ke sini).
+  // sessionStorage adalah sistem luar React dan hanya ada di browser, jadi pesannya
+  // baru bisa dibaca setelah render pertama — bukan cascading render yang dilarang.
+  useEffect(() => {
+    const flash = takeOrderFlash()
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    if (flash) setResult({ variant: "success", description: flash })
+  }, [])
 
   // Ambil order yang sedang dipinjam (beserta unit aktif + status request pending)
   // sebagai sumber unit yang bisa diminta. Dipakai saat modal dibuka & setelah
@@ -634,26 +640,9 @@ export default function OrderInstrumenPage() {
     }
   }
 
-  // Ubah status order (mis. Pinjamkan / Batalkan). Pengembalian instrumen tidak
-  // dilakukan dari sini — detail order bersifat lihat-saja untuk instrumennya.
-  async function handleChangeStatus(to: OrderStatus) {
-    if (!detail || statusBusy) return
-    setStatusBusy(true)
-    try {
-      const res = await api.put(`/master/orders/${detail.id}`, { status: to })
-      setDetail(res.data.data)
-      dispatch(invalidateOrders())
-      // Order keluar dari status `diajukan` (mis. dibatalkan) → badge order masuk
-      // di sidebar ikut turun, tanpa menunggu halaman di-refresh.
-      dispatch(fetchIncomingCount())
-      dispatch(invalidateMonitoring())
-    } finally {
-      setStatusBusy(false)
-    }
-  }
-
   async function handleDelete() {
     if (!deleteTarget || deletingId !== null) return
+    const code = deleteTarget.code
     setDeletingId(deleteTarget.id)
     try {
       await api.delete(`/master/orders/${deleteTarget.id}`)
@@ -662,6 +651,11 @@ export default function OrderInstrumenPage() {
       dispatch(fetchIncomingCount())
       dispatch(invalidateMonitoring())
       setDeleteTarget(null)
+      showSuccess(`Order ${code} berhasil dihapus.`)
+    } catch (err) {
+      // Konfirmasi ditutup dulu agar modal gagal tidak tertumpuk di atasnya.
+      setDeleteTarget(null)
+      showError(err, "Gagal menghapus order.")
     } finally {
       setDeletingId(null)
     }
@@ -1247,27 +1241,9 @@ export default function OrderInstrumenPage() {
         title={detail ? `Detail Order : ${detailTitleCodes(detail)}` : "Detail Order"}
         size="lg"
         footer={
-          <div className="flex w-full flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
-            <div className="flex flex-wrap gap-2 empty:hidden">
-              {detail &&
-                nextActions[detail.status].map((a) => (
-                  <Button
-                    key={a.to}
-                    onClick={() => handleChangeStatus(a.to)}
-                    disabled={statusBusy || detailLoading}
-                    variant={a.variant === "danger" ? "destructive" : undefined}
-                    className={
-                      a.variant === "primary" ? "bg-[#075489] hover:bg-[#075489]/90 text-white" : undefined
-                    }
-                  >
-                    {statusBusy ? "Memproses..." : a.label}
-                  </Button>
-                ))}
-            </div>
-            <Button variant="outline" onClick={() => setDetail(null)}>
-              Tutup
-            </Button>
-          </div>
+          <Button variant="outline" onClick={() => setDetail(null)}>
+            Tutup
+          </Button>
         }
       >
         {detailLoading ? (
@@ -1445,6 +1421,14 @@ export default function OrderInstrumenPage() {
           </div>
         ) : null}
       </Modal>
+
+      {/* Hasil aksi: order berhasil dibuat / dihapus — beserta pesan bila gagal */}
+      <ResultDialog
+        open={result !== null}
+        onClose={() => setResult(null)}
+        variant={result?.variant ?? "success"}
+        description={result?.description}
+      />
     </div>
   )
 }

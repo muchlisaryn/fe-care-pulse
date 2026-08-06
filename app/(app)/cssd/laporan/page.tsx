@@ -1,7 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useState } from "react"
-import { Download, RotateCcw, Search } from "lucide-react"
+import { Search, Sheet } from "lucide-react"
 import { Input } from "@/components/atoms/Input"
 import { Select } from "@/components/atoms/Select"
 import { SelectSearch } from "@/components/atoms/SelectSearch"
@@ -11,7 +11,7 @@ import { PageHeader } from "@/components/molecules/PageHeader"
 import { DateRangeFields } from "@/components/molecules/DateRangeFields"
 import { Pagination } from "@/components/molecules/Pagination"
 import api from "@/lib/axios"
-import { downloadCsv } from "@/lib/csv"
+import { downloadXlsx } from "@/lib/excel"
 
 // Detail per aset (unit) di dalam satu label kemasan.
 type ReportUnit = {
@@ -224,16 +224,7 @@ export default function LaporanPerAlatPage() {
     setPage(1)
   }
 
-  function handleReset() {
-    // Kembali ke default (rentang 30 hari terakhir), bukan dikosongkan — supaya
-    // hasil setelah Reset sama dengan saat halaman pertama dibuka.
-    const next = defaultFilters()
-    setForm(next)
-    setFilters(next)
-    setPage(1)
-  }
-
-  async function handleExportCsv() {
+  async function handleExportExcel() {
     setExporting(true)
     try {
       const res = await api.get("/master/reports/cssd-per-item", { params: buildParams({ per_page: 2000 }) })
@@ -256,7 +247,7 @@ export default function LaporanPerAlatPage() {
         "Operator",
         "Kedaluwarsa",
       ]
-      // CSV tetap per aset (per unit): baris gabungan diuraikan jadi baris-baris unitnya.
+      // Isi file tetap per aset (per unit): baris gabungan diuraikan jadi baris-baris unitnya.
       const rows = data.flatMap((g) =>
         g.units.map((u) => [
           formatDateTime(g.sterilized_at),
@@ -278,7 +269,12 @@ export default function LaporanPerAlatPage() {
           formatDate(g.expiry_date),
         ]),
       )
-      downloadCsv(`laporan-cssd-per-alat-${new Date().toISOString().slice(0, 10)}.csv`, headers, rows)
+      downloadXlsx(
+        `laporan-cssd-per-alat-${new Date().toISOString().slice(0, 10)}.xlsx`,
+        "Laporan Alat CSSD",
+        headers,
+        rows,
+      )
     } finally {
       setExporting(false)
     }
@@ -294,19 +290,19 @@ export default function LaporanPerAlatPage() {
       <Card className="p-0">
         {/* Filter */}
         <form onSubmit={handleSearch} className="border-b border-gray-100 px-5 py-4">
-          {/* Delapan filter dibagi dua baris supaya tiap kolom tetap cukup lebar:
-              BARIS 1 (identitas batch) — pencarian selebar dua kolom, mesin, status,
-              lalu rentang tanggal (DateRangeFields mengisi dua kolom terakhir).
-              BARIS 2 (hasil validasi) — ketiga indikator, disejajarkan mulai dari kolom
-              yang sama dengan Mesin agar tidak menggantung sendirian di kiri.
+          {/* Delapan filter dibagi dua baris berisi 6 kolom yang sama-sama penuh:
+              BARIS 1 — kotak pencarian selebar empat kolom (isinya teks bebas, jadi
+              paling butuh ruang) lalu rentang tanggal di dua kolom terakhir.
+              BARIS 2 — pilihan bernilai tetap yang cukup sempit: mesin, status, dan
+              ketiga indikator hasil validasi, ditutup tombol Reset & Cari.
               Di layar sedang jadi dua kolom per baris, di ponsel menumpuk. */}
           <div className="grid grid-cols-1 items-end gap-4 sm:grid-cols-2 lg:grid-cols-6">
-            <div className="space-y-1 sm:col-span-2">
-              <label className="text-xs font-semibold uppercase tracking-wide text-gray-400">Nama / Kode Alat</label>
+            <div className="space-y-1 sm:col-span-2 lg:col-span-4">
+              <label className="text-xs font-semibold uppercase tracking-wide text-gray-400">Nama Instrumen</label>
               <div className="relative">
                 <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
                 <Input
-                  placeholder="Cari nama unit..."
+                  placeholder="Cari nama instrumen..."
                   value={form.search}
                   onChange={(e) => setForm((f) => ({ ...f, search: e.target.value }))}
                   className="pl-9"
@@ -314,6 +310,14 @@ export default function LaporanPerAlatPage() {
               </div>
             </div>
 
+            <DateRangeFields
+              from={form.dateFrom}
+              to={form.dateTo}
+              onFromChange={(v) => setForm((f) => ({ ...f, dateFrom: v }))}
+              onToChange={(v) => setForm((f) => ({ ...f, dateTo: v }))}
+            />
+
+            {/* ── Baris 2: pilihan mesin/status + indikator hasil validasi ───── */}
             <div className="space-y-1">
               <label className="text-xs font-semibold uppercase tracking-wide text-gray-400">Mesin</label>
               {/* Opsi bernilai kosong = kembali ke semua mesin (SelectSearch di app ini
@@ -343,15 +347,7 @@ export default function LaporanPerAlatPage() {
               </Select>
             </div>
 
-            <DateRangeFields
-              from={form.dateFrom}
-              to={form.dateTo}
-              onFromChange={(v) => setForm((f) => ({ ...f, dateFrom: v }))}
-              onToChange={(v) => setForm((f) => ({ ...f, dateTo: v }))}
-            />
-
-            {/* ── Baris 2: indikator hasil validasi batch ───────────────────── */}
-            <div className="space-y-1 lg:col-start-3">
+            <div className="space-y-1">
               <label className="text-xs font-semibold uppercase tracking-wide text-gray-400">
                 Indikator Kimia
               </label>
@@ -401,34 +397,30 @@ export default function LaporanPerAlatPage() {
                 ))}
               </Select>
             </div>
-          </div>
 
-          <div className="mt-4 flex flex-col-reverse gap-2 sm:flex-row sm:flex-wrap sm:justify-end">
-            <Button
-              type="button"
-              variant="outline"
-              onClick={handleExportCsv}
-              disabled={exporting}
-              className="w-full justify-center sm:w-auto"
-            >
-              <Download className="h-4 w-4" />
-              {exporting ? "Mengekspor..." : "Export CSV"}
-            </Button>
-            <Button
-              type="button"
-              variant="outline"
-              onClick={handleReset}
-              className="w-full justify-center sm:w-auto"
-            >
-              <RotateCcw className="h-4 w-4" />
-              Reset
-            </Button>
+            {/* Tombol Cari menutup baris kedua — sebaris dengan filter lain, dan
+                kedua baris grid sama-sama terisi penuh 6 kolom tanpa sel menganga. */}
             <Button
               type="submit"
-              className="w-full justify-center bg-[#075489] hover:bg-[#075489]/90 text-white sm:w-auto"
+              className="w-full justify-center bg-[#075489] hover:bg-[#075489]/90 text-white"
             >
               <Search className="h-4 w-4" />
               Cari
+            </Button>
+          </div>
+
+          {/* Export berdiri di bawah filter: yang diunduh adalah SELURUH data sesuai
+              filter yang sedang aktif, bukan halaman yang sedang tampil saja. */}
+          <div className="mt-4 flex justify-end">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={handleExportExcel}
+              disabled={exporting}
+              className="w-full justify-center sm:w-auto"
+            >
+              <Sheet className="h-4 w-4" />
+              {exporting ? "Mengekspor..." : "Export Excel"}
             </Button>
           </div>
         </form>

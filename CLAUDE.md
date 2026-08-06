@@ -28,6 +28,7 @@ Larger, composed UI blocks built from atoms or other molecules:
 - `StatCard` - metric card with title, value, change indicator, and icon
 - `PageHeader` - page title + subtitle heading used at the top of every page
 - `Modal` - reusable dialog with header, scrollable body, and footer slot; supports `size` (sm/md/lg), closes on Escape key and backdrop click
+- `ResultDialog` - success/error result popup built on `Modal`; props: `open`, `onClose`, `variant` ("success" | "error"), `title?`, `description?`, `actionLabel?`; use it after every create/update/delete so the user always gets a clear result — pair with `apiErrorMessage()` from `lib/apiError.ts` for the failure text
 - `ConfirmDialog` - delete confirmation popup built on `Modal`; props: `open`, `onClose`, `onConfirm`, `title?`, `description?`, `loading?`; always use this before any delete action — never delete on a single click
 - `Pagination` - page navigation with prev/next, numbered pages, ellipsis, and item count; renders nothing when totalPages ≤ 1; always place inside the Card below DataTable
 

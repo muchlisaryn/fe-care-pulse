@@ -12,10 +12,13 @@ import { SelectSearch } from "@/components/atoms/SelectSearch"
 import { Card } from "@/components/molecules/Card"
 import { PageHeader } from "@/components/molecules/PageHeader"
 import { FormSectionHeader } from "@/components/molecules/FormSectionHeader"
+import { ResultDialog } from "@/components/molecules/ResultDialog"
 import { useAppDispatch, useAppSelector } from "@/lib/store/hooks"
 import { fetchRoomOptions } from "@/lib/store/slices/roomSlice"
 import { invalidateOrders } from "@/lib/store/slices/orderSlice"
 import { useUserOptions } from "@/lib/useUserOptions"
+import { apiErrorMessage } from "@/lib/apiError"
+import { setOrderFlash } from "@/lib/orderFlash"
 import api from "@/lib/axios"
 
 // Jenis instrumen (master) — dipakai untuk permintaan satuan.
@@ -65,13 +68,17 @@ type RequestLine = {
   contents?: PaketContent[] // isi paket (instrumen yang akan di-order) — untuk type paket
 }
 
+// Panjang maksimal No. Rekam Medis.
+const MAX_RM_LENGTH = 10
+
 /**
- * No. Rekam Medis hanya berisi ANGKA. Disaring saat mengetik (bukan divalidasi saat
- * simpan) supaya prefiks seperti "RM-" yang terlanjur diketik/di-paste langsung
- * rontok — nomor RM yang tersimpan jadi seragam dan bisa dicocokkan antar sistem.
+ * No. Rekam Medis hanya berisi ANGKA, maksimal 10 digit. Disaring saat mengetik
+ * (bukan divalidasi saat simpan) supaya prefiks seperti "RM-" yang terlanjur
+ * diketik/di-paste langsung rontok, dan kelebihan digit tidak sempat masuk —
+ * nomor RM yang tersimpan jadi seragam dan bisa dicocokkan antar sistem.
  */
 function digitsOnly(value: string): string {
-  return value.replace(/\D/g, "")
+  return value.replace(/\D/g, "").slice(0, MAX_RM_LENGTH)
 }
 
 /**
@@ -119,6 +126,9 @@ export default function TambahOrderInstrumenPage() {
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set())
   // Pesan validasi yang baru ditampilkan saat klik Simpan.
   const [formError, setFormError] = useState<string | null>(null)
+  // Kegagalan simpan dari server ditampilkan sebagai modal agar tidak terlewat —
+  // pesannya tetap ikut tercetak di bawah tombol setelah modalnya ditutup.
+  const [saveError, setSaveError] = useState<string | null>(null)
 
   const [saving, setSaving] = useState(false)
 
@@ -383,16 +393,16 @@ export default function TambahOrderInstrumenPage() {
         ),
       })
       dispatch(invalidateOrders())
+      // Modal "berhasil" muncul di halaman daftar setelah redirect.
+      setOrderFlash("Order instrumen berhasil dibuat.")
       router.push("/cssd/order/instrumen")
     } catch (err) {
       // Server memvalidasi ulang stok steril saat menyimpan (422) — stok bisa
       // sudah diambil order lain sejak halaman ini dimuat. Tampilkan alasannya
       // agar peminjam tahu harus memuat ulang, bukan gagal diam-diam.
-      const e = err as {
-        response?: { data?: { message?: string; errors?: Record<string, string[]> } }
-      }
-      const fieldError = Object.values(e.response?.data?.errors ?? {})[0]?.[0]
-      setFormError(fieldError ?? e.response?.data?.message ?? "Gagal menyimpan order.")
+      const message = apiErrorMessage(err, "Gagal menyimpan order.")
+      setFormError(message)
+      setSaveError(message)
     } finally {
       setSaving(false)
     }
@@ -463,6 +473,7 @@ export default function TambahOrderInstrumenPage() {
                   // `inputMode` memunculkan papan angka di ponsel; tetap <input type="text">
                   // agar nol di depan tidak hilang dan tombol spinner tidak muncul.
                   inputMode="numeric"
+                  maxLength={MAX_RM_LENGTH}
                   placeholder="mis. 00123"
                   className="font-mono"
                 />
@@ -808,6 +819,15 @@ export default function TambahOrderInstrumenPage() {
           {saving ? "Menyimpan..." : "Simpan Order"}
         </Button>
       </div>
+
+      {/* Gagal menyimpan order (mis. stok steril keburu diambil order lain) */}
+      <ResultDialog
+        open={saveError !== null}
+        onClose={() => setSaveError(null)}
+        variant="error"
+        title="Order Gagal Disimpan"
+        description={saveError}
+      />
     </div>
   )
 }

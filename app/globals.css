@@ -131,3 +131,29 @@
     @apply cursor-pointer;
   }
 }
+
+/* ── Animasi ResultDialog (popup hasil berhasil / gagal) ──────────────────── */
+
+/* Bilah waktu tutup-otomatis: menyusut dari penuh ke nol. */
+@keyframes result-timer {
+  from {
+    transform: scaleX(1);
+  }
+  to {
+    transform: scaleX(0);
+  }
+}
+
+.animate-result-timer {
+  transform-origin: left;
+  animation: result-timer linear forwards;
+}
+
+/* Hormati preferensi "kurangi gerak" pada sistem pengguna: tutup-otomatis
+   dimatikan — tanpa animasi tidak ada `animationend` yang menutup dialog,
+   jadi pengguna menutupnya sendiri. */
+@media (prefers-reduced-motion: reduce) {
+  .animate-result-timer {
+    animation: none;
+  }
+}
