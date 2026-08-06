@@ -28,6 +28,9 @@ import {
 import { cn } from "@/lib/utils"
 import { useAppSelector } from "@/lib/store/hooks"
 import type { AuthMenuGroup } from "@/lib/store/slices/authSlice"
+// URL menu order masuk — tempat badge notifikasi, sekaligus penentu siapa yang
+// berhak menerima notifikasinya (lihat AppLayout).
+import { INCOMING_MENU_URL } from "@/lib/menu-access"
 
 const ICON_MAP: Record<string, LucideIcon> = {
   dashboard: LayoutDashboard,
@@ -66,9 +69,6 @@ type SidebarProps = {
   onExpand?: () => void
   onClose?: () => void
 }
-
-// URL menu yang menampilkan order masuk → tempat badge notifikasi.
-const INCOMING_MENU_URL = "/cssd/tracking-order"
 
 function NotifBadge({ count, className }: { count: number; className?: string }) {
   if (count <= 0) return null

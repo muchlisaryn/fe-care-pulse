@@ -1,7 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useState } from "react"
-import { Download, RotateCcw, Search, ChevronRight, ChevronDown } from "lucide-react"
+import { Download, RotateCcw, Search } from "lucide-react"
 import { Input } from "@/components/atoms/Input"
 import { Select } from "@/components/atoms/Select"
 import { SelectSearch } from "@/components/atoms/SelectSearch"
@@ -23,7 +23,9 @@ type ReportUnit = {
 }
 
 // Satu baris laporan = satu LABEL KEMASAN (barcode_no) pada satu batch sterilisasi:
-// seluruh unit yang dikemas bersama jadi satu baris yang bisa di-expand.
+// seluruh unit yang dikemas bersama lebur jadi satu baris bernama nama setnya.
+// `units` tidak lagi dirender di layar — barisnya datar, hanya menampilkan nama —
+// tapi tetap dipakai export CSV yang memang dirinci per aset.
 type ReportGroup = {
   key: string
   barcode_no: string | null
@@ -100,16 +102,49 @@ function formatDuration(value: number | null): string {
   return value === null ? "—" : `${value} mnt`
 }
 
+/**
+ * Tanggal untuk <input type="date"> (YYYY-MM-DD), digeser `offsetDays` hari dari
+ * hari ini. Sengaja dirakit dari komponen tanggal LOKAL, bukan `toISOString()`
+ * yang memakai UTC — di WIB (UTC+7) cara itu memundurkan tanggal sehari setiap
+ * kali halaman dibuka sebelum pukul 07.00.
+ */
+function dateInput(offsetDays = 0): string {
+  const d = new Date()
+  d.setDate(d.getDate() + offsetDays)
+  const pad = (n: number) => String(n).padStart(2, "0")
+
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
+}
+
+/**
+ * Default: batch sterilisasi 30 hari terakhir (H-30 s.d. hari ini). Rentangnya
+ * dibandingkan ke `sterilizations.sterilized_at` di server — kolom yang sama
+ * dengan yang ditampilkan di kolom "Waktu Steril", jadi hasil saring selalu
+ * sejalan dengan yang terbaca di tabel. Filter lain kosong.
+ */
+function defaultFilters() {
+  return {
+    search: "",
+    machine: "",
+    result: "",
+    chemical: "",
+    bioControl: "",
+    bioTest: "",
+    dateFrom: dateInput(-30),
+    dateTo: dateInput(),
+  }
+}
+
+type Filters = ReturnType<typeof defaultFilters>
+
+// Indikator biologi hanya bernilai Negatif / Positif (lihat validasi hasil batch).
+const BIO_OPTIONS = ["Negatif", "Positif"]
+
+/** Opsi kosong = tidak menyaring. Ditulis "-" sesuai tampilan kolomnya di tabel. */
+const ANY_LABEL = "-"
+
 export default function LaporanPerAlatPage() {
   const [rows, setRows] = useState<ReportGroup[]>([])
-  const [expanded, setExpanded] = useState<Set<string>>(new Set())
-  const toggleRow = (key: string) =>
-    setExpanded((prev) => {
-      const next = new Set(prev)
-      if (next.has(key)) next.delete(key)
-      else next.add(key)
-      return next
-    })
   const [loading, setLoading] = useState(true)
   const [exporting, setExporting] = useState(false)
   const [page, setPage] = useState(1)
@@ -118,19 +153,24 @@ export default function LaporanPerAlatPage() {
   const perPage = 20
 
   // Filter aktif (yang sudah ditekan "Cari")
-  const [filters, setFilters] = useState({ search: "", machine: "", result: "", dateFrom: "", dateTo: "" })
+  const [filters, setFilters] = useState<Filters>(defaultFilters)
   // Form input sementara
-  const [form, setForm] = useState({ search: "", machine: "", result: "", dateFrom: "", dateTo: "" })
+  const [form, setForm] = useState<Filters>(defaultFilters)
 
-  // Pilihan mesin diambil dari batch yang benar-benar ada (bukan master mesin), supaya
-  // mesin yang sudah dinonaktifkan/di-rename tetap bisa dipakai menyaring batch lama.
+  // Pilihan mesin & indikator kimia diambil dari batch yang benar-benar ada (bukan
+  // master), supaya nilai yang sudah dinonaktifkan/di-rename tetap bisa dipakai
+  // menyaring batch lama — dan tidak ada opsi yang hasilnya pasti kosong.
   const [machines, setMachines] = useState<string[]>([])
+  const [chemicals, setChemicals] = useState<string[]>([])
 
   const buildParams = useCallback(
     (extra: Record<string, string | number> = {}) => ({
       search: filters.search || undefined,
       machine: filters.machine || undefined,
       result: filters.result || undefined,
+      chemical_indicator: filters.chemical || undefined,
+      bio_indicator_control: filters.bioControl || undefined,
+      bio_indicator_test: filters.bioTest || undefined,
       date_from: filters.dateFrom || undefined,
       date_to: filters.dateTo || undefined,
       ...extra,
@@ -141,12 +181,15 @@ export default function LaporanPerAlatPage() {
   useEffect(() => {
     let active = true
     ;(async () => {
-      try {
-        const res = await api.get("/master/reports/cssd-machines")
-        if (active) setMachines(res.data?.data ?? [])
-      } catch {
-        if (active) setMachines([])
-      }
+      // Kedua daftar opsi diambil berbarengan; kegagalan salah satunya tidak
+      // menggagalkan yang lain (dropdown-nya cukup tampil tanpa pilihan).
+      const [mesin, kimia] = await Promise.all([
+        api.get("/master/reports/cssd-machines").catch(() => null),
+        api.get("/master/reports/cssd-chemical-indicators").catch(() => null),
+      ])
+      if (!active) return
+      setMachines(mesin?.data?.data ?? [])
+      setChemicals(kimia?.data?.data ?? [])
     })()
     return () => {
       active = false
@@ -182,9 +225,11 @@ export default function LaporanPerAlatPage() {
   }
 
   function handleReset() {
-    const empty = { search: "", machine: "", result: "", dateFrom: "", dateTo: "" }
-    setForm(empty)
-    setFilters(empty)
+    // Kembali ke default (rentang 30 hari terakhir), bukan dikosongkan — supaya
+    // hasil setelah Reset sama dengan saat halaman pertama dibuka.
+    const next = defaultFilters()
+    setForm(next)
+    setFilters(next)
     setPage(1)
   }
 
@@ -249,9 +294,12 @@ export default function LaporanPerAlatPage() {
       <Card className="p-0">
         {/* Filter */}
         <form onSubmit={handleSearch} className="border-b border-gray-100 px-5 py-4">
-          {/* Lima filter: pencarian (selebar dua kolom) + mesin, status, dan dua
-              tanggal masing-masing satu kolom → 6 kolom pas habis dalam satu baris di
-              layar lebar. Di layar sedang jadi dua kolom per baris, di ponsel menumpuk. */}
+          {/* Delapan filter dibagi dua baris supaya tiap kolom tetap cukup lebar:
+              BARIS 1 (identitas batch) — pencarian selebar dua kolom, mesin, status,
+              lalu rentang tanggal (DateRangeFields mengisi dua kolom terakhir).
+              BARIS 2 (hasil validasi) — ketiga indikator, disejajarkan mulai dari kolom
+              yang sama dengan Mesin agar tidak menggantung sendirian di kiri.
+              Di layar sedang jadi dua kolom per baris, di ponsel menumpuk. */}
           <div className="grid grid-cols-1 items-end gap-4 sm:grid-cols-2 lg:grid-cols-6">
             <div className="space-y-1 sm:col-span-2">
               <label className="text-xs font-semibold uppercase tracking-wide text-gray-400">Nama / Kode Alat</label>
@@ -301,6 +349,58 @@ export default function LaporanPerAlatPage() {
               onFromChange={(v) => setForm((f) => ({ ...f, dateFrom: v }))}
               onToChange={(v) => setForm((f) => ({ ...f, dateTo: v }))}
             />
+
+            {/* ── Baris 2: indikator hasil validasi batch ───────────────────── */}
+            <div className="space-y-1 lg:col-start-3">
+              <label className="text-xs font-semibold uppercase tracking-wide text-gray-400">
+                Indikator Kimia
+              </label>
+              <SelectSearch
+                options={[
+                  { value: "", label: ANY_LABEL },
+                  ...chemicals.map((c) => ({ value: c, label: c })),
+                ]}
+                value={form.chemical}
+                onChange={(v) => setForm((f) => ({ ...f, chemical: v }))}
+                placeholder={ANY_LABEL}
+                searchPlaceholder="Cari no. lot..."
+                triggerClassName="py-2"
+              />
+            </div>
+
+            <div className="space-y-1">
+              <label className="text-xs font-semibold uppercase tracking-wide text-gray-400">
+                Ind. Biologi Pembanding
+              </label>
+              <Select
+                value={form.bioControl}
+                onChange={(e) => setForm((f) => ({ ...f, bioControl: e.target.value }))}
+              >
+                <option value="">{ANY_LABEL}</option>
+                {BIO_OPTIONS.map((o) => (
+                  <option key={o} value={o}>
+                    {o}
+                  </option>
+                ))}
+              </Select>
+            </div>
+
+            <div className="space-y-1">
+              <label className="text-xs font-semibold uppercase tracking-wide text-gray-400">
+                Ind. Biologi Uji
+              </label>
+              <Select
+                value={form.bioTest}
+                onChange={(e) => setForm((f) => ({ ...f, bioTest: e.target.value }))}
+              >
+                <option value="">{ANY_LABEL}</option>
+                {BIO_OPTIONS.map((o) => (
+                  <option key={o} value={o}>
+                    {o}
+                  </option>
+                ))}
+              </Select>
+            </div>
           </div>
 
           <div className="mt-4 flex flex-col-reverse gap-2 sm:flex-row sm:flex-wrap sm:justify-end">
@@ -342,12 +442,7 @@ export default function LaporanPerAlatPage() {
             {/* Mobile: tiap baris jadi kartu (label : nilai) agar tak terpotong. */}
             <div className="space-y-3 p-4 md:hidden">
               {rows.map((g) => (
-                <ReportCard
-                  key={g.key}
-                  group={g}
-                  open={expanded.has(g.key)}
-                  onToggle={() => toggleRow(g.key)}
-                />
+                <ReportCard key={g.key} group={g} />
               ))}
             </div>
             {/* Desktop: kolomnya banyak, jadi tabel diberi lebar minimum dan
@@ -375,12 +470,7 @@ export default function LaporanPerAlatPage() {
               </thead>
               <tbody className="divide-y divide-gray-50">
                 {rows.map((g) => (
-                  <ReportRows
-                    key={g.key}
-                    group={g}
-                    open={expanded.has(g.key)}
-                    onToggle={() => toggleRow(g.key)}
-                  />
+                  <ReportRows key={g.key} group={g} />
                 ))}
               </tbody>
             </table>
@@ -406,122 +496,56 @@ function IndicatorValue({ value }: { value: string | null }) {
 }
 
 /**
- * Satu baris laporan = satu label kemasan. Label yang membungkus lebih dari satu unit
- * bisa dibuka untuk melihat tiap asetnya; label berisi satu unit tidak punya detail
- * tambahan sehingga tidak bisa diklik.
+ * Satu baris laporan = satu label kemasan, ditampilkan sebagai satu baris datar.
+ * Baris set TIDAK bisa dibuka: yang perlu terlihat cukup nama setnya. Rincian tiap
+ * unit di dalamnya tetap tersedia lewat export CSV (yang memang per aset).
  */
-function ReportRows({
-  group: g,
-  open,
-  onToggle,
-}: {
-  group: ReportGroup
-  open: boolean
-  onToggle: () => void
-}) {
-  const expandable = g.qty > 1
+function ReportRows({ group: g }: { group: ReportGroup }) {
   // Bungkus yang gagal steril tetap dilaporkan, hanya ditandai merah — laporan ini
   // juga dipakai menelusuri kegagalan, jadi barisnya tidak boleh disembunyikan.
-  const rowTone = g.failed
-    ? "bg-red-50/70 " + (expandable ? "hover:bg-red-50" : "")
-    : expandable
-      ? "hover:bg-gray-50"
-      : ""
   return (
-    <>
-      <tr
-        className={(expandable ? "cursor-pointer " : "") + rowTone}
-        onClick={expandable ? onToggle : undefined}
-      >
-        <td className="whitespace-nowrap py-2.5 px-4 text-gray-600">{formatDateTime(g.sterilized_at)}</td>
-        <td className="whitespace-nowrap py-2.5 px-4">
-          {g.barcode_no ? (
-            <span className="font-mono text-xs text-gray-700">{g.barcode_no}</span>
-          ) : (
-            <span className="text-xs text-gray-400">—</span>
-          )}
-        </td>
-        <td className="min-w-[340px] py-2.5 px-4">
-          <div className="flex items-center gap-2">
-            {/* Chevron dipertahankan sebagai penanda baris yang bisa dibuka; baris
-                berisi satu unit diberi ruang kosong selebar itu agar namanya lurus. */}
-            {expandable ? (
-              open ? (
-                <ChevronDown className="h-4 w-4 shrink-0 text-gray-400" />
-              ) : (
-                <ChevronRight className="h-4 w-4 shrink-0 text-gray-400" />
-              )
-            ) : (
-              <span className="w-4 shrink-0" />
-            )}
-            <div className="min-w-0">
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="font-medium text-gray-900">{g.name ?? "—"}</span>
-                {expandable && <span className="text-xs text-gray-400">{g.qty} alat</span>}
-              </div>
-            </div>
-          </div>
-        </td>
-        <td className="whitespace-nowrap py-2.5 px-4 text-gray-700">{g.machine ?? "—"}</td>
-        <td className="whitespace-nowrap py-2.5 px-4 text-gray-700">
-          {methodLabel[g.method ?? ""] ?? g.method ?? "—"}
-        </td>
-        <td className="whitespace-nowrap py-2.5 px-4 font-mono text-xs text-gray-700">
-          {g.cycle_number ?? <span className="text-gray-400">—</span>}
-        </td>
-        <td className="whitespace-nowrap py-2.5 px-4 tabular-nums text-gray-700">
-          {formatTemperature(g.temperature)}
-        </td>
-        <td className="whitespace-nowrap py-2.5 px-4 tabular-nums text-gray-700">
-          {formatDuration(g.duration_minutes)}
-        </td>
-        <td className="whitespace-nowrap py-2.5 px-4 text-gray-700">
-          <IndicatorValue value={g.chemical_indicator} />
-        </td>
-        <td className="whitespace-nowrap py-2.5 px-4 text-gray-700">
-          <IndicatorValue value={g.bio_indicator_control} />
-        </td>
-        <td className="whitespace-nowrap py-2.5 px-4 text-gray-700">
-          <IndicatorValue value={g.bio_indicator_test} />
-        </td>
-        <td className="whitespace-nowrap py-2.5 px-4 text-gray-600">{formatDate(g.expiry_date)}</td>
-      </tr>
-
-      {expandable &&
-        open &&
-        g.units.map((u) => (
-          <tr key={u.id} className={u.failed ? "bg-red-50/70" : "bg-gray-50/60"}>
-            <td className="px-4" />
-            <td className="px-4" />
-            {/* Sisa kolom (Nama Alat … Kedaluwarsa) dilebur jadi satu sel detail. */}
-            <td className="py-1.5 px-4" colSpan={10}>
-              <div className="flex flex-wrap items-center gap-2 pl-6">
-                <span className={u.failed ? "text-red-700" : "text-gray-700"}>{u.name ?? "—"}</span>
-                {u.result && (
-                  <span className={"text-xs " + (u.failed ? "text-red-600" : "text-gray-400")}>
-                    · {u.result}
-                  </span>
-                )}
-              </div>
-            </td>
-          </tr>
-        ))}
-    </>
+    <tr className={g.failed ? "bg-red-50/70" : ""}>
+      <td className="whitespace-nowrap py-2.5 px-4 text-gray-600">{formatDateTime(g.sterilized_at)}</td>
+      <td className="whitespace-nowrap py-2.5 px-4">
+        {g.barcode_no ? (
+          <span className="font-mono text-xs text-gray-700">{g.barcode_no}</span>
+        ) : (
+          <span className="text-xs text-gray-400">—</span>
+        )}
+      </td>
+      <td className="min-w-[340px] py-2.5 px-4">
+        <span className="font-medium text-gray-900">{g.name ?? "—"}</span>
+      </td>
+      <td className="whitespace-nowrap py-2.5 px-4 text-gray-700">{g.machine ?? "—"}</td>
+      <td className="whitespace-nowrap py-2.5 px-4 text-gray-700">
+        {methodLabel[g.method ?? ""] ?? g.method ?? "—"}
+      </td>
+      <td className="whitespace-nowrap py-2.5 px-4 font-mono text-xs text-gray-700">
+        {g.cycle_number ?? <span className="text-gray-400">—</span>}
+      </td>
+      <td className="whitespace-nowrap py-2.5 px-4 tabular-nums text-gray-700">
+        {formatTemperature(g.temperature)}
+      </td>
+      <td className="whitespace-nowrap py-2.5 px-4 tabular-nums text-gray-700">
+        {formatDuration(g.duration_minutes)}
+      </td>
+      <td className="whitespace-nowrap py-2.5 px-4 text-gray-700">
+        <IndicatorValue value={g.chemical_indicator} />
+      </td>
+      <td className="whitespace-nowrap py-2.5 px-4 text-gray-700">
+        <IndicatorValue value={g.bio_indicator_control} />
+      </td>
+      <td className="whitespace-nowrap py-2.5 px-4 text-gray-700">
+        <IndicatorValue value={g.bio_indicator_test} />
+      </td>
+      <td className="whitespace-nowrap py-2.5 px-4 text-gray-600">{formatDate(g.expiry_date)}</td>
+    </tr>
   )
 }
 
-// Versi kartu (mobile) dari satu baris laporan: header (klik untuk membuka detail bila
-// labelnya membungkus lebih dari satu unit) + daftar field label:nilai.
-function ReportCard({
-  group: g,
-  open,
-  onToggle,
-}: {
-  group: ReportGroup
-  open: boolean
-  onToggle: () => void
-}) {
-  const expandable = g.qty > 1
+// Versi kartu (mobile) dari satu baris laporan: header berisi nama + barcode, lalu
+// daftar field label:nilai. Sama seperti versi tabel, kartunya tidak bisa dibuka.
+function ReportCard({ group: g }: { group: ReportGroup }) {
   return (
     <div
       className={
@@ -530,33 +554,19 @@ function ReportCard({
         (g.failed ? "border-red-200 bg-red-50/60" : "border-gray-200 bg-white")
       }
     >
-      <button
-        type="button"
-        onClick={expandable ? onToggle : undefined}
-        className={"flex w-full items-start gap-2 px-4 py-3 text-left " + (expandable ? "" : "cursor-default")}
-      >
-        {expandable ? (
-          open ? (
-            <ChevronDown className="mt-0.5 h-4 w-4 shrink-0 text-gray-400" />
-          ) : (
-            <ChevronRight className="mt-0.5 h-4 w-4 shrink-0 text-gray-400" />
-          )
-        ) : (
-          <span className="w-4 shrink-0" />
-        )}
+      <div className="flex w-full items-start gap-2 px-4 py-3 text-left">
         <div className="min-w-0 flex-1">
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="font-medium text-gray-900">{g.name ?? "—"}</span>
-            {expandable && <span className="text-xs text-gray-400">{g.qty} alat</span>}
-          </div>
-          {g.barcode_no && <span className="font-mono text-xs text-gray-500">{g.barcode_no}</span>}
+          <span className="font-medium text-gray-900">{g.name ?? "—"}</span>
+          {g.barcode_no && (
+            <span className="block font-mono text-xs text-gray-500">{g.barcode_no}</span>
+          )}
         </div>
         {g.failed && (
           <span className="shrink-0 rounded bg-red-100 px-1.5 py-0.5 text-xs font-medium text-red-700">
             Gagal
           </span>
         )}
-      </button>
+      </div>
 
       <dl className="divide-y divide-gray-50 border-t border-gray-100">
         <ReportField label="Waktu Steril">{formatDateTime(g.sterilized_at)}</ReportField>
@@ -576,23 +586,6 @@ function ReportCard({
         </ReportField>
         <ReportField label="Kedaluwarsa">{formatDate(g.expiry_date)}</ReportField>
       </dl>
-
-      {expandable && open && (
-        <div className="divide-y divide-gray-50 border-t border-gray-100 bg-gray-50/50">
-          {g.units.map((u) => (
-            <div key={u.id} className="flex flex-wrap items-center gap-2 px-4 py-2">
-              <span className={"text-sm " + (u.failed ? "text-red-700" : "text-gray-700")}>
-                {u.name ?? "—"}
-              </span>
-              {u.result && (
-                <span className={"ml-auto text-xs " + (u.failed ? "text-red-600" : "text-gray-400")}>
-                  {u.result}
-                </span>
-              )}
-            </div>
-          ))}
-        </div>
-      )}
     </div>
   )
 }

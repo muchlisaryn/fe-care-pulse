@@ -51,9 +51,9 @@ const EXPORT_HEADERS = [
   "No. RM Pasien",
   "Nama Pasien",
   "Ruangan",
+  "Jenis",
   "Nama Instrumen / Set",
   "Barcode",
-  "Jenis",
   "Peminjam",
   "Tgl Peminjaman",
   "Dikembalikan",
@@ -148,6 +148,17 @@ function Text({ value }: { value: string | null }) {
   return value ? <>{value}</> : <Empty />
 }
 
+/**
+ * Nama pasien selalu ditampilkan KAPITAL agar seragam dan mudah dipindai saat
+ * dicocokkan dengan berkas. Dipakai juga oleh export supaya isi unduhan sama
+ * persis dengan yang tampil di layar. Nilai kosong tetap null → dirender "—".
+ */
+function patientName(value: string | null): string | null {
+  const name = value?.trim()
+
+  return name ? name.toUpperCase() : null
+}
+
 export default function LaporanTransaksiInstrumenPage() {
   const dispatch = useAppDispatch()
   const { options: rooms, optionsLoaded } = useAppSelector((s) => s.rooms)
@@ -235,11 +246,11 @@ export default function LaporanTransaksiInstrumenPage() {
         r.transaction_date ? formatDate(r.transaction_date) : "",
         r.invoice_no ?? "",
         r.medical_record_no ?? "",
-        r.patient_name ?? "",
+        patientName(r.patient_name) ?? "",
         r.room ?? "",
+        r.type === "paket" ? "Set" : "Satuan",
         r.name ?? "",
         r.barcode_no ?? "",
-        r.type === "paket" ? "Set" : "Satuan",
         r.borrowed_by ?? "",
         r.borrowed_date ? formatDateTime(r.borrowed_date) : "",
         r.returned_by ?? "",
@@ -394,10 +405,10 @@ export default function LaporanTransaksiInstrumenPage() {
                     <th className="whitespace-nowrap py-2.5 px-4 text-left">No. RM Pasien</th>
                     <th className="whitespace-nowrap py-2.5 px-4 text-left">Nama Pasien</th>
                     <th className="whitespace-nowrap py-2.5 px-4 text-left">Ruangan</th>
+                    <th className="w-24 whitespace-nowrap py-2.5 px-4 text-left">Jenis</th>
                     {/* Kolom utama laporan — diberi porsi lebar paling besar. */}
                     <th className="min-w-[260px] py-2.5 px-4 text-left">Nama Instrumen / Set</th>
                     <th className="whitespace-nowrap py-2.5 px-4 text-left">Barcode</th>
-                    <th className="w-24 whitespace-nowrap py-2.5 px-4 text-left">Jenis</th>
                     <th className="whitespace-nowrap py-2.5 px-4 text-left">Peminjam</th>
                     <th className="whitespace-nowrap py-2.5 px-4 text-left">Tgl Peminjaman</th>
                     <th className="whitespace-nowrap py-2.5 px-4 text-left">Dikembalikan</th>
@@ -450,10 +461,13 @@ function LaporanRowView({ row }: { row: LaporanRow }) {
         <Text value={row.medical_record_no} />
       </td>
       <td className="py-2.5 px-4 text-gray-700">
-        <Text value={row.patient_name} />
+        <Text value={patientName(row.patient_name)} />
       </td>
       <td className="whitespace-nowrap py-2.5 px-4 text-gray-700">
         <Text value={row.room} />
+      </td>
+      <td className="py-2.5 px-4">
+        <JenisBadge type={row.type} />
       </td>
       {/* Kolom utama — ditonjolkan lewat LEBAR kolomnya saja; ukuran & ketebalan
           teksnya sengaja sama dengan kolom lain. */}
@@ -462,9 +476,6 @@ function LaporanRowView({ row }: { row: LaporanRow }) {
       </td>
       <td className="whitespace-nowrap py-2.5 px-4">
         <BarcodeCell value={row.barcode_no} />
-      </td>
-      <td className="py-2.5 px-4">
-        <JenisBadge type={row.type} />
       </td>
       <td className="whitespace-nowrap py-2.5 px-4 text-gray-700">
         <Text value={row.borrowed_by} />
@@ -502,7 +513,7 @@ function LaporanCard({ row }: { row: LaporanRow }) {
           <Text value={row.medical_record_no} />
         </Field>
         <Field label="Nama Pasien">
-          <Text value={row.patient_name} />
+          <Text value={patientName(row.patient_name)} />
         </Field>
         <Field label="Ruangan">
           <Text value={row.room} />

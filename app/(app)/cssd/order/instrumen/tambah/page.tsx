@@ -65,6 +65,24 @@ type RequestLine = {
   contents?: PaketContent[] // isi paket (instrumen yang akan di-order) — untuk type paket
 }
 
+/**
+ * No. Rekam Medis hanya berisi ANGKA. Disaring saat mengetik (bukan divalidasi saat
+ * simpan) supaya prefiks seperti "RM-" yang terlanjur diketik/di-paste langsung
+ * rontok — nomor RM yang tersimpan jadi seragam dan bisa dicocokkan antar sistem.
+ */
+function digitsOnly(value: string): string {
+  return value.replace(/\D/g, "")
+}
+
+/**
+ * Nama pasien dikapitalkan saat mengetik, jadi yang tersimpan MEMANG kapital —
+ * bukan sekadar tampilannya. Ini menyeragamkan data dengan laporan yang sudah
+ * menampilkan nama pasien kapital.
+ */
+function toUpper(value: string): string {
+  return value.toUpperCase()
+}
+
 export default function TambahOrderInstrumenPage() {
   const router = useRouter()
   const dispatch = useAppDispatch()
@@ -441,8 +459,11 @@ export default function TambahOrderInstrumenPage() {
                 <Input
                   id="no-rm"
                   value={medicalRecordNo}
-                  onChange={(e) => setMedicalRecordNo(e.target.value)}
-                  placeholder="mis. RM-00123"
+                  onChange={(e) => setMedicalRecordNo(digitsOnly(e.target.value))}
+                  // `inputMode` memunculkan papan angka di ponsel; tetap <input type="text">
+                  // agar nol di depan tidak hilang dan tombol spinner tidak muncul.
+                  inputMode="numeric"
+                  placeholder="mis. 00123"
                   className="font-mono"
                 />
               </div>
@@ -453,7 +474,7 @@ export default function TambahOrderInstrumenPage() {
                 <Input
                   id="nama-pasien"
                   value={patientName}
-                  onChange={(e) => setPatientName(e.target.value)}
+                  onChange={(e) => setPatientName(toUpper(e.target.value))}
                   placeholder="Nama lengkap pasien"
                 />
               </div>

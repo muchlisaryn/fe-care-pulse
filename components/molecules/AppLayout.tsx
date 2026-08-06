@@ -8,6 +8,7 @@ import { useAppDispatch, useAppSelector } from "@/lib/store/hooks"
 import { setCredentials, fetchMe, setHydrated } from "@/lib/store/slices/authSlice"
 import { fetchIncomingCount, fetchPendingTransferCount } from "@/lib/store/slices/notifSlice"
 import { announceIncomingOrder, primeNotifSound } from "@/lib/notifSound"
+import { INCOMING_MENU_URL, hasMenuAccess } from "@/lib/menu-access"
 import { getEcho } from "@/lib/echo"
 import { loadAuth } from "@/lib/auth"
 
@@ -21,6 +22,11 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
   const [collapsed, setCollapsed] = useState(false)
   const [mobileOpen, setMobileOpen] = useState(false)
   const didHydrate = useRef(false)
+
+  // Hanya user yang otoritasnya memuat menu Tracking Order yang berkepentingan
+  // dengan order masuk. `auth.menus` sudah disaring backend sesuai otoritas, jadi
+  // ini sekaligus penentu siapa yang boleh mendengar pengumuman suaranya.
+  const canSeeIncomingOrders = hasMenuAccess(menus, INCOMING_MENU_URL)
 
   useEffect(() => {
     const saved = localStorage.getItem("sidebar-collapsed")
@@ -83,9 +89,11 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
   // sepenuhnya datang real-time lewat event Pusher di bawah — tanpa polling.
   useEffect(() => {
     if (!isAuthenticated) return
-    dispatch(fetchIncomingCount())
+    // `incomingCount` hanya dipakai badge menu Tracking Order; tanpa otoritas itu
+    // badge-nya tidak pernah dirender, jadi angkanya tidak perlu diambil.
+    if (canSeeIncomingOrders) dispatch(fetchIncomingCount())
     dispatch(fetchPendingTransferCount())
-  }, [isAuthenticated, dispatch])
+  }, [isAuthenticated, canSeeIncomingOrders, dispatch])
 
   // Selaraskan badge saat tab kembali dibuka/difokuskan. Event Pusher hanya
   // mengabarkan order MASUK; order yang diterima/dibatalkan di perangkat atau tab
@@ -95,7 +103,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
     if (!isAuthenticated) return
     const sync = () => {
       if (document.visibilityState !== "visible") return
-      dispatch(fetchIncomingCount())
+      if (canSeeIncomingOrders) dispatch(fetchIncomingCount())
       dispatch(fetchPendingTransferCount())
     }
     document.addEventListener("visibilitychange", sync)
@@ -104,7 +112,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
       document.removeEventListener("visibilitychange", sync)
       window.removeEventListener("focus", sync)
     }
-  }, [isAuthenticated, dispatch])
+  }, [isAuthenticated, canSeeIncomingOrders, dispatch])
 
   // Real-time: dengarkan event order baru & permintaan pinjam lewat Pusher. Ini
   // satu-satunya sumber pembaruan badge (tanpa polling), jadi env Pusher wajib
@@ -113,8 +121,13 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
   // event = satu order, sehingga beberapa order beruntun tetap diumumkan semua.
   // `id` order ikut dikirim agar order yang sama tidak diumumkan berulang, berapa
   // pun jumlah instrumen di dalamnya (lihat announceIncomingOrder).
+  // HANYA user yang berhak atas menu Tracking Order yang berlangganan channel ini.
+  // Sebelumnya semua user yang login ikut mendengar "Ada order masuk dari ruangan
+  // ..." — termasuk yang menunya tidak ada, jadi tidak bisa menindaklanjuti. Selain
+  // berisik, payload event membawa nama ruangan asal order ke user yang tidak
+  // berkepentingan; tidak berlangganan sekalian menutup keduanya.
   useEffect(() => {
-    if (!isAuthenticated) return
+    if (!isAuthenticated || !canSeeIncomingOrders) return
     const echo = getEcho()
     if (!echo) return
     const channel = echo.channel("orders")
@@ -122,13 +135,22 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
       dispatch(fetchIncomingCount())
       announceIncomingOrder(e?.room, e?.id)
     })
-    // Permintaan pinjam-alih baru → perbarui badge "Permintaan Pinjam".
+    return () => {
+      echo.leaveChannel("orders")
+    }
+  }, [isAuthenticated, canSeeIncomingOrders, dispatch])
+
+  // Permintaan pinjam-alih baru → perbarui badge "Permintaan Pinjam". Dipisah dari
+  // channel order di atas karena otoritasnya berbeda.
+  useEffect(() => {
+    if (!isAuthenticated) return
+    const echo = getEcho()
+    if (!echo) return
     const transferChannel = echo.channel("transfers")
     transferChannel.listen(".transfer.requested", () => {
       dispatch(fetchPendingTransferCount())
     })
     return () => {
-      echo.leaveChannel("orders")
       echo.leaveChannel("transfers")
     }
   }, [isAuthenticated, dispatch])
