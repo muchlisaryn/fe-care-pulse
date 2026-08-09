@@ -229,6 +229,31 @@ export function DistributeReady({
                   <span>{order.unit_count} unit</span>
                   <span>Kedaluwarsa: {formatDate(order.expiry_date)}</span>
                 </div>
+                {/* Pasien tujuan alat (tautan RM, diisi saat order dibuat) — petugas
+                    mencocokkannya dengan bungkus steril sebelum diserahkan, jadi harus
+                    terbaca langsung di kartu tanpa membuka modal Distribusikan.
+                    Sengaja SELALU tampil: order yang belum punya tautan RM justru perlu
+                    terlihat, bukan disembunyikan. */}
+                <div className="mt-0.5 flex flex-wrap gap-x-4 gap-y-0.5 text-xs text-gray-500">
+                  <span>
+                    No. RM:{" "}
+                    {order.medical_record_no ? (
+                      <span className="font-mono font-semibold text-gray-700">
+                        {order.medical_record_no}
+                      </span>
+                    ) : (
+                      <span className="text-gray-400">—</span>
+                    )}
+                  </span>
+                  <span>
+                    Pasien:{" "}
+                    {order.patient_name ? (
+                      <span className="font-medium text-gray-700">{order.patient_name}</span>
+                    ) : (
+                      <span className="text-gray-400">—</span>
+                    )}
+                  </span>
+                </div>
               </div>
             </div>
             <button

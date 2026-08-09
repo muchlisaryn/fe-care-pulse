@@ -1,7 +1,7 @@
 // Notifikasi order masuk: diucapkan lewat Web Speech API ("Ada order masuk dari
-// ruangan ...") agar petugas tahu asal ordernya tanpa melihat layar. Browser yang
-// tidak mendukung sintesis suara tidak berbunyi apa pun — badge di sidebar tetap
-// menjadi penanda visualnya.
+// ruangan ...") dengan SUARA PEREMPUAN dan tempo pelan agar petugas tahu asal ordernya
+// tanpa melihat layar. Browser yang tidak mendukung sintesis suara tidak berbunyi apa
+// pun — badge di sidebar tetap menjadi penanda visualnya.
 //
 // Browser memblokir sintesis suara yang tidak dipicu gesture user (kebijakan
 // autoplay). Karena itu `primeNotifSound()` dipanggil pada gesture user pertama
@@ -15,13 +15,32 @@ function getSynth(): SpeechSynthesis | null {
   return window.speechSynthesis ?? null
 }
 
+// Penanda jenis kelamin suara dari NAMA voice — satu-satunya petunjuk yang tersedia,
+// karena `SpeechSynthesisVoice` tidak punya properti gender. Nama voice Indonesia yang
+// umum: "Microsoft Gadis" & "Google Bahasa Indonesia" (perempuan), "Microsoft Ardi"
+// (laki-laki).
+const FEMALE_VOICE = /female|wanita|perempuan|gadis|andika|damayanti|google bahasa indonesia/i
+// `\bmale\b` sengaja dipakai supaya TIDAK ikut cocok pada kata "Female".
+const MALE_VOICE = /\bmale\b|pria|laki|ardi/i
+
 /**
- * Suara berbahasa Indonesia bila tersedia di perangkat. Daftar suara dimuat asinkron
- * oleh browser, jadi bisa saja masih kosong saat dipanggil — biarkan null dan
+ * Suara PEREMPUAN berbahasa Indonesia bila tersedia di perangkat. Daftar suara dimuat
+ * asinkron oleh browser, jadi bisa saja masih kosong saat dipanggil — biarkan null dan
  * andalkan `utterance.lang`, bukan menunda pengucapan.
+ *
+ * Urutan pilihan: suara id-ID yang namanya jelas perempuan → suara id-ID yang bukan
+ * laki-laki → suara id-ID apa pun. Perangkat yang hanya punya satu suara Indonesia
+ * tetap berbunyi, tidak dibiarkan bisu hanya karena namanya tidak dikenali.
  */
 function pickVoice(synth: SpeechSynthesis): SpeechSynthesisVoice | null {
-  return synth.getVoices().find((v) => v.lang?.toLowerCase().startsWith("id")) ?? null
+  const voices = synth.getVoices().filter((v) => v.lang?.toLowerCase().startsWith("id"))
+
+  return (
+    voices.find((v) => FEMALE_VOICE.test(v.name)) ??
+    voices.find((v) => !MALE_VOICE.test(v.name)) ??
+    voices[0] ??
+    null
+  )
 }
 
 /** Ucapkan teks. Mengembalikan false bila browser tidak mendukung sintesis suara. */
@@ -32,7 +51,13 @@ function speak(text: string): boolean {
   try {
     const utterance = new SpeechSynthesisUtterance(text)
     utterance.lang = "id-ID"
-    utterance.rate = 0.95 // sedikit lebih lambat agar nama ruangan jelas terdengar
+    // Pelan & jelas: ruang CSSD berisik dan petugas sering tidak menghadap layar, jadi
+    // kalimatnya harus sempat dicerna sekali dengar. Jangan dinaikkan mendekati 1.
+    utterance.rate = 0.8
+    // Nada sedikit di atas normal — menegaskan karakter suara perempuan, sekaligus
+    // menjaga pengumuman tetap terdengar feminin di perangkat yang suara Indonesianya
+    // netral / tidak bisa dikenali jenis kelaminnya dari nama.
+    utterance.pitch = 1.1
     const voice = pickVoice(synth)
     if (voice) utterance.voice = voice
     // Tidak memakai cancel(): bila beberapa order masuk beruntun, pengumumannya
@@ -55,6 +80,10 @@ export function primeNotifSound(): void {
   if (!synth || typeof SpeechSynthesisUtterance === "undefined") return
 
   try {
+    // Memancing pemuatan daftar suara sekalian: `getVoices()` diisi browser secara
+    // asinkron, jadi memanggilnya dari sini membuat suara perempuan sudah tersedia
+    // saat pengumuman pertama berbunyi (lihat pickVoice).
+    synth.getVoices()
     const warmup = new SpeechSynthesisUtterance("")
     warmup.volume = 0
     synth.speak(warmup)

@@ -33,7 +33,16 @@ type LaporanRow = {
   room: string | null
   medical_record_no: string | null
   patient_name: string | null
+  /** Petugas CSSD yang menyerahkan alat steril (pelaku event `terdistribusi`). */
+  distributed_by: string | null
+  /** Pihak yang menerima hasil distribusi (`order.distributed_to`). */
+  received_by: string | null
+  /** Momen alat steril diserahkan (`order.distributed_at`). */
+  distributed_at: string | null
+  /** Orang dari ruangan yang menyerahkan alat kembali (`order.returned_by`). */
   returned_by: string | null
+  /** Petugas CSSD yang menerima pengembalian (pelaku event `dikembalikan`). */
+  return_received_by: string | null
   /** Tanggal pengembalian (`order.return_actual_date`) — tanpa jam. */
   return_date: string | null
   /** Momen persis pengembalian dari event timeline; null pada order lama. */
@@ -56,8 +65,12 @@ const EXPORT_HEADERS = [
   "Barcode",
   "Peminjam",
   "Tgl Peminjaman",
-  "Dikembalikan",
-  "Waktu Kembali",
+  "Petugas Distribusi",
+  "Diterima Oleh",
+  "Distribusi Tanggal",
+  "Dikembalikan Oleh",
+  "Petugas Penerima",
+  "Tanggal Kembali",
 ] as const
 
 const TYPE_OPTIONS = [
@@ -253,7 +266,11 @@ export default function LaporanTransaksiInstrumenPage() {
         r.barcode_no ?? "",
         r.borrowed_by ?? "",
         r.borrowed_date ? formatDateTime(r.borrowed_date) : "",
+        r.distributed_by ?? "",
+        r.received_by ?? "",
+        r.distributed_at ? formatDateTime(r.distributed_at) : "",
         r.returned_by ?? "",
+        r.return_received_by ?? "",
         hasReturnedAt(r) ? returnedAtLabel(r) : "",
       ])
 
@@ -397,7 +414,7 @@ export default function LaporanTransaksiInstrumenPage() {
                 judul & nilai pendek tetap satu baris; hanya kolom nama instrumen dan
                 nama pasien yang boleh membungkus. */}
             <div className="hidden overflow-x-auto md:block">
-              <table className="w-full min-w-[1180px] text-sm">
+              <table className="w-full min-w-[1740px] text-sm">
                 <thead>
                   <tr className="border-b border-gray-100 bg-gray-50 text-xs font-semibold uppercase tracking-wide text-gray-400">
                     <th className="w-32 whitespace-nowrap py-2.5 px-4 text-left">Tgl Transaksi</th>
@@ -411,8 +428,12 @@ export default function LaporanTransaksiInstrumenPage() {
                     <th className="whitespace-nowrap py-2.5 px-4 text-left">Barcode</th>
                     <th className="whitespace-nowrap py-2.5 px-4 text-left">Peminjam</th>
                     <th className="whitespace-nowrap py-2.5 px-4 text-left">Tgl Peminjaman</th>
-                    <th className="whitespace-nowrap py-2.5 px-4 text-left">Dikembalikan</th>
-                    <th className="whitespace-nowrap py-2.5 px-4 text-left">Waktu Kembali</th>
+                    <th className="whitespace-nowrap py-2.5 px-4 text-left">Petugas Distribusi</th>
+                    <th className="whitespace-nowrap py-2.5 px-4 text-left">Diterima Oleh</th>
+                    <th className="whitespace-nowrap py-2.5 px-4 text-left">Distribusi Tanggal</th>
+                    <th className="whitespace-nowrap py-2.5 px-4 text-left">Dikembalikan Oleh</th>
+                    <th className="whitespace-nowrap py-2.5 px-4 text-left">Petugas Penerima</th>
+                    <th className="whitespace-nowrap py-2.5 px-4 text-left">Tanggal Kembali</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-50">
@@ -482,7 +503,19 @@ function LaporanRowView({ row }: { row: LaporanRow }) {
       </td>
       <td className="whitespace-nowrap py-2.5 px-4 text-gray-600">{formatDateTime(row.borrowed_date)}</td>
       <td className="whitespace-nowrap py-2.5 px-4 text-gray-700">
+        <Text value={row.distributed_by} />
+      </td>
+      <td className="whitespace-nowrap py-2.5 px-4 text-gray-700">
+        <Text value={row.received_by} />
+      </td>
+      <td className="whitespace-nowrap py-2.5 px-4 text-gray-600">
+        {formatDateTime(row.distributed_at)}
+      </td>
+      <td className="whitespace-nowrap py-2.5 px-4 text-gray-700">
         <Text value={row.returned_by} />
+      </td>
+      <td className="whitespace-nowrap py-2.5 px-4 text-gray-700">
+        <Text value={row.return_received_by} />
       </td>
       <td className="whitespace-nowrap py-2.5 px-4 text-gray-600">
         {hasReturnedAt(row) ? returnedAtLabel(row) : <Empty />}
@@ -522,10 +555,20 @@ function LaporanCard({ row }: { row: LaporanRow }) {
           <Text value={row.borrowed_by} />
         </Field>
         <Field label="Tgl Peminjaman">{formatDateTime(row.borrowed_date)}</Field>
-        <Field label="Dikembalikan">
+        <Field label="Petugas Distribusi">
+          <Text value={row.distributed_by} />
+        </Field>
+        <Field label="Diterima Oleh">
+          <Text value={row.received_by} />
+        </Field>
+        <Field label="Distribusi Tanggal">{formatDateTime(row.distributed_at)}</Field>
+        <Field label="Dikembalikan Oleh">
           <Text value={row.returned_by} />
         </Field>
-        <Field label="Waktu Kembali">
+        <Field label="Petugas Penerima">
+          <Text value={row.return_received_by} />
+        </Field>
+        <Field label="Tanggal Kembali">
           {hasReturnedAt(row) ? returnedAtLabel(row) : <Empty />}
         </Field>
       </dl>

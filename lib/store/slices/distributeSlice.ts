@@ -16,6 +16,9 @@ export type DistributeOrder = {
   status: string
   borrowed_by: string | null
   room: { id: number; name: string; code: string | null } | null
+  /** Pasien tujuan alat — diisi saat order dibuat; null pada order tanpa tautan RM. */
+  medical_record_no: string | null
+  patient_name: string | null
   processed_at: string | null
   expiry_date: string | null
   unit_count: number
