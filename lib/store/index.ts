@@ -28,6 +28,7 @@ import sterilizePipelineReducer from "./slices/sterilizePipelineSlice"
 import productionPackagingReducer from "./slices/productionPackagingSlice"
 import productionSterilizeReducer from "./slices/productionSterilizeSlice"
 import storageReducer from "./slices/storageSlice"
+import sterileExpiryReducer from "./slices/sterileExpirySlice"
 import distributeReducer from "./slices/distributeSlice"
 
 export const store = configureStore({
@@ -57,6 +58,7 @@ export const store = configureStore({
     productionPackaging: productionPackagingReducer,
     productionSterilize: productionSterilizeReducer,
     storage: storageReducer,
+    sterileExpiry: sterileExpiryReducer,
     distribute: distributeReducer,
     icd10: icd10Reducer,
     categoriCP: categoriCPReducer,

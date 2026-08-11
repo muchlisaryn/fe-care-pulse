@@ -1,17 +1,17 @@
 "use client"
 
-import { Fragment, useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { useRouter } from "next/navigation"
-import { ChevronRight, Plus, Minus } from "lucide-react"
+import { UserPlus } from "lucide-react"
 import { Button } from "@/components/atoms/Button"
 import { Input } from "@/components/atoms/Input"
 import { Label } from "@/components/atoms/Label"
-import { Badge } from "@/components/atoms/Badge"
 import { Textarea } from "@/components/atoms/Textarea"
 import { SelectSearch } from "@/components/atoms/SelectSearch"
 import { Card } from "@/components/molecules/Card"
 import { PageHeader } from "@/components/molecules/PageHeader"
 import { FormSectionHeader } from "@/components/molecules/FormSectionHeader"
+import { PatientRequestCard } from "@/components/molecules/PatientRequestCard"
 import { ResultDialog } from "@/components/molecules/ResultDialog"
 import { useAppDispatch, useAppSelector } from "@/lib/store/hooks"
 import { fetchRoomOptions } from "@/lib/store/slices/roomSlice"
@@ -19,75 +19,21 @@ import { invalidateOrders } from "@/lib/store/slices/orderSlice"
 import { useUserOptions } from "@/lib/useUserOptions"
 import { apiErrorMessage } from "@/lib/apiError"
 import { setOrderFlash } from "@/lib/orderFlash"
+import {
+  emptyPatientGroup,
+  totalQtyOf,
+  type AddMode,
+  type InstrumentType,
+  type PaketCatalog,
+  type PatientGroup,
+} from "@/lib/orderRequest"
 import api from "@/lib/axios"
-
-// Jenis instrumen (master) — dipakai untuk permintaan satuan.
-type InstrumentType = {
-  id: number
-  code: string
-  name: string
-  available_stocks_count?: number // jumlah unit berstatus `tersedia`
-  available_sterile_count?: number // jumlah unit STERIL siap-order (di gudang steril)
-}
-
-// Katalog paket instrumen (Master › Katalog Instrumen, tipe `paket`).
-type PaketCatalog = {
-  id: number
-  code: string
-  name: string
-  items_count?: number
-  available_sets?: number // set yang bisa dipenuhi dari stok tersedia
-  available_sterile_sets?: number // set yang bisa dipenuhi dari stok STERIL
-}
-
-// Rincian isi paket (jenis instrumen + jumlah per set), dari endpoint show katalog.
-type PaketItem = {
-  instrument_id: number
-  quantity: number
-  instrument?: { id: number; code: string; name: string } | null
-}
-
-type AddMode = "satuan" | "paket"
 
 // Label layanan ruangan (untuk tampilan opsi ruangan).
 const LAYANAN_LABEL: Record<string, string> = {
   igd: "IGD",
   rawat_jalan: "Rawat Jalan",
   rawat_inap: "Rawat Inap",
-}
-
-// Isi paket per baris permintaan: nama instrumen + jumlah per satu set paket.
-type PaketContent = { name: string; perSet: number }
-
-// Baris permintaan: hanya jumlah. Unit fisik di-generate saat CSSD menerima pesanan.
-type RequestLine = {
-  type: AddMode
-  refId: number // instrument_id (satuan) / instrument_catalog_id (paket)
-  name: string
-  quantity: string // disimpan sebagai teks agar boleh kosong; divalidasi saat simpan
-  contents?: PaketContent[] // isi paket (instrumen yang akan di-order) — untuk type paket
-}
-
-// Panjang maksimal No. Rekam Medis.
-const MAX_RM_LENGTH = 10
-
-/**
- * No. Rekam Medis hanya berisi ANGKA, maksimal 10 digit. Disaring saat mengetik
- * (bukan divalidasi saat simpan) supaya prefiks seperti "RM-" yang terlanjur
- * diketik/di-paste langsung rontok, dan kelebihan digit tidak sempat masuk —
- * nomor RM yang tersimpan jadi seragam dan bisa dicocokkan antar sistem.
- */
-function digitsOnly(value: string): string {
-  return value.replace(/\D/g, "").slice(0, MAX_RM_LENGTH)
-}
-
-/**
- * Nama pasien dikapitalkan saat mengetik, jadi yang tersimpan MEMANG kapital —
- * bukan sekadar tampilannya. Ini menyeragamkan data dengan laporan yang sudah
- * menampilkan nama pasien kapital.
- */
-function toUpper(value: string): string {
-  return value.toUpperCase()
 }
 
 export default function TambahOrderInstrumenPage() {
@@ -108,6 +54,7 @@ export default function TambahOrderInstrumenPage() {
   const authUsername = useAppSelector((s) => s.auth.username)
   const authName = useAppSelector((s) => s.auth.name)
 
+  // Data peminjaman dipakai BERSAMA oleh seluruh pasien pada form ini.
   const [roomId, setRoomId] = useState("")
   // Berisi USERNAME peminjam terpilih, bukan nama — lihat useUserOptions. Kosong
   // berarti "belum dipilih", dan nilai efektifnya jatuh ke user yang sedang login
@@ -115,39 +62,25 @@ export default function TambahOrderInstrumenPage() {
   // tidak memicu render berantai saat sesi login selesai dimuat.
   const [borrowedBy, setBorrowedBy] = useState("")
   const { options: userOptions, loading: userLoading, nameOf } = useUserOptions()
-  const [medicalRecordNo, setMedicalRecordNo] = useState("")
-  const [patientName, setPatientName] = useState("")
   const [orderDate, setOrderDate] = useState("")
   const [orderTime, setOrderTime] = useState("")
   const [returnPlanDate, setReturnPlanDate] = useState("")
   const [note, setNote] = useState("")
-  const [requests, setRequests] = useState<RequestLine[]>([])
-  // Baris paket yang sedang dibuka (menampilkan rincian isi paket).
-  const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set())
+
+  // Satu grup = satu pasien = satu record order. Selalu ada minimal satu grup.
+  const [patients, setPatients] = useState<PatientGroup[]>(() => [emptyPatientGroup()])
+
   // Pesan validasi yang baru ditampilkan saat klik Simpan.
   const [formError, setFormError] = useState<string | null>(null)
   // Kegagalan simpan dari server ditampilkan sebagai modal agar tidak terlewat —
   // pesannya tetap ikut tercetak di bawah tombol setelah modalnya ditutup.
   const [saveError, setSaveError] = useState<string | null>(null)
-
   const [saving, setSaving] = useState(false)
-
-  // Mode penambahan: per jenis instrumen (satuan) atau per paket (katalog tipe paket)
-  const [addMode, setAddMode] = useState<AddMode>("satuan")
 
   const [instruments, setInstruments] = useState<InstrumentType[]>([])
   const [instrumentLoading, setInstrumentLoading] = useState(true)
   const [catalogs, setCatalogs] = useState<PaketCatalog[]>([])
   const [catalogLoading, setCatalogLoading] = useState(true)
-
-  // Pilihan + jumlah yang sedang diisi pada form tambah.
-  const [newInstrumentId, setNewInstrumentId] = useState("")
-  const [newInstrumentQty, setNewInstrumentQty] = useState("1")
-  const [newCatalogId, setNewCatalogId] = useState("")
-  const [newCatalogQty, setNewCatalogQty] = useState("1")
-  // Isi paket terpilih (ditampilkan agar peminjam tahu instrumen apa saja di dalamnya).
-  const [paketItems, setPaketItems] = useState<PaketItem[]>([])
-  const [loadingPaketItems, setLoadingPaketItems] = useState(false)
 
   useEffect(() => {
     dispatch(fetchRoomOptions())
@@ -189,14 +122,17 @@ export default function TambahOrderInstrumenPage() {
   }, [dispatch])
 
   // Prefill tanggal & jam pinjam dengan waktu sekarang (tetap bisa diubah manual).
+  // Sengaja lewat efek, BUKAN nilai awal useState: jam dihitung dari waktu perangkat,
+  // dan bila dirender ikut HTML dari server nilainya bisa berbeda dengan klien
+  // sehingga hidrasinya tak cocok.
   useEffect(() => {
     const { date, time } = nowDateAndTime()
+    /* eslint-disable react-hooks/set-state-in-effect */
     setOrderDate((prev) => prev || date)
     setOrderTime((prev) => prev || time)
+    /* eslint-enable react-hooks/set-state-in-effect */
   }, [])
 
-  // Order = peminjaman barang yang SUDAH STERIL. Hanya tampilkan instrumen yang
-  // punya stok steril (sudah disterilkan & tersimpan di gudang steril).
   // Peminjam efektif: pilihan petugas, atau user yang sedang login sebagai default.
   const borrowerUsername = borrowedBy || authUsername || ""
 
@@ -213,188 +149,151 @@ export default function TambahOrderInstrumenPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [userOptions, borrowerUsername, authUsername, authName])
 
-  // Label pilihan: NAMA + ketersediaan saja, tanpa kode instrumen — peminjam
-  // mengenali barang dari namanya, bukan dari kode internal CSSD.
-  const instrumentOptions = instruments
-    .filter((i) => (i.available_sterile_count ?? 0) > 0)
-    .map((i) => ({
-      value: String(i.id),
-      label: `${i.name} Tersedia ${i.available_sterile_count}`,
-    }))
-
-  // Hanya paket yang seluruh komponennya bisa dipenuhi dari stok steril.
-  const catalogOptions = catalogs
-    .filter((c) => (c.available_sterile_sets ?? 0) > 0)
-    .map((c) => ({
-      value: String(c.id),
-      label: `${c.name} Tersedia ${c.available_sterile_sets} Set`,
-    }))
-
   // Stok steril yang tersedia untuk satu instrumen (satuan) / paket (set).
   function sterileAvailFor(type: AddMode, refId: number): number {
     if (type === "satuan") return instruments.find((i) => i.id === refId)?.available_sterile_count ?? 0
     return catalogs.find((c) => c.id === refId)?.available_sterile_sets ?? 0
   }
 
-  // Tambah / gabungkan baris permintaan. Bila jenis/paket yang sama sudah ada,
-  // jumlahnya diakumulasi alih-alih membuat baris baru.
-  function addRequest(
-    type: AddMode,
-    refId: number,
-    name: string,
-    quantity: number,
-    contents?: PaketContent[],
-  ) {
-    if (quantity <= 0) return
-    setRequests((prev) => {
-      const idx = prev.findIndex((r) => r.type === type && r.refId === refId)
-      if (idx === -1) return [...prev, { type, refId, name, quantity: String(quantity), contents }]
-      const next = [...prev]
-      next[idx] = { ...next[idx], quantity: String((Number(next[idx].quantity) || 0) + quantity) }
-      return next
-    })
+  /** Jumlah instrumen/paket yang sudah dipesan pasien SELAIN `groupId` di form ini. */
+  function usedByOthers(groupId: string, type: AddMode, refId: number): number {
+    return patients
+      .filter((p) => p.id !== groupId)
+      .reduce(
+        (sum, p) =>
+          sum + (Number(p.requests.find((r) => r.type === type && r.refId === refId)?.quantity) || 0),
+        0,
+      )
   }
 
-  function handleAddInstrument() {
-    const inst = instruments.find((i) => String(i.id) === newInstrumentId)
-    const qty = Number(newInstrumentQty)
-    if (!inst || !qty || qty <= 0) return
-    // Tidak boleh melebihi stok steril (termasuk yang sudah ada di daftar).
-    const avail = inst.available_sterile_count ?? 0
-    const already = Number(requests.find((r) => r.type === "satuan" && r.refId === inst.id)?.quantity) || 0
-    if (already + qty > avail) {
-      setFormError(`Stok steril "${inst.name}" hanya ${avail}${already ? ` (sudah ${already} di daftar)` : ""}.`)
-      return
-    }
+  function updatePatient(next: PatientGroup) {
+    setPatients((prev) => prev.map((p) => (p.id === next.id ? next : p)))
+  }
+
+  function addPatient() {
     setFormError(null)
-    addRequest("satuan", inst.id, inst.name, qty)
-    setNewInstrumentId("")
-    setNewInstrumentQty("1")
+    setPatients((prev) => [...prev, emptyPatientGroup()])
   }
 
-  // Saat paket dipilih, muat rincian isinya (jenis instrumen + jumlah per set).
-  async function handleSelectCatalog(catalogId: string) {
-    setNewCatalogId(catalogId)
-    if (!catalogId) {
-      setPaketItems([])
-      return
-    }
-    setLoadingPaketItems(true)
-    try {
-      const res = await api.get(`/master/instrument-catalogs/${catalogId}`)
-      setPaketItems(res.data.data.items ?? [])
-    } finally {
-      setLoadingPaketItems(false)
-    }
+  function removePatient(id: string) {
+    setPatients((prev) => (prev.length <= 1 ? prev : prev.filter((p) => p.id !== id)))
   }
 
-  function handleAddPaket() {
-    const cat = catalogs.find((c) => String(c.id) === newCatalogId)
-    const qty = Number(newCatalogQty)
-    if (!cat || !qty || qty <= 0) return
-    // Tidak boleh melebihi jumlah set yang bisa dipenuhi dari stok steril.
-    const avail = cat.available_sterile_sets ?? 0
-    const already = Number(requests.find((r) => r.type === "paket" && r.refId === cat.id)?.quantity) || 0
-    if (already + qty > avail) {
-      setFormError(`Stok steril paket "${cat.name}" hanya cukup untuk ${avail} set${already ? ` (sudah ${already})` : ""}.`)
-      return
-    }
-    setFormError(null)
-    const contents: PaketContent[] = paketItems.map((it) => ({
-      name: it.instrument?.name ?? `Instrumen #${it.instrument_id}`,
-      perSet: it.quantity,
-    }))
-    addRequest("paket", cat.id, cat.name, qty, contents)
-    setNewCatalogId("")
-    setNewCatalogQty("1")
-    setPaketItems([])
-  }
-
-  function handleRemove(index: number) {
-    setRequests((prev) => prev.filter((_, i) => i !== index))
-  }
-
-  // Buka/tutup rincian isi paket pada sebuah baris permintaan.
-  function toggleRow(key: string) {
-    setExpandedRows((prev) => {
-      const next = new Set(prev)
-      if (next.has(key)) next.delete(key)
-      else next.add(key)
-      return next
-    })
-  }
-
-  // Boleh kosong saat diketik; validasi minimal 1 dilakukan saat Simpan.
-  function setRequestQty(index: number, value: string) {
-    setFormError(null)
-    setRequests((prev) => prev.map((r, i) => (i === index ? { ...r, quantity: value } : r)))
-  }
-
-  const totalQty = requests.reduce((sum, r) => sum + (Number(r.quantity) || 0), 0)
   // Ruangan terpilih + layanannya. Identitas pasien hanya WAJIB untuk RAWAT INAP;
-  // rawat jalan / IGD → identitas pasien disembunyikan & tidak wajib.
+  // rawat jalan / IGD → identitas pasien disembunyikan & tidak wajib. Order untuk
+  // beberapa pasien sekaligus juga hanya masuk akal di rawat inap — di layanan lain
+  // formnya tetap satu grup permintaan.
   const selectedRoom = rooms.find((r) => String(r.id) === roomId)
   const needPatient = selectedRoom?.layanan === "rawat_inap"
-  // Wajib: peminjam, ruangan, tanggal + jam pinjam, minimal 1 permintaan, dan
-  // (khusus rawat inap) identitas pasien. Opsional: Rencana Kembali & Catatan.
+
+  const totalQty = patients.reduce((sum, p) => sum + totalQtyOf(p.requests), 0)
+  const filledPatients = patients.filter((p) => p.requests.length > 0)
+
+  // Ruangan DIKUNCI begitu ada identitas pasien yang sudah diisi: mengganti ruangan
+  // bisa mengubah layanannya (rawat inap ↔ bukan), sehingga identitas yang sudah
+  // diketik jadi tidak berlaku dan simpanan gagal divalidasi. Kosongkan identitasnya
+  // dulu bila ruangannya memang perlu diganti.
+  const roomLocked = patients.some((p) => p.medicalRecordNo.trim() !== "" || p.patientName.trim() !== "")
+
+  // Wajib: peminjam, ruangan, tanggal + jam pinjam, minimal 1 permintaan pada TIAP
+  // pasien, dan (khusus rawat inap) identitas tiap pasien.
   const canSubmit =
     borrowerUsername.trim() &&
     roomId &&
     orderDate &&
     orderTime &&
-    (!needPatient || (medicalRecordNo.trim() && patientName.trim())) &&
-    requests.length > 0 &&
+    patients.length > 0 &&
+    patients.every(
+      (p) =>
+        p.requests.length > 0 &&
+        (!needPatient || (p.medicalRecordNo.trim() && p.patientName.trim())),
+    ) &&
     !saving
 
   async function handleSubmit() {
     if (!canSubmit) {
-      setFormError("Lengkapi semua field wajib (bertanda *) terlebih dahulu.")
+      setFormError(
+        needPatient
+          ? "Lengkapi identitas & minimal satu permintaan untuk setiap pasien, serta field wajib (bertanda *)."
+          : "Lengkapi semua field wajib (bertanda *) dan minimal satu permintaan.",
+      )
       return
     }
     // Validasi jumlah baru di sini (saat klik Simpan).
-    const invalid = requests.some((r) => !/^\d+$/.test(r.quantity) || Number(r.quantity) < 1)
+    const invalid = patients.some((p) =>
+      p.requests.some((r) => !/^\d+$/.test(r.quantity) || Number(r.quantity) < 1),
+    )
     if (invalid) {
       setFormError("Jumlah pada setiap permintaan harus diisi minimal 1.")
       return
     }
-    // Pastikan tiap baris tidak melebihi stok steril (mis. setelah diedit manual).
-    const over = requests.find((r) => Number(r.quantity) > sterileAvailFor(r.type, r.refId))
+    // Satu pasien = satu order: No. RM tidak boleh dobel antar grup.
+    if (needPatient) {
+      const rms = patients.map((p) => p.medicalRecordNo.trim())
+      if (new Set(rms).size !== rms.length) {
+        setFormError("No. Rekam Medis tidak boleh sama antar pasien — gabungkan permintaannya jadi satu pasien.")
+        return
+      }
+    }
+    // Total lintas pasien tidak boleh melebihi stok steril (mis. setelah diedit manual).
+    const totals = new Map<string, { type: AddMode; refId: number; name: string; qty: number }>()
+    for (const p of patients) {
+      for (const r of p.requests) {
+        const key = `${r.type}-${r.refId}`
+        const cur = totals.get(key) ?? { type: r.type, refId: r.refId, name: r.name, qty: 0 }
+        cur.qty += Number(r.quantity) || 0
+        totals.set(key, cur)
+      }
+    }
+    const over = [...totals.values()].find((t) => t.qty > sterileAvailFor(t.type, t.refId))
     if (over) {
       const avail = sterileAvailFor(over.type, over.refId)
-      setFormError(`"${over.name}" melebihi stok steril (maks ${avail}${over.type === "paket" ? " set" : ""}).`)
+      setFormError(
+        `"${over.name}" melebihi stok steril (maks ${avail}${over.type === "paket" ? " set" : ""}, diminta ${over.qty}).`,
+      )
       return
     }
+
     setFormError(null)
     setSaving(true)
     try {
-      await api.post("/master/orders", {
+      // Satu pengiriman untuk seluruh pasien — server membuat satu record order per
+      // pasien dalam SATU transaksi, jadi tidak ada order yang tersimpan sebagian
+      // bila salah satunya gagal.
+      await api.post("/master/orders/bulk", {
         room_id: Number(roomId),
         borrowed_by: borrowerName,
-        // Identitas pasien hanya dikirim untuk layanan rawat inap.
-        medical_record_no: needPatient ? medicalRecordNo.trim() || null : null,
-        patient_name: needPatient ? patientName.trim() || null : null,
         order_date: orderDate,
         order_time: orderTime || null,
         return_plan_date: returnPlanDate || null,
         note: note.trim() || null,
-        items: requests.map((r) =>
-          r.type === "paket"
-            ? {
-                type: "paket",
-                instrument_catalog_id: r.refId,
-                package_name: r.name,
-                quantity: Number(r.quantity),
-              }
-            : {
-                type: "satuan",
-                instrument_id: r.refId,
-                quantity: Number(r.quantity),
-              },
-        ),
+        patients: patients.map((p) => ({
+          // Identitas pasien hanya dikirim untuk layanan rawat inap.
+          medical_record_no: needPatient ? p.medicalRecordNo.trim() || null : null,
+          patient_name: needPatient ? p.patientName.trim() || null : null,
+          items: p.requests.map((r) =>
+            r.type === "paket"
+              ? {
+                  type: "paket",
+                  instrument_catalog_id: r.refId,
+                  package_name: r.name,
+                  quantity: Number(r.quantity),
+                }
+              : {
+                  type: "satuan",
+                  instrument_id: r.refId,
+                  quantity: Number(r.quantity),
+                },
+          ),
+        })),
       })
       dispatch(invalidateOrders())
       // Modal "berhasil" muncul di halaman daftar setelah redirect.
-      setOrderFlash("Order instrumen berhasil dibuat.")
+      setOrderFlash(
+        patients.length > 1
+          ? `${patients.length} order instrumen berhasil dibuat.`
+          : "Order instrumen berhasil dibuat.",
+      )
       router.push("/cssd/order/instrumen")
     } catch (err) {
       // Server memvalidasi ulang stok steril saat menyimpan (422) — stok bisa
@@ -412,17 +311,18 @@ export default function TambahOrderInstrumenPage() {
     <div className="space-y-6">
       <PageHeader
         title="Tambah Order Instrumen"
-        subtitle="Buat order peminjaman instrumen CSSD baru"
+        subtitle="Buat order peminjaman instrumen CSSD — bisa beberapa pasien sekaligus"
       />
 
-      {/* Data Peminjam & Pasien */}
-      <Card className="space-y-5">
+      {/* Data peminjaman — SATU kotak berisi peminjam, jadwal & catatan. Ketiganya
+          dipakai bersama oleh seluruh pasien pada form ini, jadi tidak dipecah
+          menjadi beberapa kartu. */}
+      <Card className="space-y-4">
         <FormSectionHeader
-          title="Data Peminjam & Pasien"
-          description="Peminjam, ruangan tujuan, dan identitas pasien"
+          title="Data Peminjaman"
+          description="Peminjam, ruangan, jadwal & catatan akan tercatat pada order ini"
         />
 
-        {/* Peminjam & ruangan */}
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <div className="space-y-1.5">
             <Label>
@@ -448,60 +348,15 @@ export default function TambahOrderInstrumenPage() {
               value={roomId}
               onChange={setRoomId}
               loading={roomLoading}
-              disabled={roomLoading}
+              // Terkunci setelah identitas pasien diisi — lihat `roomLocked`.
+              disabled={roomLoading || roomLocked}
               placeholder="-- Pilih Ruangan --"
             />
           </div>
         </div>
 
-        {/* Identitas pasien — hanya untuk layanan RAWAT INAP (wajib). Layanan
-            rawat jalan / IGD tidak memerlukan identitas pasien. */}
-        {needPatient && (
-          <div className="border-t border-gray-100 pt-5">
-            <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-gray-400">
-              Identitas Pasien
-            </p>
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-              <div className="space-y-1.5">
-                <Label htmlFor="no-rm">
-                  No. Rekam Medis (RM) Pasien <span className="text-red-500">*</span>
-                </Label>
-                <Input
-                  id="no-rm"
-                  value={medicalRecordNo}
-                  onChange={(e) => setMedicalRecordNo(digitsOnly(e.target.value))}
-                  // `inputMode` memunculkan papan angka di ponsel; tetap <input type="text">
-                  // agar nol di depan tidak hilang dan tombol spinner tidak muncul.
-                  inputMode="numeric"
-                  maxLength={MAX_RM_LENGTH}
-                  placeholder="mis. 00123"
-                  className="font-mono"
-                />
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="nama-pasien">
-                  Nama Pasien <span className="text-red-500">*</span>
-                </Label>
-                <Input
-                  id="nama-pasien"
-                  value={patientName}
-                  onChange={(e) => setPatientName(toUpper(e.target.value))}
-                  placeholder="Nama lengkap pasien"
-                />
-              </div>
-            </div>
-          </div>
-        )}
-      </Card>
-
-      {/* Jadwal Peminjaman */}
-      <Card className="space-y-5">
-        <FormSectionHeader
-          title="Jadwal Peminjaman"
-          description="Kapan instrumen dipinjam dan direncanakan kembali"
-          accent="#4ba69d"
-        />
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+        {/* Jadwal peminjaman */}
+        <div className="grid grid-cols-1 gap-4 border-t border-gray-100 pt-4 sm:grid-cols-3">
           <div className="space-y-1.5">
             <Label htmlFor="tgl-pinjam">
               Tanggal Pinjam <span className="text-red-500">*</span>
@@ -534,274 +389,68 @@ export default function TambahOrderInstrumenPage() {
             />
           </div>
         </div>
-      </Card>
 
-      {/* Catatan */}
-      <Card className="space-y-5">
-        <FormSectionHeader
-          title="Catatan"
-          description="Keterangan tambahan (opsional)"
-        />
-        <div className="space-y-1.5">
-          <Label htmlFor="note" className="sr-only">
-            Catatan
-          </Label>
+        {/* Catatan (opsional) */}
+        <div className="space-y-1.5 border-t border-gray-100 pt-4">
+          <Label htmlFor="note">Catatan</Label>
           <Textarea
             id="note"
             rows={2}
-            placeholder="Opsional..."
+            placeholder="Keterangan tambahan (opsional)..."
             value={note}
             onChange={(e) => setNote(e.target.value)}
           />
         </div>
       </Card>
 
-      {/* Daftar Permintaan */}
-      <Card className="p-0">
-        <div className="flex items-center justify-between gap-3 border-b border-gray-100 px-5 py-4">
-          <FormSectionHeader
-            title="Daftar Permintaan"
-            description="Instrumen atau paket yang akan dipinjam"
+      {/* Pasien & permintaannya — tiap kartu menjadi satu record order. Baru muncul
+          setelah ruangan dipilih: layanan ruangan yang menentukan perlu-tidaknya
+          identitas pasien, jadi mengisi permintaan sebelum itu hanya menimbulkan
+          form yang berubah bentuk di tengah pengisian. */}
+      {roomId && (
+      <div className="space-y-3">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h2 className="text-sm font-semibold text-gray-900">Permintaan</h2>
+          <p className="text-xs text-gray-500">
+            {filledPatients.length} order · {totalQty} unit
+          </p>
+        </div>
+
+        {patients.map((p, i) => (
+          <PatientRequestCard
+            key={p.id}
+            index={i}
+            group={p}
+            onChange={updatePatient}
+            onRemove={() => removePatient(p.id)}
+            canRemove={patients.length > 1}
+            showPatientFields={needPatient}
+            instruments={instruments}
+            catalogs={catalogs}
+            instrumentLoading={instrumentLoading}
+            catalogLoading={catalogLoading}
+            sterileAvailFor={sterileAvailFor}
+            usedByOthers={(type, refId) => usedByOthers(p.id, type, refId)}
+            onError={setFormError}
           />
-          {requests.length > 0 && <Badge variant="info">{totalQty} unit</Badge>}
-        </div>
+        ))}
 
-        {/* Form tambah permintaan */}
-        <div className="bg-gray-50 px-5 py-4">
-
-          {/* Pilihan mode: satuan vs paket */}
-          <div className="mb-4 inline-flex rounded-lg border border-gray-200 bg-white p-1">
-            {([
-              { key: "satuan", label: "Satuan" },
-              { key: "paket", label: "Paket" },
-            ] as const).map((m) => (
-              <button
-                key={m.key}
-                type="button"
-                onClick={() => setAddMode(m.key)}
-                className={
-                  "rounded-md px-4 py-1.5 text-sm font-medium transition-colors " +
-                  (addMode === m.key ? "bg-[#075489] text-white" : "text-gray-500 hover:text-gray-700")
-                }
-              >
-                {m.label}
-              </button>
-            ))}
-          </div>
-
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-[1fr_8rem_auto] lg:items-end">
-            {addMode === "satuan" ? (
-              <div className="space-y-1.5">
-                <Label>Jenis Instrumen</Label>
-                <SelectSearch
-                  options={instrumentOptions}
-                  value={newInstrumentId}
-                  onChange={setNewInstrumentId}
-                  loading={instrumentLoading}
-                  disabled={instrumentLoading}
-                  placeholder="-- Pilih instrumen --"
-                />
-              </div>
-            ) : (
-              <div className="space-y-1.5">
-                <Label>Paket Instrumen (katalog)</Label>
-                <SelectSearch
-                  options={catalogOptions}
-                  value={newCatalogId}
-                  onChange={handleSelectCatalog}
-                  loading={catalogLoading}
-                  disabled={catalogLoading}
-                  placeholder="-- Pilih paket --"
-                />
-              </div>
-            )}
-
-            <div className="space-y-1.5">
-              <Label>{addMode === "paket" ? "Jumlah Paket" : "Jumlah"}</Label>
-              <QtyStepper
-                value={addMode === "paket" ? newCatalogQty : newInstrumentQty}
-                onChange={addMode === "paket" ? setNewCatalogQty : setNewInstrumentQty}
-              />
-            </div>
-
-            {addMode === "satuan" ? (
-              <Button
-                type="button"
-                onClick={handleAddInstrument}
-                disabled={!newInstrumentId || Number(newInstrumentQty) <= 0}
-                className="bg-[#075489] hover:bg-[#075489]/90 text-white shrink-0"
-              >
-                Tambah
-              </Button>
-            ) : (
-              <Button
-                type="button"
-                onClick={handleAddPaket}
-                disabled={!newCatalogId || Number(newCatalogQty) <= 0}
-                className="bg-[#075489] hover:bg-[#075489]/90 text-white shrink-0"
-              >
-                Tambah Paket
-              </Button>
-            )}
-          </div>
-
-          {/* Isi paket terpilih: instrumen apa saja di dalamnya */}
-          {addMode === "paket" && newCatalogId && (
-            <div className="mt-4 rounded-lg border border-gray-200 bg-white">
-              <div className="flex items-center justify-between border-b border-gray-100 px-3 py-2">
-                <span className="text-xs font-semibold text-gray-500">Isi Paket</span>
-                {Number(newCatalogQty) > 1 && (
-                  <span className="text-xs text-gray-400">total = isi × {Number(newCatalogQty)} paket</span>
-                )}
-              </div>
-              {loadingPaketItems ? (
-                <p className="px-3 py-3 text-xs text-gray-400">Memuat isi paket...</p>
-              ) : paketItems.length === 0 ? (
-                <p className="px-3 py-3 text-xs text-gray-400">Paket ini belum punya rincian instrumen.</p>
-              ) : (
-                <ul className="divide-y divide-gray-50">
-                  {paketItems.map((it) => {
-                    const total = it.quantity * (Number(newCatalogQty) || 1)
-                    return (
-                      <li
-                        key={it.instrument_id}
-                        className="flex items-center justify-between px-3 py-2 text-sm"
-                      >
-                        <span className="text-gray-700">
-                          {it.instrument?.name ?? `Instrumen #${it.instrument_id}`}
-                        </span>
-                        <span className="text-xs text-gray-500">
-                          tersedia {it.quantity}
-                          {Number(newCatalogQty) > 1 && (
-                            <span className="ml-2 font-semibold text-gray-700">= {total}</span>
-                          )}
-                        </span>
-                      </li>
-                    )
-                  })}
-                </ul>
-              )}
-            </div>
-          )}
-        </div>
-
-        {/* Tabel permintaan */}
-        <div className="border-t border-gray-100">
-          {requests.length > 0 ? (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-gray-100">
-                    <th className="py-3 pl-4 pr-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-400 w-10">
-                      No
-                    </th>
-                    <th className="py-3 px-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-400 w-28">
-                      Jenis
-                    </th>
-                    <th className="py-3 px-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-400">
-                      Nama
-                    </th>
-                    <th className="py-3 px-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-400 w-28">
-                      Jumlah
-                    </th>
-                    <th className="py-3 pl-3 pr-4 w-16" />
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-50">
-                  {requests.map((r, i) => {
-                    const rowKey = `${r.type}-${r.refId}`
-                    const open = expandedRows.has(rowKey)
-                    const hasContents = r.type === "paket" && !!r.contents && r.contents.length > 0
-                    return (
-                    <Fragment key={rowKey}>
-                      <tr className="hover:bg-gray-50 transition-colors">
-                        <td className="py-3 pl-4 pr-3 align-top text-gray-400">{i + 1}</td>
-                        <td className="py-3 px-3 align-top">
-                          <Badge variant={r.type === "paket" ? "info" : "default"}>
-                            {r.type === "paket" ? "Paket" : "Satuan"}
-                          </Badge>
-                        </td>
-                        <td className="py-3 px-3">
-                          {/* Paket: klik untuk buka/tutup rincian isi paket */}
-                          {r.type === "paket" ? (
-                            <button
-                              type="button"
-                              onClick={() => toggleRow(rowKey)}
-                              className="flex items-center gap-1.5 text-left font-medium text-gray-900 hover:text-[#075489]"
-                            >
-                              <ChevronRight
-                                className={
-                                  "h-4 w-4 text-gray-400 transition-transform " + (open ? "rotate-90" : "")
-                                }
-                              />
-                              {r.name}
-                              {hasContents && (
-                                <span className="text-xs font-normal text-gray-400">
-                                  ({r.contents!.length} jenis)
-                                </span>
-                              )}
-                            </button>
-                          ) : (
-                            <span className="font-medium text-gray-900">{r.name}</span>
-                          )}
-                        </td>
-                        <td className="py-3 px-3 align-top">
-                          <QtyStepper value={r.quantity} onChange={(v) => setRequestQty(i, v)} />
-                        </td>
-                        <td className="py-3 pl-3 pr-4 align-top">
-                          <button
-                            onClick={() => handleRemove(i)}
-                            className="text-xs font-medium text-red-400 hover:text-red-600 transition-colors"
-                          >
-                            Hapus
-                          </button>
-                        </td>
-                      </tr>
-
-                      {/* Rincian isi paket — baris penuh, satu instrumen per baris (tampil saat dibuka) */}
-                      {r.type === "paket" && open && hasContents &&
-                        r.contents!.map((c) => (
-                          <tr key={`${rowKey}-${c.name}`} className="bg-gray-50/60">
-                            <td className="py-2.5 pl-4 pr-3" />
-                            <td className="py-2.5 px-3" />
-                            <td className="py-2.5 px-3">
-                              <span className="flex items-center gap-1.5 pl-5 text-gray-700">
-                                <span className="text-gray-300">└</span>
-                                {c.name}
-                                <span className="text-xs text-gray-400">— {c.perSet}/paket</span>
-                              </span>
-                            </td>
-                            <td className="py-2.5 px-3 align-middle">
-                              <span className="font-semibold text-gray-700">
-                                {c.perSet * (Number(r.quantity) || 0)}
-                              </span>
-                              <span className="ml-1 text-xs text-gray-400">unit</span>
-                            </td>
-                            <td className="py-2.5 pl-3 pr-4" />
-                          </tr>
-                        ))}
-
-                      {/* Paket dibuka tetapi tanpa rincian instrumen */}
-                      {r.type === "paket" && open && !hasContents && (
-                        <tr className="bg-gray-50/60">
-                          <td className="py-2.5 pl-4 pr-3" />
-                          <td className="py-2.5 px-3" />
-                          <td className="py-2.5 px-3 text-xs text-gray-400" colSpan={3}>
-                            Paket tanpa rincian instrumen.
-                          </td>
-                        </tr>
-                      )}
-                    </Fragment>
-                    )
-                  })}
-                </tbody>
-              </table>
-            </div>
-          ) : (
-            <div className="py-8 text-center text-sm text-gray-400">Belum ada permintaan ditambahkan.</div>
-          )}
-        </div>
-      </Card>
+        {/* Pasien tambahan hanya untuk RAWAT INAP: pengelompokannya memang per
+            pasien (No. RM + nama), yang tidak dipakai layanan lain. */}
+        {needPatient && (
+          <Button
+            type="button"
+            onClick={addPatient}
+            // Hijau teal merek (#4ba69d) — aksi menambah, dibedakan dari tombol
+            // simpan yang memakai biru tua.
+            className="w-full justify-center bg-[#4ba69d] text-white hover:bg-[#4ba69d]/90"
+          >
+            <UserPlus className="h-4 w-4" />
+            Tambah Pasien
+          </Button>
+        )}
+      </div>
+      )}
 
       <div className="flex flex-col items-stretch gap-3 sm:flex-row sm:items-center sm:justify-end">
         {formError && (
@@ -814,9 +463,9 @@ export default function TambahOrderInstrumenPage() {
           type="button"
           onClick={handleSubmit}
           disabled={!canSubmit}
-          className="bg-[#075489] hover:bg-[#075489]/90 text-white"
+          className="bg-[#075489] text-white hover:bg-[#075489]/90"
         >
-          {saving ? "Menyimpan..." : "Simpan Order"}
+          {saving ? "Menyimpan..." : patients.length > 1 ? `Simpan ${patients.length} Order` : "Simpan Order"}
         </Button>
       </div>
 
@@ -840,48 +489,4 @@ function nowDateAndTime(): { date: string; time: string } {
     date: `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`,
     time: `${pad(d.getHours())}:${pad(d.getMinutes())}`,
   }
-}
-
-// Stepper jumlah: tombol −/+ dan input teks yang boleh dikosongkan (hanya digit).
-function QtyStepper({
-  value,
-  onChange,
-  min = 1,
-}: {
-  value: string
-  onChange: (value: string) => void
-  min?: number
-}) {
-  const num = Number(value)
-  const current = Number.isFinite(num) && value !== "" ? num : min
-  return (
-    <div className="inline-flex items-stretch overflow-hidden rounded-lg border border-gray-300 bg-white">
-      <button
-        type="button"
-        onClick={() => onChange(String(Math.max(min, current - 1)))}
-        className="px-2.5 text-gray-500 transition-colors hover:bg-gray-50 hover:text-gray-800"
-        aria-label="Kurangi"
-      >
-        <Minus className="h-4 w-4" />
-      </button>
-      <input
-        type="text"
-        inputMode="numeric"
-        value={value}
-        onChange={(e) => {
-          const v = e.target.value
-          if (v === "" || /^\d+$/.test(v)) onChange(v)
-        }}
-        className="w-14 border-x border-gray-300 py-1.5 text-center text-sm outline-none focus:ring-2 focus:ring-[#4ba69d]/30"
-      />
-      <button
-        type="button"
-        onClick={() => onChange(String((value === "" ? min - 1 : current) + 1))}
-        className="px-2.5 text-gray-500 transition-colors hover:bg-gray-50 hover:text-gray-800"
-        aria-label="Tambah"
-      >
-        <Plus className="h-4 w-4" />
-      </button>
-    </div>
-  )
 }

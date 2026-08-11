@@ -15,6 +15,59 @@ function getSynth(): SpeechSynthesis | null {
   return window.speechSynthesis ?? null
 }
 
+// ---------------------------------------------------------------------------
+// Nada pendek (beep) — jaring pengaman untuk PONSEL.
+//
+// Di Android/iOS sintesis suara sering gagal berbunyi: daftar voice bahasa
+// Indonesia belum termuat, mesin TTS sedang dipakai aplikasi lain, atau
+// `speechSynthesis` masih ter-pause setelah layar mati. Karena itu tiap
+// pengumuman SELALU didahului nada pendek lewat Web Audio (tanpa berkas audio,
+// jadi tidak ada aset yang bisa gagal dimuat) — petugas tetap mendengar sesuatu
+// walau kalimatnya tidak sempat terucap.
+// ---------------------------------------------------------------------------
+
+let audioCtx: AudioContext | null = null
+
+function getAudioCtx(): AudioContext | null {
+  if (typeof window === "undefined") return null
+  const Ctor =
+    window.AudioContext ?? (window as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext
+  if (!Ctor) return null
+  audioCtx ??= new Ctor()
+  return audioCtx
+}
+
+/**
+ * Dua nada pendek "ding-ding". Web Audio pada ponsel ikut terkunci kebijakan
+ * autoplay & otomatis di-suspend saat tab tersembunyi, jadi context-nya selalu
+ * di-`resume()` dulu — resume() setelah pernah dibuka lewat gesture user tidak
+ * memerlukan gesture baru.
+ */
+function beep(): void {
+  const ctx = getAudioCtx()
+  if (!ctx) return
+
+  try {
+    if (ctx.state === "suspended") void ctx.resume()
+    const start = ctx.currentTime
+    ;[0, 0.18].forEach((offset, i) => {
+      const osc = ctx.createOscillator()
+      const gain = ctx.createGain()
+      osc.type = "sine"
+      osc.frequency.value = i === 0 ? 880 : 1175
+      // Amplop naik-turun halus supaya tidak berbunyi "klik" di speaker ponsel.
+      gain.gain.setValueAtTime(0.0001, start + offset)
+      gain.gain.exponentialRampToValueAtTime(0.25, start + offset + 0.02)
+      gain.gain.exponentialRampToValueAtTime(0.0001, start + offset + 0.15)
+      osc.connect(gain).connect(ctx.destination)
+      osc.start(start + offset)
+      osc.stop(start + offset + 0.16)
+    })
+  } catch {
+    // Perangkat tidak mendukung Web Audio — cukup andalkan sintesis suara.
+  }
+}
+
 // Penanda jenis kelamin suara dari NAMA voice — satu-satunya petunjuk yang tersedia,
 // karena `SpeechSynthesisVoice` tidak punya properti gender. Nama voice Indonesia yang
 // umum: "Microsoft Gadis" & "Google Bahasa Indonesia" (perempuan), "Microsoft Ardi"
@@ -49,6 +102,10 @@ function speak(text: string): boolean {
   if (!synth || typeof SpeechSynthesisUtterance === "undefined") return false
 
   try {
+    // Android: `speechSynthesis` bisa tertinggal dalam keadaan pause setelah layar
+    // mati / tab pindah, dan semua ucapan berikutnya diam saja sampai di-resume.
+    if (synth.paused) synth.resume()
+
     const utterance = new SpeechSynthesisUtterance(text)
     utterance.lang = "id-ID"
     // Pelan & jelas: ruang CSSD berisik dan petugas sering tidak menghadap layar, jadi
@@ -76,21 +133,58 @@ function speak(text: string): boolean {
 export function primeNotifSound(): void {
   if (unlocked) return
 
+  // Web Audio dibuka lebih dulu — di ponsel, INI yang paling menentukan apakah
+  // notifikasi nanti terdengar, karena context-nya hanya boleh dibuat/di-resume
+  // dari gesture user. Sekali dibuka, ia tetap bisa di-resume otomatis nanti.
+  try {
+    const ctx = getAudioCtx()
+    if (ctx?.state === "suspended") void ctx.resume()
+  } catch {
+    // Tidak didukung — lanjut ke sintesis suara.
+  }
+
   const synth = getSynth()
-  if (!synth || typeof SpeechSynthesisUtterance === "undefined") return
+  if (!synth || typeof SpeechSynthesisUtterance === "undefined") {
+    // Web Audio saja sudah cukup untuk menandai notifikasi bisa berbunyi.
+    unlocked = true
+
+    return
+  }
 
   try {
     // Memancing pemuatan daftar suara sekalian: `getVoices()` diisi browser secara
     // asinkron, jadi memanggilnya dari sini membuat suara perempuan sudah tersedia
     // saat pengumuman pertama berbunyi (lihat pickVoice).
     synth.getVoices()
-    const warmup = new SpeechSynthesisUtterance("")
+    // Android hanya menandai TTS "boleh berbunyi" bila ucapan pemancing benar-benar
+    // punya teks — utterance kosong diabaikan begitu saja. Volume 0 → tak terdengar.
+    const warmup = new SpeechSynthesisUtterance("­")
     warmup.volume = 0
+    warmup.lang = "id-ID"
     synth.speak(warmup)
     unlocked = true
   } catch {
     // Tidak didukung — notifikasi cukup tampil sebagai badge, tanpa suara.
   }
+}
+
+/**
+ * Dipanggil saat tab kembali terlihat: di ponsel, Web Audio di-suspend dan
+ * `speechSynthesis` bisa tertinggal pause setelah layar mati — keduanya
+ * dibangunkan lagi supaya order yang masuk berikutnya tetap berbunyi.
+ */
+export function resumeNotifSound(): void {
+  if (!unlocked) return
+
+  try {
+    const ctx = getAudioCtx()
+    if (ctx?.state === "suspended") void ctx.resume()
+  } catch {
+    // Abaikan — nada pendek akan mencoba resume lagi saat berbunyi.
+  }
+
+  const synth = getSynth()
+  if (synth?.paused) synth.resume()
 }
 
 // SATU ORDER = SATU PENGUMUMAN, berapa pun jumlah instrumen yang dipesan di dalamnya.
@@ -125,6 +219,10 @@ function shouldAnnounce(orderId?: number | null): boolean {
  */
 export function announceIncomingOrder(room?: string | null, orderId?: number | null): void {
   if (!shouldAnnounce(orderId)) return
+
+  // Nada pendek dulu — di ponsel inilah yang paling bisa diandalkan; kalimatnya
+  // menyusul bila mesin TTS perangkat memang tersedia.
+  beep()
 
   const name = room?.trim()
   speak(name ? `Ada order masuk dari ruangan ${name}` : "Ada order masuk")

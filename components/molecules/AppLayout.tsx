@@ -7,7 +7,7 @@ import { Sidebar } from "@/components/molecules/Sidebar"
 import { useAppDispatch, useAppSelector } from "@/lib/store/hooks"
 import { setCredentials, fetchMe, setHydrated } from "@/lib/store/slices/authSlice"
 import { fetchIncomingCount, fetchPendingTransferCount } from "@/lib/store/slices/notifSlice"
-import { announceIncomingOrder, primeNotifSound } from "@/lib/notifSound"
+import { announceIncomingOrder, primeNotifSound, resumeNotifSound } from "@/lib/notifSound"
 import { INCOMING_MENU_URL, hasMenuAccess } from "@/lib/menu-access"
 import { getEcho } from "@/lib/echo"
 import { loadAuth } from "@/lib/auth"
@@ -103,6 +103,9 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
     if (!isAuthenticated) return
     const sync = () => {
       if (document.visibilityState !== "visible") return
+      // Ponsel: Web Audio di-suspend & TTS bisa tertinggal pause selama layar mati.
+      // Dibangunkan tiap tab kembali terlihat agar order berikutnya tetap berbunyi.
+      resumeNotifSound()
       if (canSeeIncomingOrders) dispatch(fetchIncomingCount())
       dispatch(fetchPendingTransferCount())
     }
@@ -155,19 +158,19 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
     }
   }, [isAuthenticated, dispatch])
 
-  // Buka kunci autoplay audio pada gesture user pertama (klik / tekan tombol),
-  // agar bunyi notifikasi yang dipicu otomatis nanti tidak diblokir browser.
+  // Buka kunci autoplay audio pada gesture user pertama, agar bunyi notifikasi yang
+  // dipicu otomatis nanti tidak diblokir browser. `touchend` & `click` ikut didengar
+  // karena di Android sebagian browser hanya menganggap KEDUANYA sebagai gesture sah
+  // untuk membuka Web Audio — `pointerdown` saja kadang tidak cukup.
   useEffect(() => {
+    const events = ["pointerdown", "touchend", "click", "keydown"] as const
     const prime = () => {
       primeNotifSound()
-      window.removeEventListener("pointerdown", prime)
-      window.removeEventListener("keydown", prime)
+      events.forEach((e) => window.removeEventListener(e, prime))
     }
-    window.addEventListener("pointerdown", prime)
-    window.addEventListener("keydown", prime)
+    events.forEach((e) => window.addEventListener(e, prime))
     return () => {
-      window.removeEventListener("pointerdown", prime)
-      window.removeEventListener("keydown", prime)
+      events.forEach((e) => window.removeEventListener(e, prime))
     }
   }, [])
 

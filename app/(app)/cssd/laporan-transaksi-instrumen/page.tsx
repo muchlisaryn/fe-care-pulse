@@ -1,7 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useState } from "react"
-import { Download, RotateCcw, Search, Sheet } from "lucide-react"
+import { Building2, Download, RotateCcw, Search, Sheet } from "lucide-react"
 import { Badge } from "@/components/atoms/Badge"
 import { Button } from "@/components/atoms/Button"
 import { Input } from "@/components/atoms/Input"
@@ -9,11 +9,11 @@ import { Select } from "@/components/atoms/Select"
 import { SelectSearch } from "@/components/atoms/SelectSearch"
 import { Card } from "@/components/molecules/Card"
 import { DateRangeFields } from "@/components/molecules/DateRangeFields"
+import { DropdownMenu } from "@/components/molecules/DropdownMenu"
 import { PageHeader } from "@/components/molecules/PageHeader"
 import { Pagination } from "@/components/molecules/Pagination"
 import api from "@/lib/axios"
-import { downloadCsv } from "@/lib/csv"
-import { downloadXlsx } from "@/lib/excel"
+import { downloadXlsx, downloadXlsxReport, type XlsxGroup } from "@/lib/excel"
 import { useAppDispatch, useAppSelector } from "@/lib/store/hooks"
 import { fetchRoomOptions } from "@/lib/store/slices/roomSlice"
 
@@ -72,6 +72,10 @@ const EXPORT_HEADERS = [
   "Petugas Penerima",
   "Tanggal Kembali",
 ] as const
+
+// Rekapan per ruangan: nama ruangan jadi judul kelompok, isinya nomor urut, nama
+// barang, dan qty-nya (satu SET dihitung 1, bukan per instrumen di dalamnya).
+const EXPORT_ROOM_HEADERS = ["No", "Nama Barang", "QTY"] as const
 
 const TYPE_OPTIONS = [
   { value: "", label: "Semua Jenis" },
@@ -246,14 +250,19 @@ export default function LaporanTransaksiInstrumenPage() {
     setPage(1)
   }
 
-  /** Ambil SELURUH baris sesuai filter aktif, lalu susun sama persis dengan tabel. */
-  async function handleExport(format: "xlsx" | "csv") {
+  /** Seluruh baris sesuai filter aktif (bukan hanya halaman yang sedang tampil). */
+  async function fetchAllRows(): Promise<LaporanRow[]> {
+    const res = await api.get("/master/reports/transaksi-instrumen", {
+      params: buildParams({ per_page: 2000 }),
+    })
+    return res.data.data.data
+  }
+
+  /** Export rinci: satu baris per label kemasan, kolomnya sama persis dengan tabel. */
+  async function handleExport() {
     setExporting(true)
     try {
-      const res = await api.get("/master/reports/transaksi-instrumen", {
-        params: buildParams({ per_page: 2000 }),
-      })
-      const data: LaporanRow[] = res.data.data.data
+      const data = await fetchAllRows()
 
       const exportRows = data.map((r) => [
         r.transaction_date ? formatDate(r.transaction_date) : "",
@@ -274,12 +283,65 @@ export default function LaporanTransaksiInstrumenPage() {
         hasReturnedAt(r) ? returnedAtLabel(r) : "",
       ])
 
-      const filename = `laporan-transaksi-instrumen-${dateInput()}.${format}`
-      if (format === "xlsx") {
-        downloadXlsx(filename, "Laporan Transaksi", EXPORT_HEADERS, exportRows)
-      } else {
-        downloadCsv(filename, EXPORT_HEADERS, exportRows)
+      downloadXlsx(
+        `laporan-transaksi-instrumen-${dateInput()}.xlsx`,
+        "Laporan Transaksi",
+        EXPORT_HEADERS,
+        exportRows,
+      )
+    } finally {
+      setExporting(false)
+    }
+  }
+
+  /**
+   * Export REKAPAN PER RUANGAN: berkepala judul laporan + nama RS + rentang tanggal
+   * (mengikuti filter yang sedang aktif), lalu tiap ruangan menjadi satu kelompok
+   * berisi No / Nama Barang / QTY dengan penomoran yang dimulai ulang tiap ruangan.
+   *
+   * Qty dihitung dari jumlah baris laporan — satu baris = satu label kemasan, jadi
+   * satu SET bernilai 1 (bukan per instrumen di dalamnya) dan satu instrumen satuan
+   * juga bernilai 1.
+   */
+  async function handleExportPerRoom() {
+    setExporting(true)
+    try {
+      const data = await fetchAllRows()
+
+      // ruangan → nama barang → total qty. Set & satuan bernama sama digabung karena
+      // laporannya hanya menampilkan nama barang, tanpa kolom jenis.
+      const byRoom = new Map<string, Map<string, number>>()
+      for (const r of data) {
+        const room = r.room?.trim() || "Tanpa Ruangan"
+        const name = r.name?.trim() || "Tanpa Nama"
+        const items = byRoom.get(room) ?? new Map<string, number>()
+        items.set(name, (items.get(name) ?? 0) + 1)
+        byRoom.set(room, items)
       }
+
+      const groups: XlsxGroup[] = [...byRoom.entries()]
+        .sort((a, b) => a[0].localeCompare(b[0], "id", { numeric: true }))
+        .map(([room, items]) => ({
+          title: room,
+          rows: [...items.entries()]
+            .sort((a, b) => a[0].localeCompare(b[0], "id", { numeric: true }))
+            // Penomoran dimulai ulang di tiap ruangan.
+            .map(([name, qty], i) => [i + 1, name, qty]),
+        }))
+
+      downloadXlsxReport(
+        `rekapan-transaksi-per-ruangan-${dateInput()}.xlsx`,
+        "Rekap Per Ruangan",
+        [
+          "REKAPAN TRANSAKSI UNIT STERILISASI",
+          "RS ISLAM JAKARTA PONDOK KOPI",
+          `TANGGAL ${formatDate(filters.dateFrom)} SAMPAI ${formatDate(filters.dateTo)}`,
+        ],
+        EXPORT_ROOM_HEADERS,
+        groups,
+        // Kolom "No" ditengahkan.
+        [0],
+      )
     } finally {
       setExporting(false)
     }
@@ -365,26 +427,26 @@ export default function LaporanTransaksiInstrumenPage() {
           </div>
 
           <div className="mt-4 flex flex-col-reverse gap-2 sm:flex-row sm:flex-wrap sm:justify-end">
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => handleExport("xlsx")}
+            {/* Satu tombol untuk semua bentuk unduhan: rinci per label kemasan, atau
+                rekap per ruangan. Keduanya memakai filter yang sedang aktif. */}
+            <DropdownMenu
+              label={exporting ? "Mengekspor..." : "Export Laporan"}
+              icon={Download}
               disabled={exporting}
-              className="w-full justify-center sm:w-auto"
-            >
-              <Sheet className="h-4 w-4" />
-              {exporting ? "Mengekspor..." : "Export Excel"}
-            </Button>
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => handleExport("csv")}
-              disabled={exporting}
-              className="w-full justify-center sm:w-auto"
-            >
-              <Download className="h-4 w-4" />
-              {exporting ? "Mengekspor..." : "Export CSV"}
-            </Button>
+              className="w-full sm:w-auto"
+              items={[
+                {
+                  label: "Export Transaksi (Excel)",
+                  icon: Sheet,
+                  onClick: handleExport,
+                },
+                {
+                  label: "Export Transaksi Per Ruangan",
+                  icon: Building2,
+                  onClick: handleExportPerRoom,
+                },
+              ]}
+            />
             {/* Reset hanya muncul kalau memang ada yang bisa di-reset. */}
             {hasActiveFilter && (
               <Button type="button" variant="outline" onClick={handleReset} className="w-full justify-center sm:w-auto">

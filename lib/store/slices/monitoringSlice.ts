@@ -18,6 +18,9 @@ export type MonitoredInstrument = {
   order_code: string
   code_transaction: string | null
   borrowed_by: string | null
+  /** Identitas pasien (khusus order rawat inap) — ditampilkan di kartu Daftar Order. */
+  patient_name: string | null
+  medical_record_no: string | null
   order_date: string | null
   return_plan_date: string | null
   source: "satuan" | "paket"
@@ -53,6 +56,9 @@ export type IncomingOrder = {
   code: string
   status: IncomingStatus
   borrowed_by: string | null
+  /** Identitas pasien (khusus order rawat inap). */
+  patient_name: string | null
+  medical_record_no: string | null
   room: { id: number; name: string } | null
   order_date: string | null
   order_time: string | null
@@ -69,6 +75,9 @@ export type ReturnedOrder = {
   code: string
   code_transaction: string | null
   borrowed_by: string | null
+  /** Identitas pasien (khusus order rawat inap). */
+  patient_name: string | null
+  medical_record_no: string | null
   room: { id: number; name: string } | null
   order_date: string | null
   return_plan_date: string | null

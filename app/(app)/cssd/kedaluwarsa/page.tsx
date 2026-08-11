@@ -1,7 +1,7 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
-import { AlertTriangle, Clock, Package } from "lucide-react"
+import { useEffect, useState } from "react"
+import { AlertTriangle, Boxes, CalendarClock, Clock, MapPin, Search } from "lucide-react"
 import { Input } from "@/components/atoms/Input"
 import { Button } from "@/components/atoms/Button"
 import { Badge } from "@/components/atoms/Badge"
@@ -10,106 +10,131 @@ import { StatCard } from "@/components/molecules/StatCard"
 import { PageHeader } from "@/components/molecules/PageHeader"
 import { DataTable, type Column } from "@/components/molecules/DataTable"
 import { Pagination } from "@/components/molecules/Pagination"
-import api from "@/lib/axios"
-import type { Sterilization } from "@/lib/store/slices/sterilizationSlice"
+import { ExpiryCard } from "@/components/molecules/ExpiryCard"
+import { useAppDispatch, useAppSelector } from "@/lib/store/hooks"
+import {
+  fetchSterileExpiry,
+  fetchSterileExpirySummary,
+  type SterileExpiryBatch,
+} from "@/lib/store/slices/sterileExpirySlice"
 
 const ITEMS_PER_PAGE = 20
 
-function startOfToday(): number {
-  const d = new Date()
-  d.setHours(0, 0, 0, 0)
-  return d.getTime()
-}
-
-// Sisa hari menuju kedaluwarsa (negatif = sudah lewat).
-function daysLeft(expiry: string | null): number | null {
-  if (!expiry) return null
-  const d = new Date(expiry)
-  d.setHours(0, 0, 0, 0)
-  return Math.round((d.getTime() - startOfToday()) / 86_400_000)
-}
-
-function formatDate(value: string | null): string {
-  if (!value) return "—"
-  const d = new Date(value)
-  if (Number.isNaN(d.getTime())) return value
-  return d.toLocaleDateString("id-ID", { day: "2-digit", month: "short", year: "numeric" })
-}
-
 export default function KedaluwarsaPage() {
-  const [items, setItems] = useState<Sterilization[]>([])
-  const [loading, setLoading] = useState(true)
+  const dispatch = useAppDispatch()
+  const { items, page, lastPage, total, loading, summary } = useAppSelector((s) => s.sterileExpiry)
+
+  // Ambang hari & kata kunci yang SUDAH dikirim ke server; `*Input` adalah draft
+  // di kotak isian (baru dipakai saat tombol ditekan / form disubmit).
   const [days, setDays] = useState(7)
   const [daysInput, setDaysInput] = useState("7")
-  const [page, setPage] = useState(1)
+  const [search, setSearch] = useState("")
+  const [searchInput, setSearchInput] = useState("")
 
+  // Penyaringan & penomoran halaman seluruhnya di server — halaman ini tidak
+  // pernah menghitung ulang di klien supaya angkanya tidak beda dengan Storage Steril.
   useEffect(() => {
-    let active = true
-    setLoading(true)
-    ;(async () => {
-      try {
-        const res = await api.get("/master/sterilizations/expiring", { params: { days } })
-        if (active) setItems(res.data.data.data)
-      } finally {
-        if (active) setLoading(false)
-      }
-    })()
-    return () => {
-      active = false
-    }
-  }, [days])
+    dispatch(fetchSterileExpiry({ page: 1, search, days }))
+    dispatch(fetchSterileExpirySummary({ days }))
+  }, [dispatch, search, days])
 
   function applyDays(e: React.FormEvent) {
     e.preventDefault()
-    const n = Math.max(0, Number(daysInput) || 0)
-    setDays(n)
-    setPage(1)
+    setDays(Math.max(0, Number(daysInput) || 0))
   }
 
-  const overdue = useMemo(() => items.filter((s) => (daysLeft(s.expiry_date) ?? 0) < 0), [items])
-  const soon = useMemo(() => items.filter((s) => (daysLeft(s.expiry_date) ?? 0) >= 0), [items])
+  function handleSearch(e: React.FormEvent) {
+    e.preventDefault()
+    setSearch(searchInput)
+  }
 
-  const totalPages = Math.ceil(items.length / ITEMS_PER_PAGE)
-  const paged = items.slice((page - 1) * ITEMS_PER_PAGE, page * ITEMS_PER_PAGE)
+  function changePage(next: number) {
+    dispatch(fetchSterileExpiry({ page: next, search, days }))
+  }
 
-  const columns: Column<Sterilization>[] = [
+  const columns: Column<SterileExpiryBatch>[] = [
     {
       header: "Kode Batch",
-      cell: (s) => (
-        <span className="font-mono text-xs font-semibold text-[#075489] bg-[#075489]/8 px-2 py-1 rounded">
-          {s.code}
-        </span>
-      ),
+      cell: (b) =>
+        b.code ? (
+          <span className="font-mono text-xs font-semibold text-[#075489] bg-[#075489]/8 px-2 py-1 rounded">
+            {b.code}
+          </span>
+        ) : (
+          <span className="text-gray-400 text-xs">—</span>
+        ),
       className: "w-28",
     },
     {
       header: "Mesin",
-      cell: (s) => <span className="text-gray-700">{s.machine ?? "—"}</span>,
+      cell: (b) =>
+        b.machine ? (
+          <span className="text-gray-700">{b.machine}</span>
+        ) : (
+          <span className="text-gray-400 text-xs">—</span>
+        ),
     },
     {
+      header: "Rak",
+      cell: (b) =>
+        b.racks.length ? (
+          <span className="flex flex-wrap gap-1">
+            {b.racks.map((r) => (
+              <span
+                key={r}
+                className="inline-flex items-center gap-1 rounded bg-gray-100 px-1.5 py-0.5 text-xs text-gray-600"
+              >
+                <MapPin className="h-3 w-3" />
+                {r}
+              </span>
+            ))}
+          </span>
+        ) : (
+          <span className="text-gray-400 text-xs">—</span>
+        ),
+    },
+    {
+      /**
+       * Jumlah unit memakai aturan yang sama dengan Storage Steril: satu SET dihitung
+       * 1 (bukan per instrumen di dalamnya) dan satu instrumen satuan dihitung 1.
+       * Rinciannya ("2 set · 3 satuan") ditulis di bawah angkanya.
+       */
       header: "Jumlah Unit",
-      cell: (s) => (
-        <span className="font-semibold text-gray-900">
-          {s.items_count ?? s.items?.length ?? 0} <span className="text-xs font-normal text-gray-400">unit</span>
-        </span>
+      cell: (b) => (
+        <div className="leading-tight">
+          <span className="font-semibold text-gray-900">
+            {b.item_count} <span className="text-xs font-normal text-gray-400">unit</span>
+          </span>
+          <div className="mt-0.5 text-xs text-gray-400">
+            {[b.set_count > 0 ? `${b.set_count} set` : null, b.unit_count > 0 ? `${b.unit_count} satuan` : null]
+              .filter(Boolean)
+              .join(" · ") || "—"}
+          </div>
+        </div>
       ),
-      className: "w-24",
+      className: "w-32",
     },
     {
       header: "Kedaluwarsa",
-      cell: (s) => <span className="text-sm text-gray-600">{formatDate(s.expiry_date)}</span>,
+      cell: (b) => (
+        <ExpiryCard
+          date={b.expiry_date}
+          daysToExpiry={b.days_to_expiry}
+          expired={b.expired}
+          alert={b.alert}
+        />
+      ),
     },
     {
       header: "Sisa",
-      cell: (s) => {
-        const d = daysLeft(s.expiry_date)
-        if (d === null) return <span className="text-gray-400 text-xs">—</span>
-        return d < 0 ? (
-          <Badge variant="danger">Lewat {Math.abs(d)} hari</Badge>
-        ) : d === 0 ? (
+      cell: (b) => {
+        if (b.days_to_expiry === null) return <span className="text-gray-400 text-xs">—</span>
+        return b.days_to_expiry < 0 ? (
+          <Badge variant="danger">Lewat {Math.abs(b.days_to_expiry)} hari</Badge>
+        ) : b.days_to_expiry === 0 ? (
           <Badge variant="danger">Hari ini</Badge>
         ) : (
-          <Badge variant="warning">{d} hari lagi</Badge>
+          <Badge variant="warning">{b.days_to_expiry} hari lagi</Badge>
         )
       },
       className: "w-32",
@@ -120,36 +145,51 @@ export default function KedaluwarsaPage() {
     <div className="space-y-6">
       <PageHeader
         title="Alat Kedaluwarsa Steril"
-        subtitle="Batch steril yang masa sterilnya sudah atau akan habis"
+        subtitle="Batch steril di gudang yang masa sterilnya sudah atau akan habis"
       />
 
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-        <StatCard title="Total Batch" value={`${items.length}`} icon={Package} />
-        <StatCard title="Sudah Lewat" value={`${overdue.length}`} icon={AlertTriangle} positive={false} />
-        <StatCard title="Akan Kedaluwarsa" value={`${soon.length}`} icon={Clock} />
+      {/* Angka dari server (seluruh data), bukan dari baris halaman yang sedang tampil.
+          Instrumen dihitung dengan aturan set = 1 & satuan = 1, sama dengan Storage Steril. */}
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <StatCard title="Total Batch" value={`${summary.batches}`} icon={Boxes} />
+        <StatCard title="Total Unit" value={`${summary.items}`} icon={CalendarClock} />
+        <StatCard title="Sudah Kedaluwarsa" value={`${summary.expired}`} icon={AlertTriangle} positive={false} />
+        <StatCard title="Akan Kedaluwarsa" value={`${summary.alert}`} icon={Clock} positive={false} />
       </div>
 
       <Card className="p-0">
-        <div className="px-5 py-4 border-b border-gray-100">
-          <form onSubmit={applyDays} className="space-y-3">
-            <div className="space-y-1.5">
-              <label className="block text-xs font-semibold uppercase tracking-wide text-gray-400">
-                Ambang (hari ke depan)
-              </label>
-              <div className="flex items-center gap-2">
-                <Input
-                  type="number"
-                  min={0}
-                  value={daysInput}
-                  onChange={(e) => setDaysInput(e.target.value)}
-                  className="w-28"
-                />
-                <Button type="submit" className="bg-[#075489] hover:bg-[#075489]/90 text-white">
-                  Terapkan
-                </Button>
-              </div>
+        <div className="space-y-3 border-b border-gray-100 px-5 py-4">
+          <form onSubmit={handleSearch} className="flex w-full gap-2">
+            <div className="relative flex-1">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 pointer-events-none" />
+              <Input
+                placeholder="Cari kode batch, mesin, instrumen, rak, atau nomor label..."
+                value={searchInput}
+                onChange={(e) => setSearchInput(e.target.value)}
+                className="pl-9"
+              />
             </div>
+            <Button type="submit" className="bg-[#075489] hover:bg-[#075489]/90 text-white shrink-0">
+              Cari
+            </Button>
+          </form>
 
+          <form onSubmit={applyDays} className="space-y-1.5">
+            <label className="block text-xs font-semibold uppercase tracking-wide text-gray-400">
+              Ambang (hari ke depan)
+            </label>
+            <div className="flex items-center gap-2">
+              <Input
+                type="number"
+                min={0}
+                value={daysInput}
+                onChange={(e) => setDaysInput(e.target.value)}
+                className="w-28"
+              />
+              <Button type="submit" className="bg-[#075489] hover:bg-[#075489]/90 text-white">
+                Terapkan
+              </Button>
+            </div>
             <p className="flex items-center gap-1.5 text-xs text-gray-400">
               <Clock className="h-3.5 w-3.5 shrink-0" />
               Menampilkan batch yang kedaluwarsa ≤ {days} hari ke depan (termasuk yang sudah lewat).
@@ -160,15 +200,20 @@ export default function KedaluwarsaPage() {
         {loading ? (
           <div className="py-16 text-center text-sm text-gray-400">Memuat data...</div>
         ) : (
-          <DataTable columns={columns} data={paged} emptyMessage="Tidak ada batch yang mendekati kedaluwarsa." rowNumberOffset={(page - 1) * ITEMS_PER_PAGE} />
+          <DataTable
+            columns={columns}
+            data={items}
+            emptyMessage="Tidak ada batch yang mendekati kedaluwarsa."
+            rowNumberOffset={(page - 1) * ITEMS_PER_PAGE}
+          />
         )}
 
         <Pagination
           currentPage={page}
-          totalPages={totalPages}
-          totalItems={items.length}
+          totalPages={lastPage}
+          totalItems={total}
           itemsPerPage={ITEMS_PER_PAGE}
-          onPageChange={setPage}
+          onPageChange={changePage}
         />
       </Card>
     </div>

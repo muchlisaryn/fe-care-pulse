@@ -695,6 +695,27 @@ export default function OrderInstrumenPage() {
       },
     },
     {
+      // Identitas pasien hanya terisi pada order rawat inap — order layanan lain
+      // tetap menampilkan "—" agar selnya tidak pernah kosong.
+      header: "Pasien",
+      cell: (row) =>
+        row.patient_name ? (
+          <span className="text-gray-900">{row.patient_name}</span>
+        ) : (
+          dash
+        ),
+    },
+    {
+      header: "No. RM",
+      cell: (row) =>
+        row.medical_record_no ? (
+          <span className="font-mono text-gray-700">{row.medical_record_no}</span>
+        ) : (
+          dash
+        ),
+      className: "w-28",
+    },
+    {
       header: "Ruangan",
       cell: (row) =>
         row.room?.name ? <span className="text-gray-700">{row.room.name}</span> : dash,

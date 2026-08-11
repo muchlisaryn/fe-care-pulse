@@ -208,6 +208,41 @@ function formatDate(value: string | null) {
   return d.toLocaleDateString("id-ID", { day: "2-digit", month: "short", year: "numeric" })
 }
 
+/**
+ * Baris keterangan kartu order — urutannya seragam di semua kartu Daftar Order:
+ * nama pasien → No. RM → ruangan → tgl pinjam → tgl kembali. Identitas pasien hanya
+ * ada pada order rawat inap, jadi kedua bagian itu dilewati bila kosong.
+ */
+function OrderMeta({
+  patientName,
+  medicalRecordNo,
+  room,
+  borrowDate,
+  returnLabel = "Kembali",
+  returnDate,
+  showRoom = true,
+}: {
+  patientName: string | null
+  medicalRecordNo: string | null
+  room: string | null
+  borrowDate: string | null
+  returnLabel?: string
+  returnDate: string | null
+  showRoom?: boolean
+}) {
+  return (
+    <div className="mt-1 flex flex-wrap gap-x-4 gap-y-0.5 text-xs text-gray-500">
+      {patientName && <span className="font-medium text-gray-700">Pasien: {patientName}</span>}
+      {medicalRecordNo && <span className="font-mono">No. RM: {medicalRecordNo}</span>}
+      {showRoom && <span>Ruangan: {room ?? "—"}</span>}
+      <span>Pinjam: {formatDate(borrowDate)}</span>
+      <span>
+        {returnLabel}: {formatDate(returnDate)}
+      </span>
+    </div>
+  )
+}
+
 const startOfToday = () => {
   const d = new Date()
   d.setHours(0, 0, 0, 0)
@@ -274,6 +309,9 @@ type OrderGroup = {
   order_code: string
   code_transaction: string | null
   borrowed_by: string | null
+  /** Identitas pasien order ini (kosong untuk layanan non rawat inap). */
+  patient_name: string | null
+  medical_record_no: string | null
   room: string | null
   order_date: string | null
   return_plan_date: string | null
@@ -333,6 +371,8 @@ function buildOrderGroups(
       order_code,
       code_transaction: first.code_transaction,
       borrowed_by: first.borrowed_by,
+      patient_name: first.patient_name ?? null,
+      medical_record_no: first.medical_record_no ?? null,
       room: first.room ?? roomFallback,
       order_date: first.order_date,
       return_plan_date: first.return_plan_date,
@@ -2219,11 +2259,14 @@ function OrderGroupCard({
                       </span>
                       {isOverdue(o.return_plan_date) && <Badge variant="danger">Terlambat</Badge>}
                     </div>
-                    <div className="mt-1 flex flex-wrap gap-x-4 gap-y-0.5 text-xs text-gray-500">
-                      {showRoom && <span>Ruangan: {o.room ?? "—"}</span>}
-                      <span>Pinjam: {formatDate(o.order_date)}</span>
-                      <span>Kembali: {formatDate(o.return_plan_date)}</span>
-                    </div>
+                    <OrderMeta
+                      patientName={o.patient_name}
+                      medicalRecordNo={o.medical_record_no}
+                      room={o.room}
+                      borrowDate={o.order_date}
+                      returnDate={o.return_plan_date}
+                      showRoom={showRoom}
+                    />
                   </div>
                 </div>
                 <span className="shrink-0 text-xs text-gray-500">
@@ -2399,11 +2442,13 @@ function IncomingOrderCard({
                 </span>
                 {isOverdue(order.return_plan_date) && <Badge variant="danger">Terlambat</Badge>}
               </div>
-              <div className="mt-1 flex flex-wrap gap-x-4 gap-y-0.5 text-xs text-gray-500">
-                <span>Ruangan: {order.room?.name ?? "—"}</span>
-                <span>Pinjam: {formatDate(order.order_date)}</span>
-                <span>Kembali: {formatDate(order.return_plan_date)}</span>
-              </div>
+              <OrderMeta
+                patientName={order.patient_name}
+                medicalRecordNo={order.medical_record_no}
+                room={order.room?.name ?? null}
+                borrowDate={order.order_date}
+                returnDate={order.return_plan_date}
+              />
             </div>
           </div>
         </button>
@@ -2480,11 +2525,14 @@ function ReturnedOrderCard({
                   {order.code_transaction ?? order.code}
                 </span>
               </div>
-              <div className="mt-1 flex flex-wrap gap-x-4 gap-y-0.5 text-xs text-gray-500">
-                <span>Ruangan: {order.room?.name ?? "—"}</span>
-                <span>Pinjam: {formatDate(order.order_date)}</span>
-                <span>Dikembalikan: {formatDate(order.returned_at)}</span>
-              </div>
+              <OrderMeta
+                patientName={order.patient_name}
+                medicalRecordNo={order.medical_record_no}
+                room={order.room?.name ?? null}
+                borrowDate={order.order_date}
+                returnLabel="Dikembalikan"
+                returnDate={order.returned_at}
+              />
             </div>
           </div>
           {/* Aturan yang sama dengan kartu order aktif: paket per SET, satuan per UNIT. */}
