@@ -63,6 +63,20 @@ function formatDate(value: string | null) {
   return d.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" })
 }
 
+// Alasan sebuah baris tidak bisa dipesan — dikirim server dalam bahasa Indonesia,
+// halaman ini berbahasa Inggris. Alasan yang belum dikenal ditampilkan apa adanya
+// daripada hilang.
+const BLOCKED_LABEL: Record<string, string> = {
+  Kedaluwarsa: "Expired — reprocess before it can be ordered",
+  "Tanpa tanggal kedaluwarsa": "No sterile expiry date — cannot be guaranteed sterile",
+  "Sebungkus dengan unit kedaluwarsa": "Same package as an expired unit — the whole package is rejected",
+}
+
+function blockedLabel(reason: string | null): string {
+  if (!reason) return "Cannot be ordered"
+  return BLOCKED_LABEL[reason] ?? reason
+}
+
 function errMsg(e: unknown): string {
   const x = e as { response?: { data?: { message?: string } } }
   return x.response?.data?.message ?? "Something went wrong."
@@ -552,6 +566,15 @@ function StorageSterilPage() {
             alert={r.alert}
             locale="en"
           />
+          {/* Barang yang tidak layak TETAP tampil di daftar — petugas perlu tahu
+              fisiknya ada di rak tapi harus diproses ulang — hanya ditandai bahwa ia
+              tidak bisa dipesan, beserta alasannya. Aturannya sama persis dengan yang
+              dipakai saat distribusi, jadi penanda ini tidak bisa meleset. */}
+          {r.can_distribute === false && (
+            <span title={blockedLabel(r.blocked_reason)}>
+              <Badge variant="danger">Not orderable</Badge>
+            </span>
+          )}
           {r.barcode_no ? (
             <span
               title="Package label number"

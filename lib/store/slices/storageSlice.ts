@@ -45,6 +45,14 @@ export type StorageInventoryRow = {
   days_to_expiry: number | null
   alert: boolean
   expired: boolean
+  /**
+   * Bisa dipesan/didistribusikan atau tidak. Baris yang tidak bisa TETAP ditampilkan
+   * di daftar — petugas perlu tahu barangnya ada di rak tapi harus diproses ulang —
+   * hanya diberi keterangan `blocked_reason`.
+   */
+  can_distribute: boolean
+  /** "Kedaluwarsa" / "Tanpa tanggal kedaluwarsa" / "Sebungkus dengan unit kedaluwarsa". */
+  blocked_reason: string | null
   source: "satuan" | "paket"
   package_name: string | null
   /** Nomor label kemasan bungkus steril (satu label = satu bungkus). */
@@ -52,12 +60,18 @@ export type StorageInventoryRow = {
   /** Kode batch produksi (PRD-...) asal unit. */
   production_code: string | null
   unit: { id: number; code: string | null; instrument: string | null; image_url?: string | null }
-  order: { id: number; code: string; code_transaction: string | null } | null
+  order?: { id: number; code: string; code_transaction: string | null } | null
   batch: string | null
 }
 
 /** Angka ringkasan gudang — dipakai kartu statistik tanpa memuat seluruh baris. */
-export type StorageSummary = { total: number; alert: number; expired: number }
+export type StorageSummary = {
+  total: number
+  alert: number
+  expired: number
+  /** Tersimpan tanpa tanggal kedaluwarsa — tampil di daftar, tapi tidak bisa dipesan. */
+  no_expiry?: number
+}
 
 /**
  * Daftar yang dimuat BERTAHAP (lazy load): halaman 1 saat dibutuhkan, halaman
@@ -125,16 +139,18 @@ export const fetchProductionStorageIncoming = createAsyncThunk(
 )
 
 /**
- * Inventaris gudang steril — server hanya mengembalikan baris gudang ber-`order_id`
- * NULL (stok steril pool produksi yang belum direservasi order manapun). Penyaringan
- * seluruhnya di sisi server, FE tidak mengirim parameter tambahan.
+ * Inventaris gudang steril — endpoint TERSENDIRI milik tab "Inventaris" halaman
+ * Gudang Steril, tidak dipakai halaman lain (`sterile-inventory`, bukan
+ * `storage/inventory`). Aturan tampilannya memang khusus: baris kedaluwarsa & yang
+ * tersimpan tanpa tanggal TETAP dikirim, hanya ditandai `can_distribute = false`.
+ * Penyaringan seluruhnya di server; FE tidak mengirim parameter tambahan.
  */
 export const fetchStorageInventory = createAsyncThunk("storage/inventory", (arg: FetchPageArg = {}) =>
-  fetchPage<StorageInventoryRow>("/master/storage/inventory", arg),
+  fetchPage<StorageInventoryRow>("/master/sterile-inventory", arg),
 )
 
 export const fetchStorageSummary = createAsyncThunk("storage/summary", async () => {
-  const res = await api.get("/master/storage/summary")
+  const res = await api.get("/master/sterile-inventory/summary")
   return res.data.data as StorageSummary
 })
 
