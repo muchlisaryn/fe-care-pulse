@@ -68,16 +68,16 @@ type PinjamTarget = {
 }
 
 const statusLabel: Record<OrderStatus, string> = {
-  diajukan: "Diajukan",
-  pencucian: "Sedang Dicuci",
-  pengemasan: "Sedang Packaging",
-  selesai: "Siap Disterilkan",
-  sterilisasi: "Sedang Disterilkan",
-  steril: "Steril / Siap Rilis",
-  digudang: "Siap Distribusi",
-  dipinjam: "Terdistribusi",
-  dikembalikan: "Dikembalikan",
-  dibatalkan: "Dibatalkan",
+  diajukan: "Submitted",
+  pencucian: "Being Cleaned",
+  pengemasan: "Being Packaged",
+  selesai: "Ready to Sterilize",
+  sterilisasi: "Being Sterilized",
+  steril: "Sterile / Ready to Release",
+  digudang: "Ready to Distribute",
+  dipinjam: "Distributed",
+  dikembalikan: "Returned",
+  dibatalkan: "Canceled",
 }
 
 // Status yang relevan untuk order PEMINJAMAN (alur: diajukan → diterima/siap
@@ -157,7 +157,7 @@ function formatDate(value: string | null) {
   if (!value) return null
   const d = new Date(value)
   if (Number.isNaN(d.getTime())) return value
-  return d.toLocaleDateString("id-ID", { day: "2-digit", month: "short", year: "numeric" })
+  return d.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" })
 }
 
 // Tanggal + jam — dipakai untuk waktu diajukan / di-ACC (bisa terjadi di hari yang
@@ -166,7 +166,7 @@ function formatDateTime(value: string | null | undefined) {
   if (!value) return null
   const d = new Date(value)
   if (Number.isNaN(d.getTime())) return value
-  return d.toLocaleString("id-ID", {
+  return d.toLocaleString("en-GB", {
     day: "2-digit",
     month: "short",
     year: "numeric",
@@ -202,7 +202,7 @@ export default function OrderInstrumenPage() {
 
   // Opsi filter status: "" = semua, lalu tiap status order.
   const statusFilterOptions = [
-    { value: "", label: "Semua Status" },
+    { value: "", label: "All Statuses" },
     ...ORDER_FILTER_STATUSES.map((s) => ({ value: s, label: statusLabel[s] })),
   ]
 
@@ -371,7 +371,7 @@ export default function OrderInstrumenPage() {
       units: units.map((u) => ({
         stockId: u.instrument_stock_id,
         code: u.code ?? "—",
-        name: u.instrument_name ?? `Instrumen #${u.instrument_stock_id}`,
+        name: u.instrument_name ?? `Instrument #${u.instrument_stock_id}`,
         source: u.source,
         packageName: u.package_name,
       })),
@@ -389,19 +389,19 @@ export default function OrderInstrumenPage() {
   async function handleSubmitPinjam() {
     if (!pinjamTarget || pinjamSaving) return
     if (!pinjamRoomId) {
-      setPinjamError("Ruangan tujuan wajib dipilih.")
+      setPinjamError("Destination room is required.")
       return
     }
     if (!pinjamBorrowedBy.trim()) {
-      setPinjamError("Nama peminjam wajib diisi.")
+      setPinjamError("Borrower name is required.")
       return
     }
     if (!pinjamMedicalRecordNo.trim()) {
-      setPinjamError("No. RM pasien wajib diisi.")
+      setPinjamError("Patient medical record no. is required.")
       return
     }
     if (!pinjamPatientName.trim()) {
-      setPinjamError("Nama pasien wajib diisi.")
+      setPinjamError("Patient name is required.")
       return
     }
     setPinjamSaving(true)
@@ -420,7 +420,7 @@ export default function OrderInstrumenPage() {
       loadBorrowable() // tandai unit sebagai sedang menunggu ACC
     } catch (err) {
       const x = err as { response?: { data?: { message?: string } } }
-      setPinjamError(x.response?.data?.message ?? "Gagal mengirim permintaan pinjam.")
+      setPinjamError(x.response?.data?.message ?? "Failed to send the borrow request.")
     } finally {
       setPinjamSaving(false)
     }
@@ -457,7 +457,7 @@ export default function OrderInstrumenPage() {
       return (
         <div className="flex shrink-0 items-center gap-2">
           <Badge variant="warning">
-            Menunggu ACC{mine.to_room ? ` → ${mine.to_room}` : ""}
+            Awaiting Approval{mine.to_room ? ` → ${mine.to_room}` : ""}
           </Badge>
           <Button
             variant="destructive"
@@ -465,7 +465,7 @@ export default function OrderInstrumenPage() {
             disabled={cancellingId === mine.transfer_id}
             onClick={() => handleCancelPinjam(mine.transfer_id)}
           >
-            {cancellingId === mine.transfer_id ? "Membatalkan..." : "Batal"}
+            {cancellingId === mine.transfer_id ? "Canceling..." : "Cancel"}
           </Button>
         </div>
       )
@@ -473,7 +473,7 @@ export default function OrderInstrumenPage() {
     if (other) {
       return (
         <Badge variant="default">
-          Diminta {other.to_room ?? "ruangan lain"}
+          Requested by {other.to_room ?? "another room"}
           {other.requested_by ? ` (${other.requested_by})` : ""}
         </Badge>
       )
@@ -485,7 +485,7 @@ export default function OrderInstrumenPage() {
         onClick={() => openPinjam(order, label, units)}
       >
         <ArrowLeftRight className="h-3.5 w-3.5" />
-        Pinjam
+        Borrow
       </Button>
     )
   }
@@ -556,7 +556,7 @@ export default function OrderInstrumenPage() {
       const satuan: BorrowableUnit[] = []
       for (const u of units) {
         if (u.source === "paket") {
-          const name = u.package_name ?? "Paket"
+          const name = u.package_name ?? "Package"
           const arr = paket.get(name) ?? []
           arr.push(u)
           paket.set(name, arr)
@@ -604,8 +604,8 @@ export default function OrderInstrumenPage() {
     for (const it of detail?.items ?? []) {
       const name =
         it.source === "paket"
-          ? (it.package_name ?? "Paket")
-          : (it.instrument_stock?.instrument?.name ?? "Instrumen Satuan")
+          ? (it.package_name ?? "Package")
+          : (it.instrument_stock?.instrument?.name ?? "Single Instrument")
       const key = `${it.source}|${name}|${it.barcode_no ?? `__tanpa-label#${it.id}`}`
       const g = map.get(key) ?? {
         key,
@@ -651,11 +651,11 @@ export default function OrderInstrumenPage() {
       dispatch(fetchIncomingCount())
       dispatch(invalidateMonitoring())
       setDeleteTarget(null)
-      showSuccess(`Order ${code} berhasil dihapus.`)
+      showSuccess(`Order ${code} was deleted.`)
     } catch (err) {
       // Konfirmasi ditutup dulu agar modal gagal tidak tertumpuk di atasnya.
       setDeleteTarget(null)
-      showError(err, "Gagal menghapus order.")
+      showError(err, "Failed to delete the order.")
     } finally {
       setDeletingId(null)
     }
@@ -663,14 +663,14 @@ export default function OrderInstrumenPage() {
 
   const columns: Column<Order>[] = [
     {
-      header: "Tanggal dan Waktu Pinjam",
+      header: "Borrow Date & Time",
       cell: (row) => {
         const f = formatDateWithTime(row.order_date, row.order_time)
         return f ? <span className="text-sm text-gray-600">{f}</span> : dash
       },
     },
     {
-      header: "Kode",
+      header: "Code",
       // No. invoice (code_transaction) baru terbit setelah order diterima. Selama
       // belum ada, tampilkan no. order sebagai gantinya — hanya satu kode per baris.
       cell: (row) => {
@@ -688,7 +688,7 @@ export default function OrderInstrumenPage() {
       className: "w-36",
     },
     {
-      header: "Dipinjam Oleh",
+      header: "Borrowed By",
       cell: (row) => {
         const name = row.borrowed_by ?? row.user?.name
         return name ? <span className="font-medium text-gray-900">{name}</span> : dash
@@ -697,7 +697,7 @@ export default function OrderInstrumenPage() {
     {
       // Identitas pasien hanya terisi pada order rawat inap — order layanan lain
       // tetap menampilkan "—" agar selnya tidak pernah kosong.
-      header: "Pasien",
+      header: "Patient",
       cell: (row) =>
         row.patient_name ? (
           <span className="text-gray-900">{row.patient_name}</span>
@@ -706,7 +706,7 @@ export default function OrderInstrumenPage() {
         ),
     },
     {
-      header: "No. RM",
+      header: "MR No.",
       cell: (row) =>
         row.medical_record_no ? (
           <span className="font-mono text-gray-700">{row.medical_record_no}</span>
@@ -716,13 +716,13 @@ export default function OrderInstrumenPage() {
       className: "w-28",
     },
     {
-      header: "Ruangan",
+      header: "Room",
       cell: (row) =>
         row.room?.name ? <span className="text-gray-700">{row.room.name}</span> : dash,
     },
     {
-      header: "Instrumen",
-      cell: (row) => <span className="text-gray-700">{row.items_count ?? row.items?.length ?? 0} unit</span>,
+      header: "Instruments",
+      cell: (row) => <span className="text-gray-700">{row.items_count ?? row.items?.length ?? 0} units</span>,
       className: "w-20",
     },
     {
@@ -735,14 +735,14 @@ export default function OrderInstrumenPage() {
   return (
     <div className="space-y-6">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <PageHeader title="Order Instrumen" subtitle="Daftar order peminjaman instrumen CSSD" />
+        <PageHeader title="Instrument Orders" subtitle="List of CSSD instrument borrowing orders" />
         <div className="flex flex-col gap-2 sm:flex-row">
           <Button
             variant="outline"
             onClick={openInbox}
             className="relative border-[#075489] text-[#075489] hover:bg-[#075489]/10"
           >
-            Permintaan Pinjam
+            Borrow Requests
             {pendingTransferCount > 0 && (
               <span className="ml-1 inline-flex h-5 min-w-[20px] items-center justify-center rounded-full bg-red-500 px-1.5 text-xs font-semibold text-white">
                 {pendingTransferCount}
@@ -754,11 +754,11 @@ export default function OrderInstrumenPage() {
             onClick={openBorrowed}
             className="border-[#075489] text-[#075489] hover:bg-[#075489]/10"
           >
-            Pinjam Instrumen
+            Borrow Instrument
           </Button>
           <Link href="/cssd/order/instrumen/tambah">
             <Button className="w-full bg-[#075489] hover:bg-[#075489]/90 text-white sm:w-auto">
-              Buat Order
+              Create Order
             </Button>
           </Link>
         </div>
@@ -772,7 +772,7 @@ export default function OrderInstrumenPage() {
           >
             {/* Pencarian */}
             <div className="min-w-[220px] flex-1 space-y-1.5">
-              <Label htmlFor="order-search">Cari</Label>
+              <Label htmlFor="order-search">Search</Label>
               <div className="relative">
                 {loading ? (
                   <Loader2 className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 animate-spin text-[#075489] pointer-events-none" />
@@ -795,13 +795,16 @@ export default function OrderInstrumenPage() {
                 options={statusFilterOptions}
                 value={status}
                 onChange={(v) => dispatch(setOrderStatus(v as OrderStatus | ""))}
-                placeholder="Semua Status"
+                placeholder="All Statuses"
+                searchPlaceholder="Search..."
+                loadingText="Loading options..."
+                emptyText="Not found."
               />
             </div>
 
             {/* Rentang tanggal pinjam */}
             <div className="space-y-1.5">
-              <Label htmlFor="order-date-from">Dari Tanggal</Label>
+              <Label htmlFor="order-date-from">From Date</Label>
               <Input
                 id="order-date-from"
                 type="date"
@@ -812,7 +815,7 @@ export default function OrderInstrumenPage() {
               />
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="order-date-to">Sampai Tanggal</Label>
+              <Label htmlFor="order-date-to">To Date</Label>
               <Input
                 id="order-date-to"
                 type="date"
@@ -826,7 +829,7 @@ export default function OrderInstrumenPage() {
             {/* Aksi */}
             <div className="flex justify-end gap-2">
               <Button type="submit" className="bg-[#075489] hover:bg-[#075489]/90 text-white shrink-0">
-                Cari
+                Search
               </Button>
               {(dateFrom || dateTo) && (
                 <Button
@@ -843,7 +846,7 @@ export default function OrderInstrumenPage() {
         </div>
 
         {loading ? (
-          <div className="py-16 text-center text-sm text-gray-400">Memuat data...</div>
+          <div className="py-16 text-center text-sm text-gray-400">Loading data...</div>
         ) : (
           <DataTable
             columns={columns}
@@ -851,7 +854,7 @@ export default function OrderInstrumenPage() {
             hideRowNumber
             extraActions={[
               {
-                label: "Detail",
+                label: "Details",
                 onClick: openDetail,
                 className: "border-[#075489] text-[#075489] hover:bg-[#075489]/10",
               },
@@ -859,7 +862,8 @@ export default function OrderInstrumenPage() {
             onDelete={(row) => setDeleteTarget(row)}
             canDelete={(row) => !isProcessed(row.status)}
             isRowLoading={(row) => deletingId === row.id}
-            emptyMessage="Belum ada order tercatat."
+            emptyMessage="No order recorded yet."
+            labels={{ actions: "Actions", edit: "Edit", delete: "Delete" }}
           />
         )}
 
@@ -869,6 +873,7 @@ export default function OrderInstrumenPage() {
           totalItems={totalItems}
           itemsPerPage={20}
           onPageChange={(p) => dispatch(setOrderPage(p))}
+          labels={{ showing: "Showing", of: "of", items: "items" }}
         />
       </Card>
 
@@ -877,6 +882,11 @@ export default function OrderInstrumenPage() {
         onClose={() => setDeleteTarget(null)}
         onConfirm={handleDelete}
         loading={deletingId !== null}
+        title="Delete Order"
+        description="Are you sure you want to delete this order? This action cannot be undone."
+        confirmLabel="Delete"
+        loadingLabel="Deleting..."
+        cancelLabel="Cancel"
       />
 
       {/* Pinjam Instrumen — instrumen yang sedang dipinjam pihak lain; bisa diminta
@@ -884,39 +894,39 @@ export default function OrderInstrumenPage() {
       <Modal
         open={borrowedOpen}
         onClose={() => setBorrowedOpen(false)}
-        title="Pinjam Instrumen"
+        title="Borrow Instrument"
         size="lg"
         footer={
           <Button variant="outline" onClick={() => setBorrowedOpen(false)}>
-            Tutup
+            Close
           </Button>
         }
       >
         <div className="space-y-4">
           <p className="text-xs text-gray-500">
-            Instrumen yang sedang dipinjam unit lain. Klik <b>Pinjam</b> pada paket atau unit untuk
-            mengirim permintaan ke peminjam saat ini — bila disetujui, instrumen berpindah ke Anda.
+            Instruments currently borrowed by another unit. Click <b>Borrow</b> on a package or unit
+            to send a request to the current borrower — once approved, the instrument moves to you.
           </p>
           <form onSubmit={handleBorrowedSearch} className="flex gap-2 w-full">
             <div className="relative flex-1">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 pointer-events-none" />
               <Input
-                placeholder="Cari ruangan, peminjam, paket, instrumen, atau kode unit..."
+                placeholder="Search room, borrower, package, instrument, or unit code..."
                 value={borrowedSearchInput}
                 onChange={(e) => setBorrowedSearchInput(e.target.value)}
                 className="pl-9"
               />
             </div>
             <Button type="submit" className="bg-[#075489] hover:bg-[#075489]/90 text-white shrink-0">
-              Cari
+              Search
             </Button>
           </form>
 
           {borrowedLoading ? (
-            <div className="py-12 text-center text-sm text-gray-400">Memuat data...</div>
+            <div className="py-12 text-center text-sm text-gray-400">Loading data...</div>
           ) : visibleBorrowed.length === 0 ? (
             <div className="py-12 text-center text-sm text-gray-400">
-              Tidak ada instrumen pihak lain yang sedang dipinjam.
+              No instruments are currently borrowed by others.
             </div>
           ) : (
             <div className="space-y-2">
@@ -950,14 +960,14 @@ export default function OrderInstrumenPage() {
                             </span>
                           </div>
                           <div className="mt-1 flex flex-wrap gap-x-4 gap-y-0.5 text-xs text-gray-500">
-                            <span>No. RM: {o.medicalRecordNo ?? "—"}</span>
-                            <span>Pasien: {o.patientName ?? "—"}</span>
-                            <span>Pinjam: {formatDateWithTime(o.orderDate, o.orderTime) ?? "—"}</span>
-                            <span>Rencana kembali: {formatDate(o.returnPlanDate) ?? "—"}</span>
+                            <span>MR No.: {o.medicalRecordNo ?? "—"}</span>
+                            <span>Patient: {o.patientName ?? "—"}</span>
+                            <span>Borrowed: {formatDateWithTime(o.orderDate, o.orderTime) ?? "—"}</span>
+                            <span>Planned return: {formatDate(o.returnPlanDate) ?? "—"}</span>
                           </div>
                         </div>
                       </div>
-                      <span className="shrink-0 text-xs text-gray-500">{o.totalUnits} unit</span>
+                      <span className="shrink-0 text-xs text-gray-500">{o.totalUnits} units</span>
                     </button>
 
                     {/* Level 2: rincian instrumen — paket (bisa di-expand) + satuan, masing-masing punya tombol Pinjam */}
@@ -980,11 +990,11 @@ export default function OrderInstrumenPage() {
                                       (paketOpen ? "rotate-90" : "")
                                     }
                                   />
-                                  <Badge variant="info">Paket</Badge>
+                                  <Badge variant="info">Package</Badge>
                                   <span className="text-sm font-medium text-gray-800">{g.name}</span>
-                                  <span className="text-xs text-gray-500">· {g.units.length} unit</span>
+                                  <span className="text-xs text-gray-500">· {g.units.length} units</span>
                                 </button>
-                                {pinjamAction(o, `Paket ${g.name}`, g.units)}
+                                {pinjamAction(o, `Package ${g.name}`, g.units)}
                               </div>
 
                               {paketOpen && (
@@ -998,7 +1008,7 @@ export default function OrderInstrumenPage() {
                                         {u.code ?? "—"}
                                       </span>
                                       <span className="text-gray-700">
-                                        {u.instrument_name ?? `Instrumen #${u.instrument_stock_id}`}
+                                        {u.instrument_name ?? `Instrument #${u.instrument_stock_id}`}
                                       </span>
                                     </li>
                                   ))}
@@ -1015,12 +1025,12 @@ export default function OrderInstrumenPage() {
                             className="flex items-center justify-between gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2"
                           >
                             <div className="flex min-w-0 items-center gap-2">
-                              <Badge variant="default">Satuan</Badge>
+                              <Badge variant="default">Single</Badge>
                               <span className="font-mono text-xs font-semibold text-[#4ba69d] bg-[#4ba69d]/10 px-2 py-0.5 rounded">
                                 {u.code ?? "—"}
                               </span>
                               <span className="truncate text-sm font-medium text-gray-800">
-                                {u.instrument_name ?? `Instrumen #${u.instrument_stock_id}`}
+                                {u.instrument_name ?? `Instrument #${u.instrument_stock_id}`}
                               </span>
                             </div>
                             {pinjamAction(o, u.instrument_name ?? `Unit ${u.code}`, [u])}
@@ -1040,17 +1050,17 @@ export default function OrderInstrumenPage() {
       <Modal
         open={pinjamTarget !== null}
         onClose={() => setPinjamTarget(null)}
-        title="Pinjam Instrumen"
+        title="Borrow Instrument"
         size="md"
         footer={
           pinjamSuccess ? (
             <Button variant="outline" onClick={() => setPinjamTarget(null)}>
-              Tutup
+              Close
             </Button>
           ) : (
             <div className="flex w-full items-center justify-end gap-2">
               <Button variant="outline" onClick={() => setPinjamTarget(null)}>
-                Batal
+                Cancel
               </Button>
               <Button
                 onClick={handleSubmitPinjam}
@@ -1063,7 +1073,7 @@ export default function OrderInstrumenPage() {
                 }
                 className="bg-[#075489] hover:bg-[#075489]/90 text-white"
               >
-                {pinjamSaving ? "Mengirim..." : "Kirim Permintaan"}
+                {pinjamSaving ? "Sending..." : "Send Request"}
               </Button>
             </div>
           )
@@ -1074,10 +1084,10 @@ export default function OrderInstrumenPage() {
             {pinjamSuccess ? (
               <div className="rounded-lg border border-green-200 bg-green-50 px-4 py-6 text-center">
                 <p className="text-sm font-medium text-green-700">
-                  Permintaan pinjam terkirim ke peminjam saat ini.
+                  The borrow request was sent to the current borrower.
                 </p>
                 <p className="mt-1 text-xs text-green-600">
-                  Instrumen akan berpindah ke Anda setelah permintaan disetujui (di-ACC).
+                  The instrument moves to you once the request is approved.
                 </p>
               </div>
             ) : (
@@ -1085,11 +1095,11 @@ export default function OrderInstrumenPage() {
                 <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm">
                   <p className="font-medium text-gray-800">{pinjamTarget.label}</p>
                   <p className="mt-0.5 text-xs text-gray-500">
-                    Dari order{" "}
+                    From order{" "}
                     <span className="font-mono font-semibold text-[#075489]">
                       {pinjamTarget.fromOrderCode}
                     </span>{" "}
-                    · {pinjamTarget.units.length} unit
+                    · {pinjamTarget.units.length} units
                   </p>
                   <ul className="mt-2 flex flex-wrap gap-1">
                     {pinjamTarget.units.map((u) => (
@@ -1105,44 +1115,47 @@ export default function OrderInstrumenPage() {
 
                 <div className="space-y-1">
                   <label className="text-xs font-semibold uppercase tracking-wide text-gray-400">
-                    Ruangan Tujuan <span className="text-red-500">*</span>
+                    Destination Room <span className="text-red-500">*</span>
                   </label>
                   <SelectSearch
                     options={roomOptions}
                     value={pinjamRoomId}
                     onChange={setPinjamRoomId}
-                    placeholder="Pilih ruangan peminjam baru"
+                    placeholder="Select the new borrower room"
+                    searchPlaceholder="Search room..."
+                    loadingText="Loading options..."
+                    emptyText="Not found."
                   />
                 </div>
 
                 <div className="space-y-1">
                   <label className="text-xs font-semibold uppercase tracking-wide text-gray-400">
-                    Nama Peminjam
+                    Borrower Name
                   </label>
                   {/* Terkunci: yang mengajukan pinjam-alih adalah akun yang login. */}
                   <Input value={pinjamBorrowedBy} readOnly disabled />
                   <p className="text-xs text-gray-400">
-                    Otomatis terisi dari akun yang sedang login.
+                    Filled automatically from the signed-in account.
                   </p>
                 </div>
 
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                   <div className="space-y-1">
                     <label className="text-xs font-semibold uppercase tracking-wide text-gray-400">
-                      No. RM Pasien <span className="text-red-500">*</span>
+                      Patient MR No. <span className="text-red-500">*</span>
                     </label>
                     <Input
-                      placeholder="No. rekam medis pasien"
+                      placeholder="Patient medical record no."
                       value={pinjamMedicalRecordNo}
                       onChange={(e) => setPinjamMedicalRecordNo(e.target.value)}
                     />
                   </div>
                   <div className="space-y-1">
                     <label className="text-xs font-semibold uppercase tracking-wide text-gray-400">
-                      Nama Pasien <span className="text-red-500">*</span>
+                      Patient Name <span className="text-red-500">*</span>
                     </label>
                     <Input
-                      placeholder="Nama pasien"
+                      placeholder="Patient name"
                       value={pinjamPatientName}
                       onChange={(e) => setPinjamPatientName(e.target.value)}
                     />
@@ -1151,10 +1164,10 @@ export default function OrderInstrumenPage() {
 
                 <div className="space-y-1">
                   <label className="text-xs font-semibold uppercase tracking-wide text-gray-400">
-                    Catatan (opsional)
+                    Note (optional)
                   </label>
                   <Input
-                    placeholder="Catatan untuk peminjam saat ini"
+                    placeholder="Note for the current borrower"
                     value={pinjamNote}
                     onChange={(e) => setPinjamNote(e.target.value)}
                   />
@@ -1173,19 +1186,19 @@ export default function OrderInstrumenPage() {
       <Modal
         open={inboxOpen}
         onClose={() => setInboxOpen(false)}
-        title="Permintaan Pinjam Masuk"
+        title="Incoming Borrow Requests"
         size="lg"
         footer={
           <Button variant="outline" onClick={() => setInboxOpen(false)}>
-            Tutup
+            Close
           </Button>
         }
       >
         {transfersLoading ? (
-          <div className="py-12 text-center text-sm text-gray-400">Memuat data...</div>
+          <div className="py-12 text-center text-sm text-gray-400">Loading data...</div>
         ) : transfers.length === 0 ? (
           <div className="py-12 text-center text-sm text-gray-400">
-            Tidak ada permintaan pinjam yang menunggu persetujuan.
+            No borrow request is awaiting approval.
           </div>
         ) : (
           <div className="space-y-3">
@@ -1201,22 +1214,22 @@ export default function OrderInstrumenPage() {
                       {t.to_room?.name && <Badge variant="info">{t.to_room.name}</Badge>}
                     </div>
                     <p className="mt-1 text-xs text-gray-500">
-                      Dari order{" "}
+                      From order{" "}
                       <span className="font-mono font-semibold text-[#075489]">
                         {t.from_order?.code ?? "—"}
                       </span>
-                      {t.borrowed_by ? ` · a/n ${t.borrowed_by}` : ""}
+                      {t.borrowed_by ? ` · on behalf of ${t.borrowed_by}` : ""}
                     </p>
                     {(t.medical_record_no || t.patient_name) && (
                       <p className="mt-0.5 text-xs text-gray-500">
-                        Pasien: {t.patient_name ?? "—"}
-                        {t.medical_record_no ? ` · No. RM ${t.medical_record_no}` : ""}
+                        Patient: {t.patient_name ?? "—"}
+                        {t.medical_record_no ? ` · MR No. ${t.medical_record_no}` : ""}
                       </p>
                     )}
                     {t.note && <p className="mt-1 text-xs text-gray-500 italic">“{t.note}”</p>}
                   </div>
                   <span className="shrink-0 text-xs text-gray-500">
-                    {t.items?.length ?? 0} unit
+                    {t.items?.length ?? 0} units
                   </span>
                 </div>
 
@@ -1238,14 +1251,14 @@ export default function OrderInstrumenPage() {
                     disabled={actingId === t.id}
                     onClick={() => handleRespond(t, "reject")}
                   >
-                    {actingId === t.id ? "Memproses..." : "Tolak"}
+                    {actingId === t.id ? "Processing..." : "Reject"}
                   </Button>
                   <Button
                     className="h-8 px-3 text-xs bg-[#075489] hover:bg-[#075489]/90 text-white"
                     disabled={actingId === t.id}
                     onClick={() => handleRespond(t, "accept")}
                   >
-                    {actingId === t.id ? "Memproses..." : "Setujui (ACC)"}
+                    {actingId === t.id ? "Processing..." : "Approve"}
                   </Button>
                 </div>
               </div>
@@ -1259,16 +1272,16 @@ export default function OrderInstrumenPage() {
       <Modal
         open={detail !== null}
         onClose={() => setDetail(null)}
-        title={detail ? `Detail Order : ${detailTitleCodes(detail)}` : "Detail Order"}
+        title={detail ? `Order Details: ${detailTitleCodes(detail)}` : "Order Details"}
         size="lg"
         footer={
           <Button variant="outline" onClick={() => setDetail(null)}>
-            Tutup
+            Close
           </Button>
         }
       >
         {detailLoading ? (
-          <div className="py-10 text-center text-sm text-gray-400">Memuat data...</div>
+          <div className="py-10 text-center text-sm text-gray-400">Loading data...</div>
         ) : detail ? (
           <div className="space-y-5">
             {/* Status tracking alur CSSD: Diterima → Dicuci → Packaging → Steril → Distribusi */}
@@ -1280,17 +1293,17 @@ export default function OrderInstrumenPage() {
             </div>
 
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-              <Field label="Dipinjam Oleh" value={detail.borrowed_by ?? detail.user?.name} />
-              <Field label="Ruangan / Unit" value={detail.room?.name} />
-              <Field label="Tanggal Pinjam" value={formatDate(detail.order_date)} />
-              <Field label="Jam Pinjam" value={formatTime(detail.order_time)} />
-              <Field label="Waktu Diajukan" value={formatDateTime(timelineTimeOf(detail.timeline, "dibuat"))} />
-              <Field label="Waktu ACC / Dipinjamkan" value={formatDateTime(timelineTimeOf(detail.timeline, "diterima"))} />
-              <Field label="Rencana Kembali" value={formatDate(detail.return_plan_date)} />
-              <Field label="Tanggal Kembali" value={formatDate(detail.return_actual_date)} />
-              <Field label="Dikembalikan Oleh" value={detail.returned_by} />
-              <Field label="No. RM Pasien" value={detail.medical_record_no} />
-              <Field label="Nama Pasien" value={detail.patient_name} />
+              <Field label="Borrowed By" value={detail.borrowed_by ?? detail.user?.name} />
+              <Field label="Room / Unit" value={detail.room?.name} />
+              <Field label="Borrow Date" value={formatDate(detail.order_date)} />
+              <Field label="Borrow Time" value={formatTime(detail.order_time)} />
+              <Field label="Submitted At" value={formatDateTime(timelineTimeOf(detail.timeline, "dibuat"))} />
+              <Field label="Approved / Handed Over At" value={formatDateTime(timelineTimeOf(detail.timeline, "diterima"))} />
+              <Field label="Planned Return" value={formatDate(detail.return_plan_date)} />
+              <Field label="Actual Return" value={formatDate(detail.return_actual_date)} />
+              <Field label="Returned By" value={detail.returned_by} />
+              <Field label="Patient MR No." value={detail.medical_record_no} />
+              <Field label="Patient Name" value={detail.patient_name} />
               <div className="space-y-1">
                 <p className="text-xs font-semibold uppercase tracking-wide text-gray-400">Status</p>
                 <OrderStatusBadge status={detail.status} />
@@ -1299,18 +1312,18 @@ export default function OrderInstrumenPage() {
 
             {detail.note && (
               <div className="space-y-1">
-                <p className="text-xs font-semibold uppercase tracking-wide text-gray-400">Catatan</p>
+                <p className="text-xs font-semibold uppercase tracking-wide text-gray-400">Note</p>
                 <p className="text-sm text-gray-700">{detail.note}</p>
               </div>
             )}
 
             {/* Riwayat Peminjaman: timeline tracking order (dibuat → diterima → dipinjam → dst.) */}
-            <OrderTimeline events={detail.timeline} scopeOrderId={detail.id} />
+            <OrderTimeline events={detail.timeline} scopeOrderId={detail.id} locale="en" />
 
             {detail.request_items && detail.request_items.length > 0 && (
               <div>
                 <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-400">
-                  Daftar Permintaan
+                  Requested Items
                 </p>
                 <div className="space-y-2">
                   {detail.request_items.map((r) => {
@@ -1332,23 +1345,23 @@ export default function OrderInstrumenPage() {
                                   "h-4 w-4 text-gray-400 transition-transform " + (open ? "rotate-90" : "")
                                 }
                               />
-                              <Badge variant="info">Paket</Badge>
+                              <Badge variant="info">Package</Badge>
                               <span className="text-sm font-medium text-gray-800">
-                                {r.package_name ?? r.catalog?.name ?? "Paket"}
+                                {r.package_name ?? r.catalog?.name ?? "Package"}
                               </span>
                             </div>
                             {/* Paket diminta dalam satuan SET (satu set = satu bungkus). */}
-                            <span className="text-xs text-gray-500">{r.quantity} set</span>
+                            <span className="text-xs text-gray-500">{r.quantity} sets</span>
                           </button>
                         ) : (
                           <div className="flex items-center justify-between gap-2 px-3 py-2">
                             <div className="flex items-center gap-2">
-                              <Badge variant="default">Satuan</Badge>
+                              <Badge variant="default">Single</Badge>
                               <span className="text-sm font-medium text-gray-800">
-                                {r.instrument?.name ?? `Instrumen #${r.instrument_id}`}
+                                {r.instrument?.name ?? `Instrument #${r.instrument_id}`}
                               </span>
                             </div>
-                            <span className="text-xs text-gray-500">{r.quantity} unit</span>
+                            <span className="text-xs text-gray-500">{r.quantity} units</span>
                           </div>
                         )}
 
@@ -1361,7 +1374,7 @@ export default function OrderInstrumenPage() {
                                 className="flex items-center justify-between px-3 py-1.5 text-sm"
                               >
                                 <span className="pl-6 text-gray-600">
-                                  {ci.instrument?.name ?? `Instrumen #${ci.instrument_id}`}
+                                  {ci.instrument?.name ?? `Instrument #${ci.instrument_id}`}
                                 </span>
                                 <span className="text-xs font-semibold text-gray-700">
                                   {ci.quantity * r.quantity}
@@ -1372,7 +1385,7 @@ export default function OrderInstrumenPage() {
                         )}
                         {r.type === "paket" && open && !hasContents && (
                           <p className="border-t border-gray-100 bg-gray-50/60 px-3 py-2 pl-9 text-xs text-gray-400">
-                            Paket tanpa rincian instrumen.
+                            Package has no instrument breakdown.
                           </p>
                         )}
                       </div>
@@ -1384,7 +1397,7 @@ export default function OrderInstrumenPage() {
 
             <div>
               <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-400">
-                Instrumen Dipinjam
+                Borrowed Instruments
               </p>
               {detail.items && detail.items.length > 0 ? (
                 <div className="space-y-2">
@@ -1407,7 +1420,7 @@ export default function OrderInstrumenPage() {
                             }
                           />
                           <Badge variant={isPaket ? "info" : "default"}>
-                            {isPaket ? "Paket" : "Satuan"}
+                            {isPaket ? "Package" : "Single"}
                           </Badge>
                           <span className="truncate text-sm font-medium text-gray-800">{g.name}</span>
                           {g.barcodeNo ? (
@@ -1415,10 +1428,10 @@ export default function OrderInstrumenPage() {
                               {g.barcodeNo}
                             </span>
                           ) : (
-                            <span className="shrink-0 text-xs text-gray-400">tanpa label</span>
+                            <span className="shrink-0 text-xs text-gray-400">no label</span>
                           )}
                           <span className="ml-auto shrink-0 text-xs text-gray-500">
-                            {g.units.length} instrumen
+                            {g.units.length} instruments
                           </span>
                         </button>
 
@@ -1435,7 +1448,7 @@ export default function OrderInstrumenPage() {
                 </div>
               ) : (
                 <div className="py-6 text-center text-sm text-gray-400">
-                  Unit fisik belum di-generate — akan dialokasikan saat pesanan diterima CSSD.
+                  Physical units are not generated yet — they are allocated once CSSD accepts the order.
                 </div>
               )}
             </div>
@@ -1449,6 +1462,8 @@ export default function OrderInstrumenPage() {
         onClose={() => setResult(null)}
         variant={result?.variant ?? "success"}
         description={result?.description}
+        title={result?.variant === "error" ? "Failed" : "Success"}
+        actionLabel={result?.variant === "error" ? "Close" : "Done"}
       />
     </div>
   )
@@ -1457,7 +1472,7 @@ export default function OrderInstrumenPage() {
 // Satu baris unit instrumen di modal detail (lihat-saja). `indent` untuk unit
 // di dalam grup bungkus. Jenis (paket/satuan) sudah ditandai di kepala grupnya.
 function DetailUnitRow({ unit, indent = false }: { unit: OrderItem; indent?: boolean }) {
-  const name = unit.instrument_stock?.instrument?.name ?? `Instrumen #${unit.instrument_stock_id}`
+  const name = unit.instrument_stock?.instrument?.name ?? `Instrument #${unit.instrument_stock_id}`
   const pad = indent ? "pl-6" : ""
   return (
     <div className="px-3 py-2">
@@ -1471,12 +1486,12 @@ function DetailUnitRow({ unit, indent = false }: { unit: OrderItem; indent?: boo
       {/* Baris 2: status + kondisi keluar → masuk. */}
       <div className={"mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-gray-500 " + pad}>
         {unit.is_returned ? (
-          <Badge variant="success">Kembali</Badge>
+          <Badge variant="success">Returned</Badge>
         ) : (
-          <Badge variant="warning">Dipinjam</Badge>
+          <Badge variant="warning">Borrowed</Badge>
         )}
-        <span>Kondisi Keluar: {unit.condition_out?.name ?? "—"}</span>
-        <span>Kondisi Masuk: {unit.condition_in?.name ?? "—"}</span>
+        <span>Condition Out: {unit.condition_out?.name ?? "—"}</span>
+        <span>Condition In: {unit.condition_in?.name ?? "—"}</span>
       </div>
     </div>
   )

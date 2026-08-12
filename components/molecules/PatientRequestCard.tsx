@@ -98,7 +98,7 @@ export function PatientRequestCard({
     .filter(({ left }) => left > 0)
     .map(({ instrument, left }) => ({
       value: String(instrument.id),
-      label: `${instrument.name} Tersedia ${left}`,
+      label: `${instrument.name} — ${left} available`,
     }))
 
   // Hanya paket yang seluruh komponennya bisa dipenuhi dari stok steril, dan yang
@@ -111,7 +111,7 @@ export function PatientRequestCard({
     .filter(({ left }) => left > 0)
     .map(({ catalog, left }) => ({
       value: String(catalog.id),
-      label: `${catalog.name} Tersedia ${left} Set`,
+      label: `${catalog.name} — ${left} sets available`,
     }))
 
   function setRequests(next: RequestLine[]) {
@@ -145,7 +145,7 @@ export function PatientRequestCard({
     const avail = sterileAvailFor("satuan", inst.id)
     const already = ownQty("satuan", inst.id) + usedByOthers("satuan", inst.id)
     if (already + qty > avail) {
-      onError(`Stok steril "${inst.name}" hanya ${avail}${already ? ` (sudah ${already} di form ini)` : ""}.`)
+      onError(`Sterile stock for "${inst.name}" is only ${avail}${already ? ` (${already} already in this form)` : ""}.`)
       return
     }
     onError(null)
@@ -178,13 +178,13 @@ export function PatientRequestCard({
     const already = ownQty("paket", cat.id) + usedByOthers("paket", cat.id)
     if (already + qty > avail) {
       onError(
-        `Stok steril paket "${cat.name}" hanya cukup untuk ${avail} set${already ? ` (sudah ${already} di form ini)` : ""}.`,
+        `Sterile stock for package "${cat.name}" only covers ${avail} sets${already ? ` (${already} already in this form)` : ""}.`,
       )
       return
     }
     onError(null)
     const contents: PaketContent[] = paketItems.map((it) => ({
-      name: it.instrument?.name ?? `Instrumen #${it.instrument_id}`,
+      name: it.instrument?.name ?? `Instrument #${it.instrument_id}`,
       perSet: it.quantity,
     }))
     addRequest("paket", cat.id, cat.name, qty, contents)
@@ -236,20 +236,20 @@ export function PatientRequestCard({
           <div className="min-w-0">
             <p className="truncate text-sm font-semibold text-gray-900">
               {showPatientFields
-                ? group.patientName || `Pasien ${index + 1}`
-                : "Daftar Permintaan"}
+                ? group.patientName || `Patient ${index + 1}`
+                : "Request List"}
             </p>
             {showPatientFields && group.medicalRecordNo && (
-              <p className="font-mono text-xs text-gray-400">RM {group.medicalRecordNo}</p>
+              <p className="font-mono text-xs text-gray-400">MR {group.medicalRecordNo}</p>
             )}
           </div>
         </div>
         <div className="flex items-center gap-2">
-          {requests.length > 0 && <Badge variant="info">{totalQty} unit</Badge>}
+          {requests.length > 0 && <Badge variant="info">{totalQty} units</Badge>}
           {canRemove && (
             <Button type="button" variant="destructive" size="sm" onClick={onRemove}>
               <Trash2 className="h-4 w-4" />
-              Hapus
+              Remove
             </Button>
           )}
         </div>
@@ -261,12 +261,12 @@ export function PatientRequestCard({
         <div className="border-b border-gray-100 px-5 py-4">
           <p className="mb-3 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-gray-400">
             <User className="h-3.5 w-3.5" />
-            Identitas Pasien
+            Patient Identity
           </p>
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div className="space-y-1.5">
               <Label htmlFor={`no-rm-${group.id}`}>
-                No. Rekam Medis (RM) Pasien <span className="text-red-500">*</span>
+                Patient Medical Record (MR) No. <span className="text-red-500">*</span>
               </Label>
               <Input
                 id={`no-rm-${group.id}`}
@@ -276,13 +276,13 @@ export function PatientRequestCard({
                 // agar nol di depan tidak hilang dan tombol spinner tidak muncul.
                 inputMode="numeric"
                 maxLength={MAX_RM_LENGTH}
-                placeholder="mis. 00123"
+                placeholder="e.g. 00123"
                 className="font-mono"
               />
             </div>
             <div className="space-y-1.5">
               <Label htmlFor={`nama-pasien-${group.id}`}>
-                Nama Pasien <span className="text-red-500">*</span>
+                Patient Name <span className="text-red-500">*</span>
               </Label>
               <Input
                 id={`nama-pasien-${group.id}`}
@@ -290,7 +290,7 @@ export function PatientRequestCard({
                 // Nama pasien dikapitalkan saat mengetik, jadi yang TERSIMPAN memang
                 // kapital — seragam dengan laporan yang menampilkannya kapital.
                 onChange={(e) => onChange({ ...group, patientName: e.target.value.toUpperCase() })}
-                placeholder="Nama lengkap pasien"
+                placeholder="Patient full name"
               />
             </div>
           </div>
@@ -303,8 +303,8 @@ export function PatientRequestCard({
         <div className="mb-4 inline-flex rounded-lg border border-gray-200 bg-white p-1">
           {(
             [
-              { key: "satuan", label: "Satuan" },
-              { key: "paket", label: "Paket" },
+              { key: "satuan", label: "Single" },
+              { key: "paket", label: "Package" },
             ] as const
           ).map((m) => (
             <button
@@ -324,32 +324,38 @@ export function PatientRequestCard({
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-[1fr_8rem_auto] lg:items-end">
           {addMode === "satuan" ? (
             <div className="space-y-1.5">
-              <Label>Jenis Instrumen</Label>
+              <Label>Instrument Type</Label>
               <SelectSearch
                 options={instrumentOptions}
                 value={newInstrumentId}
                 onChange={setNewInstrumentId}
                 loading={instrumentLoading}
                 disabled={instrumentLoading}
-                placeholder="-- Pilih instrumen --"
+                placeholder="-- Select instrument --"
+                searchPlaceholder="Search instrument..."
+                loadingText="Loading options..."
+                emptyText="Not found."
               />
             </div>
           ) : (
             <div className="space-y-1.5">
-              <Label>Paket Instrumen (katalog)</Label>
+              <Label>Instrument Package (catalog)</Label>
               <SelectSearch
                 options={catalogOptions}
                 value={newCatalogId}
                 onChange={handleSelectCatalog}
                 loading={catalogLoading}
                 disabled={catalogLoading}
-                placeholder="-- Pilih paket --"
+                placeholder="-- Select package --"
+                searchPlaceholder="Search package..."
+                loadingText="Loading options..."
+                emptyText="Not found."
               />
             </div>
           )}
 
           <div className="space-y-1.5">
-            <Label>{addMode === "paket" ? "Jumlah Paket" : "Jumlah"}</Label>
+            <Label>{addMode === "paket" ? "Package Qty" : "Quantity"}</Label>
             <QtyStepper
               value={addMode === "paket" ? newCatalogQty : newInstrumentQty}
               onChange={addMode === "paket" ? setNewCatalogQty : setNewInstrumentQty}
@@ -364,7 +370,7 @@ export function PatientRequestCard({
               className="shrink-0 bg-[#075489] text-white hover:bg-[#075489]/90"
             >
               <Plus className="h-4 w-4" />
-              Tambah
+              Add
             </Button>
           ) : (
             <Button
@@ -374,7 +380,7 @@ export function PatientRequestCard({
               className="shrink-0 bg-[#075489] text-white hover:bg-[#075489]/90"
             >
               <Plus className="h-4 w-4" />
-              Tambah Paket
+              Add Package
             </Button>
           )}
         </div>
@@ -385,16 +391,16 @@ export function PatientRequestCard({
             <div className="flex items-center justify-between border-b border-gray-100 bg-gray-50/60 px-3 py-2">
               <span className="flex items-center gap-1.5 text-xs font-semibold text-gray-500">
                 <Boxes className="h-3.5 w-3.5 text-[#075489]" />
-                Isi Paket
+                Package Contents
               </span>
               {Number(newCatalogQty) > 1 && (
-                <span className="text-xs text-gray-400">total = isi × {Number(newCatalogQty)} paket</span>
+                <span className="text-xs text-gray-400">total = contents × {Number(newCatalogQty)} packages</span>
               )}
             </div>
             {loadingPaketItems ? (
-              <p className="px-3 py-3 text-xs text-gray-400">Memuat isi paket...</p>
+              <p className="px-3 py-3 text-xs text-gray-400">Loading package contents...</p>
             ) : paketItems.length === 0 ? (
-              <p className="px-3 py-3 text-xs text-gray-400">Paket ini belum punya rincian instrumen.</p>
+              <p className="px-3 py-3 text-xs text-gray-400">This package has no instrument breakdown yet.</p>
             ) : (
               <ul className="divide-y divide-gray-50">
                 {paketItems.map((it) => {
@@ -402,7 +408,7 @@ export function PatientRequestCard({
                   return (
                     <li key={it.instrument_id} className="flex items-center justify-between px-3 py-2 text-sm">
                       <span className="text-gray-700">
-                        {it.instrument?.name ?? `Instrumen #${it.instrument_id}`}
+                        {it.instrument?.name ?? `Instrument #${it.instrument_id}`}
                       </span>
                       <span className="text-xs text-gray-500">
                         {it.quantity}/set
@@ -453,7 +459,7 @@ export function PatientRequestCard({
                     <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
                       <span className="text-xs text-gray-300">{i + 1}.</span>
                       <span className="truncate text-sm font-semibold text-gray-900">{r.name}</span>
-                      <Badge variant={isPaket ? "info" : "default"}>{isPaket ? "Paket" : "Satuan"}</Badge>
+                      <Badge variant={isPaket ? "info" : "default"}>{isPaket ? "Package" : "Single"}</Badge>
                     </div>
                     {/* Paket: tombol buka/tutup rincian isi set */}
                     {isPaket ? (
@@ -463,11 +469,11 @@ export function PatientRequestCard({
                         className="mt-0.5 flex items-center gap-1 text-xs text-gray-400 hover:text-[#075489]"
                       >
                         <ChevronRight className={"h-3.5 w-3.5 transition-transform " + (open ? "rotate-90" : "")} />
-                        {hasContents ? `${r.contents!.length} jenis instrumen per set` : "Tanpa rincian instrumen"}
-                        <span className="text-gray-300">— {open ? "tutup" : "lihat isi"}</span>
+                        {hasContents ? `${r.contents!.length} instrument types per set` : "No instrument breakdown"}
+                        <span className="text-gray-300">— {open ? "hide" : "view contents"}</span>
                       </button>
                     ) : (
-                      <p className="mt-0.5 text-xs text-gray-400">{qty} unit instrumen</p>
+                      <p className="mt-0.5 text-xs text-gray-400">{qty} instrument units</p>
                     )}
                   </div>
 
@@ -477,8 +483,8 @@ export function PatientRequestCard({
                     <button
                       type="button"
                       onClick={() => handleRemoveLine(i)}
-                      title="Hapus permintaan ini"
-                      aria-label={`Hapus ${r.name}`}
+                      title="Remove this request"
+                      aria-label={`Remove ${r.name}`}
                       className="flex h-8 w-8 items-center justify-center rounded-lg text-gray-300 transition-colors hover:bg-red-50 hover:text-red-500"
                     >
                       <Trash2 className="h-4 w-4" />
@@ -504,7 +510,7 @@ export function PatientRequestCard({
                         ))}
                       </ul>
                     ) : (
-                      <p className="text-xs text-gray-400">Paket tanpa rincian instrumen.</p>
+                      <p className="text-xs text-gray-400">Package has no instrument breakdown.</p>
                     )}
                   </div>
                 )}

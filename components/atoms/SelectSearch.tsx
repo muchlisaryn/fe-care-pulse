@@ -35,6 +35,10 @@ type SelectSearchProps = {
   className?: string
   /** Kelas tambahan untuk tombol pemicu (mis. samakan tinggi/padding dengan tombol lain). */
   triggerClassName?: string
+  /** Teks saat opsi sedang dimuat — dipakai halaman berbahasa Inggris. */
+  loadingText?: string
+  /** Teks saat pencarian tidak menemukan opsi — dipakai halaman berbahasa Inggris. */
+  emptyText?: string
 }
 
 export function SelectSearch({
@@ -48,6 +52,8 @@ export function SelectSearch({
   loading = false,
   className,
   triggerClassName,
+  loadingText = "Memuat opsi...",
+  emptyText = "Tidak ditemukan.",
 }: SelectSearchProps) {
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState("")
@@ -158,10 +164,10 @@ export function SelectSearch({
           {loading ? (
             <li className="flex items-center justify-center gap-2 px-3 py-4 text-sm text-gray-400">
               <Loader2 className="h-4 w-4 animate-spin" />
-              Memuat opsi...
+              {loadingText}
             </li>
           ) : filtered.length === 0 ? (
-            <li className="px-3 py-2 text-sm text-gray-400 text-center">Tidak ditemukan.</li>
+            <li className="px-3 py-2 text-sm text-gray-400 text-center">{emptyText}</li>
           ) : (
             filtered.map((option) => (
               <li
@@ -206,7 +212,7 @@ export function SelectSearch({
         )}
       >
         <span className={cn("truncate", selected ? "text-gray-900" : "text-gray-400")}>
-          {loading && !selected ? "Memuat opsi..." : selected ? selected.label : placeholder}
+          {loading && !selected ? loadingText : selected ? selected.label : placeholder}
         </span>
         {loading ? (
           <Loader2 className="ml-2 h-4 w-4 shrink-0 animate-spin text-gray-400" />

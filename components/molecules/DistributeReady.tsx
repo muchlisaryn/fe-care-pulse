@@ -40,19 +40,19 @@ function formatDate(value: string | null) {
   if (!value) return "—"
   const d = new Date(value)
   if (Number.isNaN(d.getTime())) return value
-  return d.toLocaleDateString("id-ID", { day: "2-digit", month: "short", year: "numeric" })
+  return d.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" })
 }
 
 function errMsg(e: unknown): string {
   const x = e as { response?: { data?: { message?: string } } }
-  return x.response?.data?.message ?? "Terjadi kesalahan."
+  return x.response?.data?.message ?? "Something went wrong."
 }
 
 /** Label opsi di dropdown: NAMA RAK - NAMA PAKET / INSTRUMEN (KODE PRODUKSI). */
 function optionLabel(opt: DistributeOption) {
-  const rack = opt.rack_code ?? "Tanpa rak"
+  const rack = opt.rack_code ?? "No rack"
   const set = opt.set_index ? ` Set ${opt.set_index}` : ""
-  const code = opt.production_code ?? "Tanpa kode produksi"
+  const code = opt.production_code ?? "No production code"
   return `${rack} - ${opt.name ?? "—"}${set} (${code})`
 }
 
@@ -165,7 +165,7 @@ export function DistributeReady({
     if (gone) {
       setRequirements(fresh)
       setPicked(Object.fromEntries(fresh.map((r) => [r.key, initialPick()])))
-      setError("Sebagian barang yang dipilih sudah tidak ada di gudang. Pilihan direset — silakan pilih ulang.")
+      setError("Some selected items are no longer in storage. The selection was reset — please choose again.")
       return false
     }
 
@@ -175,11 +175,11 @@ export function DistributeReady({
   async function submit() {
     if (!active || saving || modalLoading) return
     if (incomplete.length > 0) {
-      setError("Lengkapi pilihan barang sesuai jumlah yang diminta.")
+      setError("Select items to match the requested quantity.")
       return
     }
     if (!recipient.trim()) {
-      setError("Pilih petugas penerima (verifikasi).")
+      setError("Select the receiving officer (verification).")
       return
     }
     setSaving(true)
@@ -203,7 +203,7 @@ export function DistributeReady({
   return (
     <div className="space-y-2">
       <div className="flex items-center gap-2 px-1 text-xs font-semibold uppercase tracking-wide text-gray-400">
-        Siap Distribusi ({items.length})
+        Ready to Distribute ({items.length})
       </div>
 
       {items.map((order) => (
@@ -222,12 +222,12 @@ export function DistributeReady({
                   <span className="font-mono text-xs font-semibold text-[#075489] bg-[#075489]/10 px-2 py-0.5 rounded">
                     {order.code_transaction ?? order.code}
                   </span>
-                  <Badge variant="info">Di Gudang Steril</Badge>
+                  <Badge variant="info">In Sterile Storage</Badge>
                 </div>
                 <div className="mt-1 flex flex-wrap gap-x-4 gap-y-0.5 text-xs text-gray-500">
-                  <span>Ruangan: {order.room?.name ?? "—"}</span>
-                  <span>{order.unit_count} unit</span>
-                  <span>Kedaluwarsa: {formatDate(order.expiry_date)}</span>
+                  <span>Room: {order.room?.name ?? "—"}</span>
+                  <span>{order.unit_count} units</span>
+                  <span>Expiry: {formatDate(order.expiry_date)}</span>
                 </div>
                 {/* Pasien tujuan alat (tautan RM, diisi saat order dibuat) — petugas
                     mencocokkannya dengan bungkus steril sebelum diserahkan, jadi harus
@@ -236,7 +236,7 @@ export function DistributeReady({
                     terlihat, bukan disembunyikan. */}
                 <div className="mt-0.5 flex flex-wrap gap-x-4 gap-y-0.5 text-xs text-gray-500">
                   <span>
-                    No. RM:{" "}
+                    MR No.:{" "}
                     {order.medical_record_no ? (
                       <span className="font-mono font-semibold text-gray-700">
                         {order.medical_record_no}
@@ -246,7 +246,7 @@ export function DistributeReady({
                     )}
                   </span>
                   <span>
-                    Pasien:{" "}
+                    Patient:{" "}
                     {order.patient_name ? (
                       <span className="font-medium text-gray-700">{order.patient_name}</span>
                     ) : (
@@ -261,7 +261,7 @@ export function DistributeReady({
               onClick={() => openDistribute(order)}
               className="shrink-0 self-center rounded-md border border-[#075489] bg-[#075489] px-3 py-1.5 text-xs font-medium text-white hover:bg-[#075489]/90"
             >
-              Distribusikan
+              Distribute
             </button>
           </div>
         </div>
@@ -270,21 +270,21 @@ export function DistributeReady({
       <Modal
         open={active !== null}
         onClose={saving ? () => {} : () => setActive(null)}
-        title="Distribusikan"
+        title="Distribute"
         size="lg"
         footer={
           <div className="flex w-full items-center justify-between gap-3">
             {error ? <p className="text-sm text-red-600">{error}</p> : <span />}
             <div className="flex shrink-0 gap-2">
               <Button variant="outline" onClick={() => setActive(null)} disabled={saving}>
-                Batal
+                Cancel
               </Button>
               <Button
                 onClick={submit}
                 disabled={saving || modalLoading || incomplete.length > 0}
                 className="bg-[#075489] hover:bg-[#075489]/90 text-white"
               >
-                {saving ? "Memproses..." : "Distribusikan"}
+                {saving ? "Processing..." : "Distribute"}
               </Button>
             </div>
           </div>
@@ -292,14 +292,14 @@ export function DistributeReady({
       >
         {active && (
           modalLoading ? (
-            <div className="py-10 text-center text-sm text-gray-400">Memuat data...</div>
+            <div className="py-10 text-center text-sm text-gray-400">Loading data...</div>
           ) : (
             <div className="space-y-6">
               {/* Identitas order yang sedang didistribusikan. */}
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                 <div>
                   <p className="text-xs font-semibold uppercase tracking-wide text-gray-400">
-                    No. Invoice
+                    Invoice No.
                   </p>
                   <p className="mt-0.5 font-mono text-sm font-semibold text-[#075489]">
                     {active.code_transaction ?? active.code}
@@ -307,7 +307,7 @@ export function DistributeReady({
                 </div>
                 <div>
                   <p className="text-xs font-semibold uppercase tracking-wide text-gray-400">
-                    Nama Ruangan
+                    Room Name
                   </p>
                   <p className="mt-0.5 text-sm font-semibold text-gray-900">
                     {active.room?.name ?? <span className="text-xs text-gray-400">—</span>}
@@ -321,7 +321,7 @@ export function DistributeReady({
               <section className="rounded-xl border border-gray-200 bg-gray-50/70 p-4">
                 <p className="mb-3 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-gray-500">
                   <ClipboardList className="h-3.5 w-3.5" />
-                  Pilih Barang dari Gudang
+                  Select Items from Storage
                 </p>
 
                 <div className="space-y-3">
@@ -335,17 +335,17 @@ export function DistributeReady({
                           <span className="flex items-center gap-2 text-sm font-semibold text-gray-900">
                             {req.name ?? <span className="text-xs text-gray-400">—</span>}
                             <Badge variant={req.kind === "paket" ? "info" : "default"}>
-                              {req.kind === "paket" ? "Paket" : "Satuan"}
+                              {req.kind === "paket" ? "Package" : "Single"}
                             </Badge>
                           </span>
                           <Badge variant={complete ? "success" : "warning"}>
-                            {chosen.length} / {req.needed_qty} {req.unit_label} dipilih
+                            {chosen.length} / {req.needed_qty} {req.unit_label} selected
                           </Badge>
                         </div>
 
                         {req.options.length === 0 ? (
                           <p className="px-4 py-3 text-sm text-gray-400">
-                            Tidak ada {req.unit_label} steril di gudang untuk permintaan ini.
+                            No sterile {req.unit_label} in storage for this request.
                           </p>
                         ) : (
                           <div className="px-4 py-3">
@@ -355,8 +355,12 @@ export function DistributeReady({
                               value={chosen}
                               onChange={(next) => choose(req, next)}
                               max={req.needed_qty}
-                              placeholder={`Pilih ${req.needed_qty} ${req.unit_label}...`}
-                              searchPlaceholder="Cari rak / nama / kode produksi..."
+                              placeholder={`Select ${req.needed_qty} ${req.unit_label}...`}
+                              searchPlaceholder="Search rack / name / production code..."
+                              loadingText="Loading options..."
+                              emptyText="Not found."
+                              noOptionsText="No other choice."
+                              removeText="Remove"
                               options={req.options.map((o) => ({
                                 value: o.value,
                                 label: optionLabel(o),
@@ -374,18 +378,20 @@ export function DistributeReady({
               <section className="rounded-xl border border-[#075489]/25 bg-[#075489]/[0.04] p-4">
                 <p className="mb-3 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-[#075489]">
                   <UserCheck className="h-3.5 w-3.5" />
-                  Verifikasi Penerima
+                  Recipient Verification
                 </p>
                 <div className="space-y-1.5">
-                  <Label>Nama Penerima *</Label>
+                  <Label>Recipient Name *</Label>
                   <SelectSearch
                     options={recipientOptions}
                     value={recipient}
                     onChange={setRecipient}
                     loading={userLoading}
                     disabled={userLoading}
-                    placeholder="-- Pilih Penerima --"
-                    searchPlaceholder="Cari nama atau nopeg..."
+                    placeholder="-- Select Recipient --"
+                    searchPlaceholder="Search name or staff ID..."
+                    loadingText="Loading options..."
+                    emptyText="Not found."
                   />
                 </div>
               </section>

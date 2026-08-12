@@ -33,6 +33,14 @@ type MultiSelectSearchProps = {
   error?: boolean
   loading?: boolean
   className?: string
+  /** Teks saat opsi sedang dimuat — dipakai halaman berbahasa Inggris. */
+  loadingText?: string
+  /** Teks saat pencarian tidak menemukan opsi. */
+  emptyText?: string
+  /** Teks saat seluruh opsi sudah terpilih. */
+  noOptionsText?: string
+  /** Kata kerja tombol lepas chip (aria-label), mis. "Hapus" / "Remove". */
+  removeText?: string
 }
 
 /**
@@ -51,6 +59,10 @@ export function MultiSelectSearch({
   error = false,
   loading = false,
   className,
+  loadingText = "Memuat opsi...",
+  emptyText = "Tidak ditemukan.",
+  noOptionsText = "Tidak ada pilihan lain.",
+  removeText = "Hapus",
 }: MultiSelectSearchProps) {
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState("")
@@ -168,11 +180,11 @@ export function MultiSelectSearch({
           {loading ? (
             <li className="flex items-center justify-center gap-2 px-3 py-4 text-sm text-gray-400">
               <Loader2 className="h-4 w-4 animate-spin" />
-              Memuat opsi...
+              {loadingText}
             </li>
           ) : filtered.length === 0 ? (
             <li className="px-3 py-2 text-sm text-gray-400 text-center">
-              {available.length === 0 ? "Tidak ada pilihan lain." : "Tidak ditemukan."}
+              {available.length === 0 ? noOptionsText : emptyText}
             </li>
           ) : (
             filtered.map((option) => (
@@ -208,7 +220,7 @@ export function MultiSelectSearch({
                 type="button"
                 disabled={disabled}
                 onClick={() => onChange(value.filter((v) => v !== option.value))}
-                aria-label={`Hapus ${option.label}`}
+                aria-label={`${removeText} ${option.label}`}
                 className="grid h-7 w-7 shrink-0 place-items-center rounded-md text-[#075489] transition-colors hover:bg-[#075489]/10 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 <X className="h-4 w-4" />
@@ -236,7 +248,7 @@ export function MultiSelectSearch({
           )}
         >
           <span className="truncate text-gray-400">
-            {loading ? "Memuat opsi..." : placeholder}
+            {loading ? loadingText : placeholder}
           </span>
           {loading ? (
             <Loader2 className="h-4 w-4 shrink-0 animate-spin text-gray-400" />

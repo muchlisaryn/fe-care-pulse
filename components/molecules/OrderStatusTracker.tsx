@@ -26,66 +26,66 @@ type StatusStyle = {
 
 const STATUS_STYLES: Record<OrderStatus, StatusStyle> = {
   diajukan: {
-    label: "Diajukan",
+    label: "Submitted",
     icon: Clock,
     className: "bg-amber-50 text-amber-700 ring-1 ring-amber-200",
     iconClassName: "text-amber-500",
     pulse: true,
   },
   pencucian: {
-    label: "Sedang Dicuci",
+    label: "Being Cleaned",
     icon: Droplets,
     className: "bg-yellow-50 text-yellow-700 ring-1 ring-yellow-200",
     iconClassName: "text-yellow-500",
     pulse: true,
   },
   pengemasan: {
-    label: "Sedang Packaging",
+    label: "Being Packaged",
     icon: Package,
     className: "bg-violet-50 text-violet-700 ring-1 ring-violet-200",
     iconClassName: "text-violet-500",
     pulse: true,
   },
   selesai: {
-    label: "Siap Disterilkan",
+    label: "Ready to Sterilize",
     icon: ShieldCheck,
     className: "bg-indigo-50 text-indigo-700 ring-1 ring-indigo-200",
     iconClassName: "text-indigo-500",
     pulse: true,
   },
   sterilisasi: {
-    label: "Sedang Disterilkan",
+    label: "Being Sterilized",
     icon: FlaskConical,
     className: "bg-sky-50 text-sky-700 ring-1 ring-sky-200",
     iconClassName: "text-sky-500",
     pulse: true,
   },
   steril: {
-    label: "Steril / Siap Rilis",
+    label: "Sterile / Ready to Release",
     icon: ShieldCheck,
     className: "bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200",
     iconClassName: "text-emerald-500",
   },
   digudang: {
-    label: "Siap Distribusi",
+    label: "Ready to Distribute",
     icon: Warehouse,
     className: "bg-teal-50 text-teal-700 ring-1 ring-teal-200",
     iconClassName: "text-teal-500",
   },
   dipinjam: {
-    label: "Terdistribusi",
+    label: "Distributed",
     icon: Truck,
     className: "bg-blue-50 text-blue-700 ring-1 ring-blue-200",
     iconClassName: "text-blue-500",
   },
   dikembalikan: {
-    label: "Dikembalikan",
+    label: "Returned",
     icon: Undo2,
     className: "bg-green-50 text-green-700 ring-1 ring-green-200",
     iconClassName: "text-green-500",
   },
   dibatalkan: {
-    label: "Dibatalkan",
+    label: "Canceled",
     icon: X,
     className: "bg-red-50 text-red-600 ring-1 ring-red-200",
     iconClassName: "text-red-500",
@@ -130,9 +130,9 @@ type Stage = { key: string; label: string; icon: LucideIcon }
 // Cleaning/Sterilisasi lagi — begitu diterima, unit steril dialokasikan & order
 // langsung siap distribusi.
 const STAGES: Stage[] = [
-  { key: "diterima", label: "Diterima", icon: Inbox },
-  { key: "distribusi", label: "Distribusi", icon: Truck },
-  { key: "kembali", label: "Dikembalikan", icon: Undo2 },
+  { key: "diterima", label: "Received", icon: Inbox },
+  { key: "distribusi", label: "Distribution", icon: Truck },
+  { key: "kembali", label: "Returned", icon: Undo2 },
 ]
 
 // Pemetaan status order (DB) → indeks tahap yang sedang berjalan (0-based).
@@ -161,7 +161,7 @@ export function OrderStatusTracker({ status }: { status: OrderStatus }) {
     return (
       <div className="flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-600">
         <X className="h-4 w-4 shrink-0" />
-        Order dibatalkan — tidak diproses lebih lanjut.
+        Order canceled — no further processing.
       </div>
     )
   }
@@ -172,7 +172,7 @@ export function OrderStatusTracker({ status }: { status: OrderStatus }) {
     <div className="rounded-lg border border-gray-200 bg-white px-4 py-4">
       {status === "diajukan" && (
         <p className="mb-3 text-xs font-medium text-amber-600">
-          Menunggu pesanan diterima CSSD.
+          Waiting for CSSD to accept the order.
         </p>
       )}
       <ol className="flex items-center">

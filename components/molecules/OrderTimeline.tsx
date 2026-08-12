@@ -55,11 +55,13 @@ export type TimelineEvent = {
   detail?: TimelineDetail | null
 }
 
-function formatDateTime(value: string | null) {
+export type TimelineLocale = "id" | "en"
+
+function formatDateTime(value: string | null, locale: TimelineLocale = "id") {
   if (!value) return "—"
   const d = new Date(value)
   if (Number.isNaN(d.getTime())) return value
-  return d.toLocaleString("id-ID", {
+  return d.toLocaleString(locale === "en" ? "en-GB" : "id-ID", {
     day: "2-digit",
     month: "short",
     year: "numeric",
@@ -85,6 +87,24 @@ const TIMELINE_LABEL: Record<string, string> = {
   dipindah: "Dipinjam Unit Lain",
   dikembalikan: "Dikembalikan",
   dibatalkan: "Dibatalkan",
+}
+const TIMELINE_LABEL_EN: Record<string, string> = {
+  produksi: "Production",
+  dibuat: "Order Created",
+  diterima: "Received by CSSD",
+  diproses: "Processed",
+  selesai_cuci: "Cleaning & Disinfection",
+  gagal_cuci: "Cleaning Failed",
+  packaging: "Inspection & Packaging",
+  disterilkan: "Sterilized",
+  steril: "Sterile / Ready to Release",
+  gagal_steril: "Sterilization Failed",
+  disimpan: "In Sterile Storage",
+  terdistribusi: "Distributed / In Use",
+  dipinjam: "Borrowed",
+  dipindah: "Borrowed by Another Unit",
+  dikembalikan: "Returned",
+  dibatalkan: "Canceled",
 }
 const TIMELINE_VARIANT: Record<string, "info" | "success" | "danger" | "warning" | "default"> = {
   produksi: "info",
@@ -122,6 +142,22 @@ const TIMELINE_ACTOR_LABEL: Record<string, string> = {
   dipindah: "Disetujui",
   dikembalikan: "Diterima",
   dibatalkan: "Dibatalkan",
+}
+const TIMELINE_ACTOR_LABEL_EN: Record<string, string> = {
+  produksi: "Produced by",
+  dibuat: "Submitted by",
+  diterima: "Received by",
+  selesai_cuci: "Cleaned by",
+  gagal_cuci: "Cleaned by",
+  packaging: "Packed by",
+  steril: "Validated by",
+  gagal_steril: "Validated by",
+  disterilkan: "Sterilized by",
+  disimpan: "Stored by",
+  dipinjam: "Handed over by",
+  dipindah: "Approved by",
+  dikembalikan: "Received by",
+  dibatalkan: "Canceled by",
 }
 const TIMELINE_DOT: Record<string, string> = {
   produksi: "bg-[#075489]",
@@ -161,12 +197,16 @@ function TimelineItem({
   showConnector,
   padBottom,
   onDetail,
+  locale = "id",
 }: {
   ev: TimelineEvent
   showConnector: boolean
   padBottom: boolean
   onDetail: (ev: TimelineEvent) => void
+  locale?: TimelineLocale
 }) {
+  const labels = locale === "en" ? TIMELINE_LABEL_EN : TIMELINE_LABEL
+  const actorLabels = locale === "en" ? TIMELINE_ACTOR_LABEL_EN : TIMELINE_ACTOR_LABEL
   return (
     <li className="flex gap-3">
       {/* Kolom penanda: dot + garis penghubung, keduanya rata tengah */}
@@ -181,7 +221,7 @@ function TimelineItem({
       <div className={padBottom ? "pb-4" : "pb-0"}>
         <div className="flex flex-wrap items-center gap-2">
           <Badge variant={TIMELINE_VARIANT[ev.type] ?? "default"}>
-            {TIMELINE_LABEL[ev.type] ?? ev.type}
+            {labels[ev.type] ?? ev.type}
           </Badge>
           {ev.room && <span className="text-sm text-gray-700">{ev.room}</span>}
           {ev.detail && (
@@ -190,7 +230,7 @@ function TimelineItem({
               onClick={() => onDetail(ev)}
               className="inline-flex items-center gap-1 rounded-md border border-[#075489]/30 px-2 py-0.5 text-xs font-medium text-[#075489] transition-colors hover:bg-[#075489]/10"
             >
-              <ListTree className="h-3.5 w-3.5" /> Detail
+              <ListTree className="h-3.5 w-3.5" /> {locale === "en" ? "Details" : "Detail"}
             </button>
           )}
         </div>
@@ -200,8 +240,8 @@ function TimelineItem({
             sudah ada di tabel Detail. */}
         {!PIPELINE_STAGES.has(ev.type) && (
           <p className="mt-0.5 text-xs text-gray-400">
-            {ev.actor && <>{TIMELINE_ACTOR_LABEL[ev.type] ?? ""} {ev.actor} · </>}
-            {formatDateTime(ev.created_at)}
+            {ev.actor && <>{actorLabels[ev.type] ?? ""} {ev.actor} · </>}
+            {formatDateTime(ev.created_at, locale)}
           </p>
         )}
       </div>
@@ -210,14 +250,22 @@ function TimelineItem({
 }
 
 // Kolom pencarian rincian Detail (filter baris tabel).
-function SearchBox({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+function SearchBox({
+  value,
+  onChange,
+  locale = "id",
+}: {
+  value: string
+  onChange: (v: string) => void
+  locale?: TimelineLocale
+}) {
   return (
     <div className="relative">
       <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
       <input
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        placeholder="Cari nama atau kode…"
+        placeholder={locale === "en" ? "Search name or code…" : "Cari nama atau kode…"}
         className="w-full rounded-lg border border-gray-300 bg-white py-1.5 pl-8 pr-3 text-sm text-gray-900 outline-none placeholder:text-gray-400 focus:border-[#075489] focus:ring-2 focus:ring-[#075489]/20"
       />
     </div>
@@ -226,7 +274,16 @@ function SearchBox({ value, onChange }: { value: string; onChange: (v: string) =
 
 // Tabel rincian tahap (di-lazy-load): tanggal | nomor batch | nama | jumlah.
 // `codeLabel` = judul kolom nomor (mis. "Nomor Produksi" / "Nomor Cleaning").
-function LazyItemsTable({ items, codeLabel }: { items: TimelineItemLine[]; codeLabel: string }) {
+function LazyItemsTable({
+  items,
+  codeLabel,
+  locale = "id",
+}: {
+  items: TimelineItemLine[]
+  codeLabel: string
+  locale?: TimelineLocale
+}) {
+  const en = locale === "en"
   const [q, setQ] = useState("")
   const query = q.trim().toLowerCase()
   const filtered = query
@@ -240,25 +297,27 @@ function LazyItemsTable({ items, codeLabel }: { items: TimelineItemLine[]; codeL
   const showPetugas = items.some((it) => it.petugas)
   return (
     <div className="space-y-2">
-      <SearchBox value={q} onChange={setQ} />
+      <SearchBox value={q} onChange={setQ} locale={locale} />
       {filtered.length === 0 ? (
-        <p className="py-6 text-center text-sm text-gray-400">Tidak ada rincian.</p>
+        <p className="py-6 text-center text-sm text-gray-400">
+          {en ? "No details." : "Tidak ada rincian."}
+        </p>
       ) : (
         <div className="overflow-x-auto">
           <table className="w-full border-collapse text-left text-sm">
             <thead>
               <tr className="border-b border-gray-200 text-[11px] font-semibold uppercase tracking-wide text-gray-400">
-                <th className="py-2 pr-3">Tanggal</th>
-                <th className="py-2 pr-3">No. Label</th>
+                <th className="py-2 pr-3">{en ? "Date" : "Tanggal"}</th>
+                <th className="py-2 pr-3">{en ? "Label No." : "No. Label"}</th>
                 <th className="py-2 pr-3">{codeLabel}</th>
-                <th className="py-2 pr-3">Nama</th>
-                {showPetugas && <th className="py-2">Nama Petugas</th>}
+                <th className="py-2 pr-3">{en ? "Name" : "Nama"}</th>
+                {showPetugas && <th className="py-2">{en ? "Officer" : "Nama Petugas"}</th>}
               </tr>
             </thead>
             <tbody>
               {filtered.map((it, i) => (
                 <tr key={i} className="border-b border-gray-100 last:border-0">
-                  <td className="whitespace-nowrap py-2 pr-3 text-gray-600">{formatDateTime(it.tanggal ?? null)}</td>
+                  <td className="whitespace-nowrap py-2 pr-3 text-gray-600">{formatDateTime(it.tanggal ?? null, locale)}</td>
                   <td className="whitespace-nowrap py-2 pr-3">
                     {it.barcode_no ? (
                       <span className="font-mono text-xs font-semibold text-[#4ba69d] bg-[#4ba69d]/10 px-1.5 py-0.5 rounded">
@@ -284,7 +343,14 @@ function LazyItemsTable({ items, codeLabel }: { items: TimelineItemLine[]; codeL
 }
 
 // Tabel rincian Detail packaging (lazy-load): tanggal | code | nama | nama petugas.
-function PackagingTable({ rows }: { rows: TimelinePackagingRow[] }) {
+function PackagingTable({
+  rows,
+  locale = "id",
+}: {
+  rows: TimelinePackagingRow[]
+  locale?: TimelineLocale
+}) {
+  const en = locale === "en"
   const [q, setQ] = useState("")
   const query = q.trim().toLowerCase()
   const filtered = query
@@ -292,24 +358,26 @@ function PackagingTable({ rows }: { rows: TimelinePackagingRow[] }) {
     : rows
   return (
     <div className="space-y-2">
-      <SearchBox value={q} onChange={setQ} />
+      <SearchBox value={q} onChange={setQ} locale={locale} />
       {filtered.length === 0 ? (
-        <p className="py-6 text-center text-sm text-gray-400">Tidak ada rincian.</p>
+        <p className="py-6 text-center text-sm text-gray-400">
+          {en ? "No details." : "Tidak ada rincian."}
+        </p>
       ) : (
         <div className="overflow-x-auto">
           <table className="w-full border-collapse text-left text-sm">
             <thead>
               <tr className="border-b border-gray-200 text-[11px] font-semibold uppercase tracking-wide text-gray-400">
-                <th className="py-2 pr-3">Tanggal</th>
+                <th className="py-2 pr-3">{en ? "Date" : "Tanggal"}</th>
                 <th className="py-2 pr-3">Code</th>
-                <th className="py-2 pr-3">Nama</th>
-                <th className="py-2">Nama Petugas</th>
+                <th className="py-2 pr-3">{en ? "Name" : "Nama"}</th>
+                <th className="py-2">{en ? "Officer" : "Nama Petugas"}</th>
               </tr>
             </thead>
             <tbody>
               {filtered.map((r, i) => (
                 <tr key={i} className="border-b border-gray-100 last:border-0">
-                  <td className="whitespace-nowrap py-2 pr-3 text-gray-600">{formatDateTime(r.tanggal ?? null)}</td>
+                  <td className="whitespace-nowrap py-2 pr-3 text-gray-600">{formatDateTime(r.tanggal ?? null, locale)}</td>
                   <td className="whitespace-nowrap py-2 pr-3 font-mono text-xs font-semibold text-[#075489]">{r.code}</td>
                   <td className="py-2 pr-3 text-gray-800">{r.name}</td>
                   <td className="py-2 text-gray-600">{r.petugas ?? "—"}</td>
@@ -326,11 +394,27 @@ function PackagingTable({ rows }: { rows: TimelinePackagingRow[] }) {
 // Riwayat Peminjaman: daftar event tracking order (dibuat → diterima → dipinjam →
 // dipindah antar unit → dikembalikan / dibatalkan) dalam bentuk garis waktu vertikal.
 // Endpoint + parameter lazy-load Detail per jenis tahap.
-const LAZY_DETAIL: Record<string, { endpoint: string; codeLabel: string }> = {
-  produksi: { endpoint: "/master/production/detail", codeLabel: "Nomor Produksi" },
-  cleaning: { endpoint: "/master/cleaning/detail", codeLabel: "Nomor Cleaning" },
-  packaging: { endpoint: "/master/packaging/barcode-detail", codeLabel: "Nomor Packaging" },
-  steril: { endpoint: "/master/sterilization-pipeline/detail", codeLabel: "Nomor Sterilisasi" },
+const LAZY_DETAIL: Record<string, { endpoint: string; codeLabel: string; codeLabelEn: string }> = {
+  produksi: {
+    endpoint: "/master/production/detail",
+    codeLabel: "Nomor Produksi",
+    codeLabelEn: "Production No.",
+  },
+  cleaning: {
+    endpoint: "/master/cleaning/detail",
+    codeLabel: "Nomor Cleaning",
+    codeLabelEn: "Cleaning No.",
+  },
+  packaging: {
+    endpoint: "/master/packaging/barcode-detail",
+    codeLabel: "Nomor Packaging",
+    codeLabelEn: "Packaging No.",
+  },
+  steril: {
+    endpoint: "/master/sterilization-pipeline/detail",
+    codeLabel: "Nomor Sterilisasi",
+    codeLabelEn: "Sterilization No.",
+  },
 }
 
 /**
@@ -342,9 +426,12 @@ export function OrderTimeline({
   events,
   orderId,
   scopeOrderId,
+  locale = "id",
 }: {
   events?: TimelineEvent[]
   orderId?: number
+  /** Bahasa teks timeline — halaman berbahasa Inggris mengirim "en". */
+  locale?: TimelineLocale
   /**
    * Order yang dipakai MENYARING rincian Detail tiap tahap — satu batch pipeline
    * bisa berisi unit milik order lain, dan yang ingin dilacak hanya instrumen order
@@ -352,6 +439,7 @@ export function OrderTimeline({
    */
   scopeOrderId?: number
 }) {
+  const en = locale === "en"
   const detailOrderId = scopeOrderId ?? orderId
   const [expanded, setExpanded] = useState(false)
   const [detailEv, setDetailEv] = useState<TimelineEvent | null>(null)
@@ -424,7 +512,7 @@ export function OrderTimeline({
         <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-400">Tracking</p>
         <div className="py-4 text-center text-xs text-gray-400">
           <Loader2 className="mx-auto h-4 w-4 animate-spin text-[#075489]" />
-          <p className="mt-1">Memuat tracking…</p>
+          <p className="mt-1">{en ? "Loading tracking…" : "Memuat tracking…"}</p>
         </div>
       </div>
     )
@@ -447,14 +535,21 @@ export function OrderTimeline({
       {collapsed ? (
         <>
           <ol>
-            <TimelineItem ev={latest} showConnector={false} padBottom={false} onDetail={setDetailEv} />
+            <TimelineItem
+              ev={latest}
+              showConnector={false}
+              padBottom={false}
+              onDetail={setDetailEv}
+              locale={locale}
+            />
           </ol>
           <button
             type="button"
             onClick={() => setExpanded(true)}
             className="ml-6 mt-2 inline-flex items-center gap-1 text-xs font-medium text-[#075489] hover:underline"
           >
-            <ChevronDown className="h-3.5 w-3.5" /> Tampilkan semua tracking ({hiddenCount})
+            <ChevronDown className="h-3.5 w-3.5" />{" "}
+            {en ? `Show all tracking (${hiddenCount})` : `Tampilkan semua tracking (${hiddenCount})`}
           </button>
         </>
       ) : (
@@ -467,6 +562,7 @@ export function OrderTimeline({
                 showConnector={i < data.length - 1}
                 padBottom={i < data.length - 1}
                 onDetail={setDetailEv}
+                locale={locale}
               />
             ))}
           </ol>
@@ -476,7 +572,7 @@ export function OrderTimeline({
               onClick={() => setExpanded(false)}
               className="ml-6 mt-1 inline-flex items-center gap-1 text-xs font-medium text-[#075489] hover:underline"
             >
-              <ChevronUp className="h-3.5 w-3.5" /> Sembunyikan
+              <ChevronUp className="h-3.5 w-3.5" /> {en ? "Hide" : "Sembunyikan"}
             </button>
           )}
         </>
@@ -485,11 +581,17 @@ export function OrderTimeline({
       <Modal
         open={detailEv !== null}
         onClose={() => setDetailEv(null)}
-        title={detailEv ? (TIMELINE_LABEL[detailEv.type] ?? "Detail") : "Detail"}
+        title={
+          detailEv
+            ? ((en ? TIMELINE_LABEL_EN : TIMELINE_LABEL)[detailEv.type] ?? (en ? "Details" : "Detail"))
+            : en
+              ? "Details"
+              : "Detail"
+        }
         size={lazyCfg ? "lg" : "sm"}
         footer={
           <Button variant="outline" onClick={() => setDetailEv(null)}>
-            Tutup
+            {en ? "Close" : "Tutup"}
           </Button>
         }
       >
@@ -497,12 +599,20 @@ export function OrderTimeline({
           (lazyLoading ? (
             <div className="py-8 text-center">
               <Loader2 className="mx-auto h-5 w-5 animate-spin text-[#075489]" />
-              <p className="mt-2 text-sm text-gray-400">Memuat rincian…</p>
+              <p className="mt-2 text-sm text-gray-400">
+                {en ? "Loading details…" : "Memuat rincian…"}
+              </p>
             </div>
           ) : isPackaging ? (
-            <PackagingTable rows={lazyData?.rows ?? []} />
+            <PackagingTable rows={lazyData?.rows ?? []} locale={locale} />
           ) : (
-            <LazyItemsTable items={lazyData?.items ?? []} codeLabel={lazyCfg?.codeLabel ?? "Nomor"} />
+            <LazyItemsTable
+              items={lazyData?.items ?? []}
+              codeLabel={
+                (en ? lazyCfg?.codeLabelEn : lazyCfg?.codeLabel) ?? (en ? "Number" : "Nomor")
+              }
+              locale={locale}
+            />
           ))}
       </Modal>
     </div>

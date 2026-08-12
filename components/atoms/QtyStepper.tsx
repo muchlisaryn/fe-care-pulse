@@ -25,7 +25,7 @@ export function QtyStepper({
         type="button"
         onClick={() => onChange(String(Math.max(min, current - 1)))}
         className="px-2.5 text-gray-500 transition-colors hover:bg-gray-50 hover:text-gray-800"
-        aria-label="Kurangi"
+        aria-label="Decrease"
       >
         <Minus className="h-4 w-4" />
       </button>
@@ -43,7 +43,7 @@ export function QtyStepper({
         type="button"
         onClick={() => onChange(String((value === "" ? min - 1 : current) + 1))}
         className="px-2.5 text-gray-500 transition-colors hover:bg-gray-50 hover:text-gray-800"
-        aria-label="Tambah"
+        aria-label="Increase"
       >
         <Plus className="h-4 w-4" />
       </button>

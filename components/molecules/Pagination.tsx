@@ -9,6 +9,9 @@ type PaginationProps = {
   totalItems: number
   itemsPerPage: number
   onPageChange: (page: number) => void
+  // Teks ringkasan "Menampilkan {from}–{to} dari {total} data" — dioper oleh
+  // halaman berbahasa Inggris menjadi "Showing {from}–{to} of {total} items".
+  labels?: { showing: string; of: string; items: string }
 }
 
 export function Pagination({
@@ -17,6 +20,7 @@ export function Pagination({
   totalItems,
   itemsPerPage,
   onPageChange,
+  labels = { showing: "Menampilkan", of: "dari", items: "data" },
 }: PaginationProps) {
   if (totalPages <= 1) return null
 
@@ -38,8 +42,8 @@ export function Pagination({
   return (
     <div className="flex items-center justify-between px-5 py-3 border-t border-gray-100">
       <p className="text-xs text-gray-500">
-        Menampilkan <span className="font-semibold text-gray-700">{from}–{to}</span> dari{" "}
-        <span className="font-semibold text-gray-700">{totalItems}</span> data
+        {labels.showing} <span className="font-semibold text-gray-700">{from}–{to}</span>{" "}
+        {labels.of} <span className="font-semibold text-gray-700">{totalItems}</span> {labels.items}
       </p>
 
       <div className="flex items-center gap-1">

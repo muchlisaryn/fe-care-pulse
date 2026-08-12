@@ -28,7 +28,7 @@ function formatDateTime(value: string | null) {
   if (!value) return "—"
   const d = new Date(value)
   if (Number.isNaN(d.getTime())) return value
-  return d.toLocaleString("id-ID", {
+  return d.toLocaleString("en-GB", {
     day: "2-digit",
     month: "short",
     year: "numeric",
@@ -42,7 +42,7 @@ function formatDate(value: string | null) {
   if (!value) return "—"
   const d = new Date(value)
   if (Number.isNaN(d.getTime())) return value
-  return d.toLocaleDateString("id-ID", {
+  return d.toLocaleDateString("en-GB", {
     day: "2-digit",
     month: "short",
     year: "numeric",
@@ -259,11 +259,11 @@ export function CleaningTab({
   async function saveWashing() {
     if (!active || saving) return
     if (!washReady) {
-      setError("Lengkapi Mesin Washer, Suhu, Waktu Mulai Cuci, Durasi, dan Jenis Deterjen.")
+      setError("Complete Washer Machine, Temperature, Wash Start Time, Duration, and Detergent Type.")
       return
     }
     if (tempBelowStd || durationBelowStd) {
-      setError("Suhu / durasi di bawah standar mesin washer terpilih. Sesuaikan dulu.")
+      setError("Temperature / duration is below the selected washer machine standard. Adjust it first.")
       return
     }
     setSaving(true)
@@ -273,15 +273,15 @@ export function CleaningTab({
       const w = res.data?.data?.washing as { alert?: boolean; alert_message?: string | null } | undefined
       onChanged()
       if (w?.alert) {
-        setAlertMsg(w.alert_message ?? "Parameter pencucian di luar ambang mesin.")
-        toast.error(w.alert_message ?? "Parameter pencucian di luar ambang mesin.")
+        setAlertMsg(w.alert_message ?? "Washing parameters are outside the machine thresholds.")
+        toast.error(w.alert_message ?? "Washing parameters are outside the machine thresholds.")
       } else {
-        toast.success(res.data?.message ?? "Catatan pencucian berhasil disimpan.")
+        toast.success(res.data?.message ?? "Washing record saved.")
         setActive(null)
       }
     } catch (err) {
       const e = err as { response?: { data?: { message?: string } } }
-      const msg = e.response?.data?.message ?? "Gagal menyimpan catatan pencucian."
+      const msg = e.response?.data?.message ?? "Failed to save the washing record."
       setError(msg)
       toast.error(msg)
     } finally {
@@ -293,7 +293,7 @@ export function CleaningTab({
   async function failWashing() {
     if (!active || failing) return
     if (!failReason.trim()) {
-      setError("Isi alasan kegagalan terlebih dahulu.")
+      setError("Enter the failure reason first.")
       return
     }
     setFailing(true)
@@ -309,10 +309,10 @@ export function CleaningTab({
       setFailMode(false)
       setFailReason("")
       onChanged()
-      toast.success(res.data?.message ?? "Pencucian ditandai gagal.")
+      toast.success(res.data?.message ?? "Washing marked as failed.")
     } catch (err) {
       const e = err as { response?: { data?: { message?: string } } }
-      const msg = e.response?.data?.message ?? "Gagal menandai pencucian gagal."
+      const msg = e.response?.data?.message ?? "Failed to mark the washing as failed."
       setError(msg)
       toast.error(msg)
     } finally {
@@ -332,7 +332,7 @@ export function CleaningTab({
   async function completeWashing() {
     if (!confirmTarget || completingId) return
     if (!completedAt) {
-      setConfirmError("Tentukan tanggal & jam selesai cleaning.")
+      setConfirmError("Set the cleaning completion date & time.")
       return
     }
     setCompletingId(confirmTarget.id)
@@ -344,10 +344,10 @@ export function CleaningTab({
       })
       setConfirmTarget(null)
       onChanged()
-      toast.success(res.data?.message ?? "Cleaning & disinfection selesai.")
+      toast.success(res.data?.message ?? "Cleaning & disinfection completed.")
     } catch (err) {
       const e = err as { response?: { data?: { message?: string } } }
-      const msg = e.response?.data?.message ?? "Gagal menyelesaikan cleaning."
+      const msg = e.response?.data?.message ?? "Failed to complete the cleaning."
       setConfirmError(msg)
       toast.error(msg)
     } finally {
@@ -363,10 +363,10 @@ export function CleaningTab({
       const res = await api.delete(`/master/cleaning/${cancelTarget.id}/cancel`)
       setCancelTarget(null)
       onChanged()
-      toast.success(res.data?.message ?? "Pencucian dibatalkan & stok dikembalikan.")
+      toast.success(res.data?.message ?? "Washing canceled & stock returned.")
     } catch (err) {
       const e = err as { response?: { data?: { message?: string } } }
-      toast.error(e.response?.data?.message ?? "Gagal membatalkan pencucian.")
+      toast.error(e.response?.data?.message ?? "Failed to cancel the washing.")
     } finally {
       setCancelling(false)
     }
@@ -418,20 +418,20 @@ export function CleaningTab({
       <Modal
         open={active !== null}
         onClose={() => setActive(null)}
-        title="Catatan Pencucian"
+        title="Washing Record"
         size="lg"
         footer={
           <div className="flex w-full flex-col items-stretch gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
             {error ? (
               <p className="text-sm text-red-600">{error}</p>
             ) : canceledActive ? (
-              <span className="text-xs text-gray-400">Batch dibatalkan.</span>
+              <span className="text-xs text-gray-400">Batch canceled.</span>
             ) : washedActive ? (
-              <span className="text-xs text-gray-400">Pencucian selesai.</span>
+              <span className="text-xs text-gray-400">Washing completed.</span>
             ) : null}
             <div className="flex shrink-0 justify-end gap-2 sm:ml-auto">
               <Button variant="outline" onClick={() => setActive(null)}>
-                Tutup
+                Close
               </Button>
               {!washedActive && !canceledActive && (
                 <Button
@@ -439,7 +439,7 @@ export function CleaningTab({
                   disabled={saving || !washReady || tempBelowStd || durationBelowStd}
                   className="bg-[#075489] hover:bg-[#075489]/90 text-white"
                 >
-                  {saving ? "Menyimpan..." : "Simpan"}
+                  {saving ? "Saving..." : "Save"}
                 </Button>
               )}
             </div>
@@ -452,9 +452,9 @@ export function CleaningTab({
               <div className="flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 px-4 py-3">
                 <XCircle className="mt-0.5 h-5 w-5 shrink-0 text-red-500" />
                 <div>
-                  <p className="text-sm font-semibold text-red-700">Batch dibatalkan</p>
+                  <p className="text-sm font-semibold text-red-700">Batch canceled</p>
                   <p className="text-xs text-red-600/90">
-                    Seluruh unit sudah dikembalikan ke stok semula. Batch ini tersimpan sebagai riwayat.
+                    All units have been returned to their original stock. This batch is kept as history.
                   </p>
                 </div>
               </div>
@@ -467,12 +467,12 @@ export function CleaningTab({
                 <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-amber-500" />
                 <div>
                   <p className="text-sm font-semibold text-amber-700">
-                    Notifikasi kegagalan suhu/waktu
+                    Temperature/time failure alert
                   </p>
                   <p className="text-xs text-amber-700/90">{alertMsg}</p>
                   <p className="mt-1 text-xs text-amber-600">
-                    Pencucian belum bisa diselesaikan. Perbaiki parameter lalu Simpan ulang, atau
-                    Tandai Gagal.
+                    Washing cannot be completed yet. Fix the parameters and save again, or mark
+                    it as failed.
                   </p>
                 </div>
               </div>
@@ -481,27 +481,29 @@ export function CleaningTab({
             {!washedActive && !canceledActive && (
               <div className="space-y-1.5">
                 <Label>
-                  Mesin Washer <span className="text-red-500">*</span>
+                  Washer Machine <span className="text-red-500">*</span>
                 </Label>
                 <SelectSearch
                   options={machines.map((m) => ({ value: String(m.id), label: m.name }))}
                   value={washerMachineId ? String(washerMachineId) : ""}
                   onChange={selectMachine}
                   loading={machinesLoading}
-                  placeholder="Pilih mesin washer..."
-                  searchPlaceholder="Cari nama mesin..."
+                  placeholder="Select washer machine..."
+                  searchPlaceholder="Search machine name..."
+                  loadingText="Loading options..."
+                  emptyText="Not found."
                 />
                 {activeMachine && (
                   <div className="flex flex-wrap items-center gap-2 rounded-lg border border-[#075489]/30 bg-[#075489]/5 px-3 py-2 text-xs">
                     <span className="font-medium text-gray-800">{activeMachine.name}</span>
                     {stdText(activeMachine.temperature, "°C") && (
                       <span className="text-gray-500">
-                        Suhu standar {stdText(activeMachine.temperature, "°C")}
+                        Standard temperature {stdText(activeMachine.temperature, "°C")}
                       </span>
                     )}
-                    {stdText(activeMachine.duration_minutes, " mnt") && (
+                    {stdText(activeMachine.duration_minutes, " min") && (
                       <span className="text-gray-500">
-                        Durasi standar {stdText(activeMachine.duration_minutes, " mnt")}
+                        Standard duration {stdText(activeMachine.duration_minutes, " min")}
                       </span>
                     )}
                   </div>
@@ -517,14 +519,14 @@ export function CleaningTab({
             <div className="grid grid-cols-1 items-start gap-4 sm:grid-cols-2">
               <div className="space-y-1.5">
                 <Label htmlFor="wash-temp">
-                  Suhu (°C) <span className="text-red-500">*</span>
+                  Temperature (°C) <span className="text-red-500">*</span>
                 </Label>
                 <Input
                   id="wash-temp"
                   type="number"
                   value={temperature}
                   onChange={(e) => setTemperature(e.target.value)}
-                  placeholder="mis. 60"
+                  placeholder="e.g. 60"
                   disabled={washedActive}
                   min={activeMachine?.temperature ?? undefined}
                   error={tempBelowStd}
@@ -532,13 +534,13 @@ export function CleaningTab({
                 />
                 {activeMachine && stdText(activeMachine.temperature, "°C") && tempBelowStd && (
                   <p className="text-xs text-red-600">
-                    Di bawah standar mesin ({stdText(activeMachine.temperature, "°C")}).
+                    Below the machine standard ({stdText(activeMachine.temperature, "°C")}).
                   </p>
                 )}
               </div>
               <div className="space-y-1.5">
                 <Label htmlFor="wash-duration">
-                  Durasi (menit) <span className="text-red-500">*</span>
+                  Duration (minutes) <span className="text-red-500">*</span>
                 </Label>
                 <Input
                   id="wash-duration"
@@ -546,20 +548,20 @@ export function CleaningTab({
                   min={activeMachine?.duration_minutes ?? 0}
                   value={duration}
                   onChange={(e) => setDuration(e.target.value)}
-                  placeholder="mis. 20"
+                  placeholder="e.g. 20"
                   disabled={washedActive}
                   error={durationBelowStd}
                   aria-invalid={durationBelowStd}
                 />
-                {activeMachine && stdText(activeMachine.duration_minutes, " mnt") && durationBelowStd && (
+                {activeMachine && stdText(activeMachine.duration_minutes, " min") && durationBelowStd && (
                   <p className="text-xs text-red-600">
-                    Di bawah standar mesin ({stdText(activeMachine.duration_minutes, " mnt")}).
+                    Below the machine standard ({stdText(activeMachine.duration_minutes, " min")}).
                   </p>
                 )}
               </div>
               <div className="space-y-1.5">
                 <Label htmlFor="wash-time">
-                  Waktu Mulai Cuci <span className="text-red-500">*</span>
+                  Wash Start Time <span className="text-red-500">*</span>
                 </Label>
                 <Input
                   id="wash-time"
@@ -571,13 +573,13 @@ export function CleaningTab({
               </div>
               <div className="space-y-1.5">
                 <Label htmlFor="wash-detergent">
-                  Jenis Deterjen / Enzimatis <span className="text-red-500">*</span>
+                  Detergent / Enzymatic Type <span className="text-red-500">*</span>
                 </Label>
                 <Input
                   id="wash-detergent"
                   value={detergent}
                   onChange={(e) => setDetergent(e.target.value)}
-                  placeholder="mis. Enzimatik, Deterjen Netral"
+                  placeholder="e.g. Enzymatic, Neutral Detergent"
                   disabled={washedActive}
                 />
               </div>
@@ -590,13 +592,13 @@ export function CleaningTab({
               (failMode ? (
                 <div className="space-y-2 rounded-lg border border-red-200 bg-red-50 px-4 py-3">
                   <Label htmlFor="fail-reason" className="text-red-700">
-                    Alasan Kegagalan Pencucian
+                    Washing Failure Reason
                   </Label>
                   <Textarea
                     id="fail-reason"
                     value={failReason}
                     onChange={(e) => setFailReason(e.target.value)}
-                    placeholder="mis. Suhu tidak tercapai, indikator kotor masih tersisa"
+                    placeholder="e.g. Temperature not reached, soil indicator still present"
                   />
                   <div className="flex justify-end gap-2">
                     <Button
@@ -607,14 +609,14 @@ export function CleaningTab({
                       }}
                       disabled={failing}
                     >
-                      Batal
+                      Cancel
                     </Button>
                     <Button
                       onClick={failWashing}
                       disabled={failing || !failReason.trim()}
                       className="bg-red-600 hover:bg-red-700 text-white"
                     >
-                      {failing ? "Memproses..." : "Konfirmasi Gagal"}
+                      {failing ? "Processing..." : "Confirm Failure"}
                     </Button>
                   </div>
                 </div>
@@ -625,7 +627,7 @@ export function CleaningTab({
                   className="inline-flex items-center gap-1.5 rounded-lg border border-red-300 bg-red-50 px-3 py-2 text-sm font-medium text-red-600 transition-colors hover:bg-red-100"
                 >
                   <XCircle className="h-4 w-4" />
-                  Tandai Pencucian Gagal
+                  Mark Washing as Failed
                 </button>
               ))}
 
@@ -633,9 +635,9 @@ export function CleaningTab({
               <div className="flex items-start gap-3 rounded-lg border border-dashed border-gray-300 bg-gray-50 px-4 py-3">
                 <Package className="mt-0.5 h-5 w-5 shrink-0 text-gray-400" />
                 <div>
-                  <p className="text-sm font-medium text-gray-700">Tahap Pengemasan</p>
+                  <p className="text-sm font-medium text-gray-700">Packaging Stage</p>
                   <p className="text-xs text-gray-500">
-                    Pencucian selesai. Tahap pengemasan akan tersedia berikutnya.
+                    Washing completed. The packaging stage will be available next.
                   </p>
                 </div>
               </div>
@@ -648,14 +650,14 @@ export function CleaningTab({
       <Modal
         open={confirmTarget !== null}
         onClose={completingId ? () => {} : () => setConfirmTarget(null)}
-        title="Selesaikan Cleaning & Disinfection"
+        title="Complete Cleaning & Disinfection"
         size="sm"
         footer={
           <div className="flex w-full flex-col items-stretch gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
             {confirmError ? (
               <p className="text-sm text-red-600">{confirmError}</p>
             ) : (
-              <span className="text-xs text-gray-400">Order akan lanjut ke Inspection &amp; Packaging.</span>
+              <span className="text-xs text-gray-400">The order will continue to Inspection &amp; Packaging.</span>
             )}
             <div className="flex shrink-0 justify-end gap-2">
               <Button
@@ -663,14 +665,14 @@ export function CleaningTab({
                 onClick={() => setConfirmTarget(null)}
                 disabled={completingId !== null}
               >
-                Batal
+                Cancel
               </Button>
               <Button
                 onClick={completeWashing}
                 disabled={completingId !== null}
                 className="bg-[#075489] hover:bg-[#075489]/90 text-white"
               >
-                {completingId !== null ? "Menyelesaikan..." : "Selesaikan"}
+                {completingId !== null ? "Completing..." : "Complete"}
               </Button>
             </div>
           </div>
@@ -683,15 +685,15 @@ export function CleaningTab({
                 <CheckCircle2 className="h-5 w-5 text-[#075489]" />
               </div>
               <p className="pt-1.5 text-sm leading-relaxed text-gray-600">
-                Pastikan proses cleaning &amp; disinfection untuk{" "}
+                Make sure the cleaning &amp; disinfection process for{" "}
                 <span className="font-semibold text-gray-900">
                   {confirmTarget.code_transaction ?? confirmTarget.code}
                 </span>{" "}
-                sudah selesai.
+                is complete.
               </p>
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="complete-time">Waktu Selesai Cleaning</Label>
+              <Label htmlFor="complete-time">Cleaning Completion Time</Label>
               <Input
                 id="complete-time"
                 type="datetime-local"
@@ -701,7 +703,7 @@ export function CleaningTab({
                 className="cursor-not-allowed bg-gray-50"
               />
               <p className="text-xs text-gray-400">
-                Tercatat otomatis sesuai waktu saat ini &mdash; tidak dapat diubah.
+                Recorded automatically from the current time &mdash; cannot be changed.
               </p>
             </div>
           </div>
@@ -714,12 +716,13 @@ export function CleaningTab({
         onClose={() => setCancelTarget(null)}
         onConfirm={cancelWashing}
         loading={cancelling}
-        title="Batalkan Pencucian"
-        confirmLabel="Batalkan"
-        loadingLabel="Membatalkan..."
+        title="Cancel Washing"
+        confirmLabel="Cancel Batch"
+        loadingLabel="Canceling..."
+        cancelLabel="Back"
         description={
           cancelTarget
-            ? `Batalkan batch ${cancelTarget.code_transaction ?? cancelTarget.code}? Seluruh unit akan dikembalikan ke stok semula (tersedia).`
+            ? `Cancel batch ${cancelTarget.code_transaction ?? cancelTarget.code}? All units will be returned to their original stock (available).`
             : undefined
         }
       />
@@ -792,7 +795,7 @@ function groupUnits(units: CleaningUnit[]): UnitGroup[] {
 
   for (const u of units) {
     const isPaket = u.source === "paket"
-    const name = (isPaket ? u.package_name : u.name) ?? "Instrumen"
+    const name = (isPaket ? u.package_name : u.name) ?? "Instrument"
     const key = `${isPaket ? "paket" : "satuan"}|${name}`
 
     // Satu kolom foto: sudah berisi foto paket / foto instrumen sesuai jenis baris.
@@ -816,7 +819,7 @@ function groupUnits(units: CleaningUnit[]): UnitGroup[] {
     if (isPaket) g.packageNos.add(String(u.package_no ?? ""))
 
     if (isPaket) {
-      const itemName = u.name ?? "Instrumen"
+      const itemName = u.name ?? "Instrument"
       let b = g.breakdown.find((x) => x.name === itemName)
       if (!b) {
         b = { name: itemName, codes: [] }
@@ -834,7 +837,7 @@ function paketBreakdown(order: CleaningOrder, packageName: string) {
   const map = new Map<string, { name: string; qty: number }>()
   for (const u of order.units ?? []) {
     if (u.source !== "paket" || u.package_name !== packageName) continue
-    const name = u.name ?? "Instrumen"
+    const name = u.name ?? "Instrument"
     const cur = map.get(name) ?? { name, qty: 0 }
     cur.qty += 1
     map.set(name, cur)
@@ -891,18 +894,18 @@ function CleaningOrderCard({
               {/* Baris 1: status | kode produksi | tanggal produksi. */}
               <div className="flex flex-wrap items-center gap-2">
                 {washed ? (
-                  <Badge variant="success">Selesai Cuci</Badge>
+                  <Badge variant="success">Wash Complete</Badge>
                 ) : canceled ? (
-                  <Badge variant="default">Dibatalkan</Badge>
+                  <Badge variant="default">Canceled</Badge>
                 ) : order.washing?.status === "gagal" ? (
-                  <Badge variant="danger">Gagal Cuci</Badge>
+                  <Badge variant="danger">Wash Failed</Badge>
                 ) : inProcess ? (
-                  <Badge variant="info">Diproses</Badge>
+                  <Badge variant="info">In Process</Badge>
                 ) : (
-                  <Badge variant="warning">Belum Diproses</Badge>
+                  <Badge variant="warning">Not Processed</Badge>
                 )}
                 {!washed && !canceled && order.washing?.alert && (
-                  <Badge variant="warning">Cek Parameter</Badge>
+                  <Badge variant="warning">Check Parameters</Badge>
                 )}
                 <span className="font-mono text-xs font-semibold text-[#075489] bg-[#075489]/8 px-2 py-0.5 rounded">
                   {order.code_transaction ?? order.code}
@@ -931,7 +934,7 @@ function CleaningOrderCard({
                               }
                             : undefined
                         }
-                        title={isPaket ? "Lihat isi set" : `${it.name} ×${it.quantity}`}
+                        title={isPaket ? "View set contents" : `${it.name} ×${it.quantity}`}
                         className={
                           "inline-flex max-w-[200px] items-center gap-1 rounded-md px-1.5 py-0.5 text-xs ring-1 " +
                           (isPaket
@@ -957,7 +960,7 @@ function CleaningOrderCard({
                   })}
                   {order.items.length > 4 && (
                     <span className="rounded-md bg-[#075489]/8 px-1.5 py-0.5 text-xs font-medium text-[#075489]">
-                      +{order.items.length - 4} lainnya
+                      +{order.items.length - 4} more
                     </span>
                   )}
                 </div>
@@ -970,7 +973,7 @@ function CleaningOrderCard({
               {/* Mesin cuci: nama mesin + tanggal & jam mulai cuci (di bawah nama instrumen). */}
               {!compact && order.washing?.washer_machine?.name && (
                 <p className="mt-2.5 text-xs text-gray-500">
-                  Diproses mesin:{" "}
+                  Processed by machine:{" "}
                   <span className="font-medium text-gray-700">
                     {order.washing.washer_machine.name}
                   </span>
@@ -984,7 +987,7 @@ function CleaningOrderCard({
                   onClick={(e) => e.stopPropagation()}
                   className="mt-1.5 rounded-md border border-gray-100 bg-gray-50 px-2 py-1.5"
                 >
-                  <p className="mb-1 text-[11px] font-semibold text-gray-500">Isi {openPaket}:</p>
+                  <p className="mb-1 text-[11px] font-semibold text-gray-500">{openPaket} contents:</p>
                   <div className="flex flex-wrap gap-1.5">
                     {paketBreakdown(order, openPaket).map((p) => (
                       <span
@@ -998,7 +1001,7 @@ function CleaningOrderCard({
                               e.stopPropagation()
                               setZoom({ url: imageByName[p.name], name: p.name })
                             }}
-                            title="Klik untuk perbesar"
+                            title="Click to enlarge"
                             className="group relative h-7 w-7 shrink-0 cursor-zoom-in overflow-hidden rounded-md border border-gray-200"
                           >
                             {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -1027,7 +1030,7 @@ function CleaningOrderCard({
               {/* Catatan (opsional) dari tahap Mulai Produksi. */}
               {!compact && order.note && (
                 <p className="mt-1.5 text-xs text-gray-500">
-                  <span className="font-medium text-gray-600">Catatan:</span> {order.note}
+                  <span className="font-medium text-gray-600">Note:</span> {order.note}
                 </p>
               )}
 
@@ -1035,7 +1038,7 @@ function CleaningOrderCard({
                   di sini cukup tampilkan waktu selesai cuci saat batch sudah selesai. */}
               {!canceled && washed && (
                 <div className="mt-1 flex flex-wrap gap-x-4 gap-y-0.5 text-xs text-gray-500">
-                  <span>Selesai cuci: {formatDateTime(order.washing?.completed_at ?? null)}</span>
+                  <span>Wash completed: {formatDateTime(order.washing?.completed_at ?? null)}</span>
                 </div>
               )}
             </div>
@@ -1050,7 +1053,7 @@ function CleaningOrderCard({
                 disabled={completing}
                 className="rounded-md border border-[#075489] bg-[#075489] px-2 py-1 text-xs font-medium text-white hover:bg-[#075489]/90 disabled:opacity-60"
               >
-                {completing ? "Memproses..." : "Selesai"}
+                {completing ? "Processing..." : "Complete"}
               </button>
             ) : (
               <>
@@ -1061,7 +1064,7 @@ function CleaningOrderCard({
                     onClick={onCancel}
                     className="rounded-md border border-red-300 px-2 py-1 text-xs font-medium text-red-600 hover:bg-red-50"
                   >
-                    Batal
+                    Cancel
                   </button>
                 )}
                 <button
@@ -1069,7 +1072,7 @@ function CleaningOrderCard({
                   onClick={onOpen}
                   className="rounded-md border border-[#075489] px-2 py-1 text-xs font-medium text-[#075489] hover:bg-[#075489]/10"
                 >
-                  Proses
+                  Process
                 </button>
               </>
             )
@@ -1089,7 +1092,7 @@ function CleaningOrderCard({
             type="button"
             onClick={() => setZoom(null)}
             className="absolute right-4 top-4 rounded-full bg-white/10 p-2 text-white hover:bg-white/20"
-            title="Tutup"
+            title="Close"
           >
             <X className="h-5 w-5" />
           </button>
@@ -1140,7 +1143,7 @@ function InstrumentList({
         >
           <span className="flex items-center gap-1.5">
             <ListChecks className="h-4 w-4" />
-            Daftar Instrumen
+            Instrument List
           </span>
           <ChevronDown
             className={"h-4 w-4 transition-transform " + (open ? "rotate-180" : "")}
@@ -1149,7 +1152,7 @@ function InstrumentList({
       ) : (
         <p className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-gray-400">
           <ListChecks className="h-4 w-4" />
-          Daftar Instrumen
+          Instrument List
         </p>
       )}
 
@@ -1163,7 +1166,7 @@ function InstrumentList({
                     <button
                       type="button"
                       onClick={() => setZoom({ url: g.image as string, name: g.name })}
-                      title="Klik untuk perbesar"
+                      title="Click to enlarge"
                       className="group relative h-8 w-8 shrink-0 cursor-zoom-in overflow-hidden rounded-md border border-gray-200"
                     >
                       {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -1176,7 +1179,7 @@ function InstrumentList({
                     <Package className="h-4 w-4 shrink-0 text-[#075489]" />
                   )}
                   <span className="truncate text-sm font-medium text-gray-800">{g.name}</span>
-                  {g.kind === "paket" && <Badge variant="info">Paket</Badge>}
+                  {g.kind === "paket" && <Badge variant="info">Package</Badge>}
                 </span>
                 {/* Kuantitas: satuan = jumlah unit, paket = jumlah SET (bukan jumlah
                     instrumen di dalamnya). Pada satuan, kode unit muncul saat di-hover. */}
@@ -1214,7 +1217,7 @@ function InstrumentList({
             <li key={`${it.name}-${i}`} className="flex items-center justify-between gap-2 px-3 py-2">
               <span className="flex items-center gap-2 text-sm text-gray-800">
                 {it.name}
-                {it.type === "paket" && <Badge variant="info">Paket</Badge>}
+                {it.type === "paket" && <Badge variant="info">Package</Badge>}
               </span>
               <span className="text-xs text-gray-400">{it.quantity} unit</span>
             </li>
@@ -1222,7 +1225,7 @@ function InstrumentList({
         </ul>
       ) : (
         <p className="rounded-lg border border-dashed border-gray-200 px-3 py-2 text-xs text-gray-400">
-          Belum ada rincian instrumen.
+          No instrument details yet.
         </p>
       )}
 
@@ -1238,7 +1241,7 @@ function InstrumentList({
             type="button"
             onClick={() => setZoom(null)}
             className="absolute right-4 top-4 rounded-full bg-white/10 p-2 text-white hover:bg-white/20"
-            title="Tutup"
+            title="Close"
           >
             <X className="h-5 w-5" />
           </button>

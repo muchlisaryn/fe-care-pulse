@@ -54,7 +54,7 @@ export default function KedaluwarsaPage() {
 
   const columns: Column<SterileExpiryBatch>[] = [
     {
-      header: "Kode Batch",
+      header: "Batch Code",
       cell: (b) =>
         b.code ? (
           <span className="font-mono text-xs font-semibold text-[#075489] bg-[#075489]/8 px-2 py-1 rounded">
@@ -66,7 +66,7 @@ export default function KedaluwarsaPage() {
       className: "w-28",
     },
     {
-      header: "Mesin",
+      header: "Machine",
       cell: (b) =>
         b.machine ? (
           <span className="text-gray-700">{b.machine}</span>
@@ -75,7 +75,7 @@ export default function KedaluwarsaPage() {
         ),
     },
     {
-      header: "Rak",
+      header: "Rack",
       cell: (b) =>
         b.racks.length ? (
           <span className="flex flex-wrap gap-1">
@@ -99,14 +99,14 @@ export default function KedaluwarsaPage() {
        * 1 (bukan per instrumen di dalamnya) dan satu instrumen satuan dihitung 1.
        * Rinciannya ("2 set · 3 satuan") ditulis di bawah angkanya.
        */
-      header: "Jumlah Unit",
+      header: "Unit Count",
       cell: (b) => (
         <div className="leading-tight">
           <span className="font-semibold text-gray-900">
-            {b.item_count} <span className="text-xs font-normal text-gray-400">unit</span>
+            {b.item_count} <span className="text-xs font-normal text-gray-400">units</span>
           </span>
           <div className="mt-0.5 text-xs text-gray-400">
-            {[b.set_count > 0 ? `${b.set_count} set` : null, b.unit_count > 0 ? `${b.unit_count} satuan` : null]
+            {[b.set_count > 0 ? `${b.set_count} sets` : null, b.unit_count > 0 ? `${b.unit_count} singles` : null]
               .filter(Boolean)
               .join(" · ") || "—"}
           </div>
@@ -115,26 +115,27 @@ export default function KedaluwarsaPage() {
       className: "w-32",
     },
     {
-      header: "Kedaluwarsa",
+      header: "Expiry",
       cell: (b) => (
         <ExpiryCard
           date={b.expiry_date}
           daysToExpiry={b.days_to_expiry}
           expired={b.expired}
           alert={b.alert}
+          locale="en"
         />
       ),
     },
     {
-      header: "Sisa",
+      header: "Remaining",
       cell: (b) => {
         if (b.days_to_expiry === null) return <span className="text-gray-400 text-xs">—</span>
         return b.days_to_expiry < 0 ? (
-          <Badge variant="danger">Lewat {Math.abs(b.days_to_expiry)} hari</Badge>
+          <Badge variant="danger">{Math.abs(b.days_to_expiry)} days overdue</Badge>
         ) : b.days_to_expiry === 0 ? (
-          <Badge variant="danger">Hari ini</Badge>
+          <Badge variant="danger">Today</Badge>
         ) : (
-          <Badge variant="warning">{b.days_to_expiry} hari lagi</Badge>
+          <Badge variant="warning">{b.days_to_expiry} days left</Badge>
         )
       },
       className: "w-32",
@@ -144,17 +145,17 @@ export default function KedaluwarsaPage() {
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Alat Kedaluwarsa Steril"
-        subtitle="Batch steril di gudang yang masa sterilnya sudah atau akan habis"
+        title="Sterile Expiry"
+        subtitle="Sterile batches in storage whose sterile period has expired or is about to"
       />
 
       {/* Angka dari server (seluruh data), bukan dari baris halaman yang sedang tampil.
           Instrumen dihitung dengan aturan set = 1 & satuan = 1, sama dengan Storage Steril. */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <StatCard title="Total Batch" value={`${summary.batches}`} icon={Boxes} />
-        <StatCard title="Total Unit" value={`${summary.items}`} icon={CalendarClock} />
-        <StatCard title="Sudah Kedaluwarsa" value={`${summary.expired}`} icon={AlertTriangle} positive={false} />
-        <StatCard title="Akan Kedaluwarsa" value={`${summary.alert}`} icon={Clock} positive={false} />
+        <StatCard title="Total Batches" value={`${summary.batches}`} icon={Boxes} />
+        <StatCard title="Total Units" value={`${summary.items}`} icon={CalendarClock} />
+        <StatCard title="Already Expired" value={`${summary.expired}`} icon={AlertTriangle} positive={false} />
+        <StatCard title="Expiring Soon" value={`${summary.alert}`} icon={Clock} positive={false} />
       </div>
 
       <Card className="p-0">
@@ -163,20 +164,20 @@ export default function KedaluwarsaPage() {
             <div className="relative flex-1">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 pointer-events-none" />
               <Input
-                placeholder="Cari kode batch, mesin, instrumen, rak, atau nomor label..."
+                placeholder="Search batch code, machine, instrument, rack, or label number..."
                 value={searchInput}
                 onChange={(e) => setSearchInput(e.target.value)}
                 className="pl-9"
               />
             </div>
             <Button type="submit" className="bg-[#075489] hover:bg-[#075489]/90 text-white shrink-0">
-              Cari
+              Search
             </Button>
           </form>
 
           <form onSubmit={applyDays} className="space-y-1.5">
             <label className="block text-xs font-semibold uppercase tracking-wide text-gray-400">
-              Ambang (hari ke depan)
+              Threshold (days ahead)
             </label>
             <div className="flex items-center gap-2">
               <Input
@@ -187,23 +188,23 @@ export default function KedaluwarsaPage() {
                 className="w-28"
               />
               <Button type="submit" className="bg-[#075489] hover:bg-[#075489]/90 text-white">
-                Terapkan
+                Apply
               </Button>
             </div>
             <p className="flex items-center gap-1.5 text-xs text-gray-400">
               <Clock className="h-3.5 w-3.5 shrink-0" />
-              Menampilkan batch yang kedaluwarsa ≤ {days} hari ke depan (termasuk yang sudah lewat).
+              Showing batches expiring within {days} days (including those already past).
             </p>
           </form>
         </div>
 
         {loading ? (
-          <div className="py-16 text-center text-sm text-gray-400">Memuat data...</div>
+          <div className="py-16 text-center text-sm text-gray-400">Loading data...</div>
         ) : (
           <DataTable
             columns={columns}
             data={items}
-            emptyMessage="Tidak ada batch yang mendekati kedaluwarsa."
+            emptyMessage="No batch is approaching expiry."
             rowNumberOffset={(page - 1) * ITEMS_PER_PAGE}
           />
         )}
@@ -214,6 +215,7 @@ export default function KedaluwarsaPage() {
           totalItems={total}
           itemsPerPage={ITEMS_PER_PAGE}
           onPageChange={changePage}
+          labels={{ showing: "Showing", of: "of", items: "items" }}
         />
       </Card>
     </div>

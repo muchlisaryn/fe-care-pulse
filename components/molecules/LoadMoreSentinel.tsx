@@ -27,11 +27,11 @@ export function LoadMoreSentinel({ ref, hasMore, loading, onLoadMore }: LoadMore
       {loading ? (
         <span className="inline-flex items-center gap-2 text-sm text-gray-400">
           <Loader2 className="h-4 w-4 animate-spin" />
-          Memuat data...
+          Loading data...
         </span>
       ) : (
         <Button type="button" variant="outline" onClick={onLoadMore}>
-          Muat lebih banyak
+          Load more
         </Button>
       )}
     </div>

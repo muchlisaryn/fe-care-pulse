@@ -48,7 +48,7 @@ type ProduksiLine = {
 
 function errMsg(e: unknown): string {
   const x = e as { response?: { data?: { message?: string } } }
-  return x.response?.data?.message ?? "Terjadi kesalahan."
+  return x.response?.data?.message ?? "Something went wrong."
 }
 
 // Date lokal → "YYYY-MM-DD" untuk <input type="date">.
@@ -291,7 +291,7 @@ function ProduksiCssdPage() {
     setScanInput(code)
 
     if (scannedCodes.includes(code)) {
-      toast.error(`Label "${code}" sudah tercentang.`)
+      toast.error(`Label "${code}" is already selected.`)
       return
     }
 
@@ -303,8 +303,8 @@ function ProduksiCssdPage() {
       const index = sterActive.findIndex((o) => o.barcode_no === code)
       if (index < 0) {
         setScanAlert({
-          title: "Label di luar daftar",
-          message: `Label "${code}" valid, tetapi tidak ada di daftar yang sedang ditampilkan. Periksa rentang tanggal atau sub-tab yang aktif, lalu pindai ulang.`,
+          title: "Label Not in List",
+          message: `Label "${code}" is valid, but it is not in the list currently shown. Check the date range or the active sub-tab, then scan again.`,
         })
         return
       }
@@ -313,7 +313,7 @@ function ProduksiCssdPage() {
       // yang memuatnya, baru digulirkan ke posisinya.
       setPage(Math.floor(index / ITEMS_PER_PAGE) + 1)
       setScannedCodes((prev) => [...prev, code])
-      toast.success(`${label?.name ?? code} tercentang.`)
+      toast.success(`${label?.name ?? code} selected.`)
       // Kolom dikosongkan begitu tercentang → siap menerima barcode berikutnya.
       setScanInput("")
 
@@ -327,7 +327,7 @@ function ProduksiCssdPage() {
         }),
       )
     } catch (e) {
-      setScanAlert({ title: "Barcode Tidak Dikenal", message: errMsg(e) })
+      setScanAlert({ title: "Unknown Barcode", message: errMsg(e) })
     } finally {
       setScanChecking(false)
     }
@@ -593,7 +593,7 @@ function ProduksiCssdPage() {
   async function submit() {
     if (saving) return
     if (lines.length === 0) {
-      setFormError("Tambahkan minimal satu jenis instrumen / paket.")
+      setFormError("Add at least one instrument type / package.")
       return
     }
     const items = lines.map((l) => ({
@@ -604,7 +604,7 @@ function ProduksiCssdPage() {
         : { instrument_catalog_id: l.refId, package_name: l.name }),
     }))
     if (items.some((it) => !it.quantity || it.quantity <= 0)) {
-      setFormError("Jumlah tiap baris harus lebih dari 0.")
+      setFormError("Quantity for each line must be greater than 0.")
       return
     }
     setSaving(true)
@@ -617,7 +617,7 @@ function ProduksiCssdPage() {
       // lalu alihkan ke tab Cleaning (efek lazy-load akan memuat ulang datanya).
       dispatch(invalidateCleaning())
       changeTab("cleaning")
-      toast.success(res.data?.message ?? "Batch produksi berhasil dibuat & masuk tahap Cleaning.")
+      toast.success(res.data?.message ?? "Production batch created and moved to the Cleaning stage.")
     } catch (e) {
       const msg = errMsg(e)
       setFormError(msg)
@@ -630,7 +630,7 @@ function ProduksiCssdPage() {
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Produksi CSSD"
+        title="CSSD Production"
         subtitle="Start production & monitor the reprocessing stages: Cleaning → Inspection → Sterilization"
       />
 
@@ -639,7 +639,7 @@ function ProduksiCssdPage() {
         <div className="flex gap-5 overflow-x-auto border-b border-gray-200 px-5 pt-4 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
           {(
             [
-              { key: "produksi", label: "Produksi Baru" },
+              { key: "produksi", label: "New Production" },
               { key: "cleaning", label: "Cleaning & Disinfection" },
               { key: "packaging", label: "Inspection & Packaging" },
               { key: "sterilization", label: "Sterilization" },
@@ -673,7 +673,7 @@ function ProduksiCssdPage() {
               {/* Pencarian: murni frontend — menyaring data yang sudah dimuat
                   langsung saat mengetik, tanpa menunggu tombol & tanpa request. */}
               <div className="flex-1 space-y-1.5">
-                <Label htmlFor="pipeline-search">Cari</Label>
+                <Label htmlFor="pipeline-search">Search</Label>
                 <div className="relative">
                   {/* Ikon kiri sekaligus indikator: berputar selama barcode divalidasi. */}
                   {scanChecking ? (
@@ -708,8 +708,8 @@ function ProduksiCssdPage() {
                     }}
                     placeholder={
                       scanMode
-                        ? "Menunggu pindaian barcode..."
-                        : "Cari kode batch, nama set, atau kode unit..."
+                        ? "Waiting for barcode scan..."
+                        : "Search batch code, set name, or unit code..."
                     }
                     className={
                       "pl-9 " +
@@ -728,7 +728,7 @@ function ProduksiCssdPage() {
                         setSearch("")
                         setPage(1)
                       }}
-                      title={scanMode ? "Kembali ke pencarian teks" : "Aktifkan mode scan barcode"}
+                      title={scanMode ? "Back to text search" : "Enable barcode scan mode"}
                       aria-pressed={scanMode}
                       className={
                         "absolute right-1.5 top-1/2 inline-flex -translate-y-1/2 items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition-colors " +
@@ -745,7 +745,7 @@ function ProduksiCssdPage() {
               </div>
 
               <div className="space-y-1.5">
-                <Label htmlFor="pipeline-date-from">Dari Tanggal</Label>
+                <Label htmlFor="pipeline-date-from">From Date</Label>
                 <Input
                   id="pipeline-date-from"
                   type="date"
@@ -756,7 +756,7 @@ function ProduksiCssdPage() {
                 />
               </div>
               <div className="space-y-1.5">
-                <Label htmlFor="pipeline-date-to">Sampai Tanggal</Label>
+                <Label htmlFor="pipeline-date-to">To Date</Label>
                 <Input
                   id="pipeline-date-to"
                   type="date"
@@ -768,7 +768,7 @@ function ProduksiCssdPage() {
               </div>
               <div className="flex justify-end gap-2">
                 <Button type="submit" className="bg-[#075489] hover:bg-[#075489]/90 text-white shrink-0">
-                  Terapkan
+                  Apply
                 </Button>
                 {hasFilter && (
                   <Button type="button" variant="outline" onClick={resetFilter} className="shrink-0">
@@ -788,7 +788,7 @@ function ProduksiCssdPage() {
           {tab === "cleaning" && (
             <div className="mb-3 inline-flex max-w-full overflow-x-auto rounded-lg border border-gray-200 p-0.5 text-sm [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
               {([
-                { key: "proses" as const, label: "Proses Cleaning", count: cleaningProses.length },
+                { key: "proses" as const, label: "Cleaning Process", count: cleaningProses.length },
                 { key: "history" as const, label: "History", count: cleaningHistory.length },
               ]).map((v) => (
                 <button
@@ -812,7 +812,7 @@ function ProduksiCssdPage() {
           {tab === "packaging" && (
             <div className="mb-3 inline-flex max-w-full overflow-x-auto rounded-lg border border-gray-200 p-0.5 text-sm [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
               {([
-                { key: "pending" as const, label: "Proses Packaging", count: packagingPending.length },
+                { key: "pending" as const, label: "Packaging Process", count: packagingPending.length },
                 { key: "history" as const, label: "History", count: packagingHistory.length },
               ]).map((v) => (
                 <button
@@ -838,8 +838,8 @@ function ProduksiCssdPage() {
           {tab === "sterilization" && (
             <div className="mb-3 inline-flex max-w-full overflow-x-auto rounded-lg border border-gray-200 p-0.5 text-sm [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
               {([
-                { key: "proses" as const, label: "Proses Steril", count: sterProses.length },
-                { key: "validasi" as const, label: "Validasi Hasil", count: sterValidasi.length },
+                { key: "proses" as const, label: "Sterilization Process", count: sterProses.length },
+                { key: "validasi" as const, label: "Result Validation", count: sterValidasi.length },
                 { key: "history" as const, label: "History", count: sterHistory.length },
               ]).map((v) => (
                 <button
@@ -865,26 +865,26 @@ function ProduksiCssdPage() {
             </div>
           )}
           {pipelineLoading ? (
-            <div className="py-16 text-center text-sm text-gray-400">Memuat data...</div>
+            <div className="py-16 text-center text-sm text-gray-400">Loading data...</div>
           ) : activeCount === 0 ? (
             <div className="py-16 text-center text-sm text-gray-400">
               {q || dateFrom || dateTo
-                ? "Tidak ada data yang cocok."
+                ? "No matching data."
                 : tab === "packaging"
                   ? pkgView === "history"
-                    ? "Belum ada riwayat batch yang dikemas."
-                    : "Belum ada batch yang perlu dikemas."
+                    ? "No packaged batch history yet."
+                    : "No batch needs packaging yet."
                   : tab === "sterilization"
                     ? sterView === "validasi"
-                      ? "Tidak ada batch menunggu validasi."
+                      ? "No batch is awaiting validation."
                       : sterView === "history"
-                        ? "Belum ada riwayat batch sterilisasi."
-                        : "Belum ada batch siap disterilkan."
+                        ? "No sterilization batch history yet."
+                        : "No batch is ready for sterilization yet."
                     : tab === "cleaning"
                       ? cleanView === "history"
-                        ? "Belum ada riwayat cleaning."
-                        : "Belum ada batch pada tahap cleaning."
-                      : "Belum ada order pada tahap ini."}
+                        ? "No cleaning history yet."
+                        : "No batch is in the cleaning stage yet."
+                      : "No order is in this stage yet."}
             </div>
           ) : (
             <>
@@ -920,6 +920,7 @@ function ProduksiCssdPage() {
                 totalItems={activeCount}
                 itemsPerPage={ITEMS_PER_PAGE}
                 onPageChange={setPage}
+                labels={{ showing: "Showing", of: "of", items: "items" }}
               />
             </>
           )}
@@ -932,7 +933,7 @@ function ProduksiCssdPage() {
         {/* Form tambah baris */}
         <Card className="space-y-4 p-5 lg:col-span-2">
           <div className="flex items-center gap-2">
-            <h2 className="text-sm font-semibold text-gray-800">Tambah Alat untuk Diproduksi</h2>
+            <h2 className="text-sm font-semibold text-gray-800">Add Instruments to Produce</h2>
           </div>
 
           {/* Mode satuan / paket */}
@@ -949,19 +950,22 @@ function ProduksiCssdPage() {
                     : "border-gray-200 text-gray-500 hover:bg-gray-50")
                 }
               >
-                {m === "satuan" ? "Satuan" : "Paket / Set"}
+                {m === "satuan" ? "Single" : "Package / Set"}
               </button>
             ))}
           </div>
 
           <div className="space-y-1.5">
-            <Label>{mode === "satuan" ? "Jenis Instrumen" : "Paket / Set Instrumen"}</Label>
+            <Label>{mode === "satuan" ? "Instrument Type" : "Instrument Package / Set"}</Label>
             <SelectSearch
               options={options}
               value={pickId}
               onChange={handlePick}
               loading={optionsLoading}
-              placeholder={mode === "satuan" ? "Cari instrumen..." : "Cari paket..."}
+              placeholder={mode === "satuan" ? "Search instrument..." : "Search package..."}
+              searchPlaceholder="Search..."
+              loadingText="Loading options..."
+              emptyText="Not found."
             />
           </div>
 
@@ -969,9 +973,9 @@ function ProduksiCssdPage() {
           {mode === "paket" && pickId && (
             <div className="rounded-lg border border-gray-100 bg-gray-50 px-3 py-2 text-xs">
               {loadingPaket ? (
-                <span className="text-gray-400">Memuat isi paket...</span>
+                <span className="text-gray-400">Loading package contents...</span>
               ) : paketItems.length === 0 ? (
-                <span className="text-gray-400">Paket tidak memiliki rincian isi.</span>
+                <span className="text-gray-400">This package has no content details.</span>
               ) : (
                 <div className="flex flex-wrap gap-1.5">
                   {paketItems.map((it) => (
@@ -986,7 +990,7 @@ function ProduksiCssdPage() {
 
           <div className="flex items-end gap-2">
             <div className="w-24 space-y-1.5">
-              <Label htmlFor="prod-qty">Jumlah</Label>
+              <Label htmlFor="prod-qty">Quantity</Label>
               <Input
                 id="prod-qty"
                 type="number"
@@ -1001,7 +1005,7 @@ function ProduksiCssdPage() {
               disabled={!pickId || !(Number(pickQty) > 0)}
               className="bg-[#075489] hover:bg-[#075489]/90 text-white"
             >
-              Tambah
+              Add
             </Button>
           </div>
         </Card>
@@ -1010,18 +1014,18 @@ function ProduksiCssdPage() {
         <Card className="flex flex-col p-5 lg:col-span-3">
           <div className="mb-4 flex items-center justify-between">
             <div className="flex items-center gap-2">
-              <h2 className="text-sm font-semibold text-gray-800">Daftar Produksi</h2>
+              <h2 className="text-sm font-semibold text-gray-800">Production List</h2>
             </div>
             {lines.length > 0 && (
               <span className="inline-flex items-center rounded-full bg-[#075489]/10 px-2.5 py-1 text-xs font-semibold text-[#075489]">
-                {lines.length} jenis
+                {lines.length} types
               </span>
             )}
           </div>
 
           {lines.length === 0 ? (
             <div className="flex flex-1 flex-col items-center justify-center gap-3 rounded-xl border border-dashed border-gray-200 bg-gray-50/50 py-14 text-center">
-              <p className="text-sm text-gray-400">Belum ada alat. Tambahkan dari panel kiri.</p>
+              <p className="text-sm text-gray-400">No instruments yet. Add them from the left panel.</p>
             </div>
           ) : (
             <div className="space-y-2.5">
@@ -1046,7 +1050,7 @@ function ProduksiCssdPage() {
                         <button
                           type="button"
                           onClick={() => setPreviewImage({ src: l.image!, name: l.name })}
-                          title="Lihat gambar"
+                          title="View image"
                           className={
                             "group/thumb relative h-10 w-10 shrink-0 cursor-zoom-in overflow-hidden rounded-lg ring-1 transition hover:ring-2 " +
                             (isPaket ? "ring-[#4ba69d]/30 hover:ring-[#4ba69d]/60" : "ring-[#075489]/20 hover:ring-[#075489]/50")
@@ -1071,14 +1075,14 @@ function ProduksiCssdPage() {
                       <div className="min-w-0 flex-1">
                         <div className="flex flex-wrap items-center gap-2">
                           <span className="truncate text-sm font-semibold text-gray-800">{l.name}</span>
-                          <Badge variant={isPaket ? "info" : "default"}>{isPaket ? "Paket" : "Satuan"}</Badge>
+                          <Badge variant={isPaket ? "info" : "default"}>{isPaket ? "Package" : "Single"}</Badge>
                         </div>
 
                         {/* Detail isi paket: instrumen × total unit (per-set × jumlah set) */}
                         {isPaket && l.items && l.items.length > 0 && (
                           <div className="mt-1.5 flex flex-wrap items-center gap-1">
                             <span className="inline-flex items-center gap-1 text-[11px] text-gray-400">
-                              <Package className="h-3 w-3" /> Isi:
+                              <Package className="h-3 w-3" /> Contains:
                             </span>
                             {l.items.map((it) => (
                               <span
@@ -1104,7 +1108,7 @@ function ProduksiCssdPage() {
                           type="button"
                           onClick={() => removeLine(i)}
                           className="rounded-md p-1.5 text-gray-400 transition-colors hover:bg-red-50 hover:text-red-600"
-                          title="Hapus"
+                          title="Delete"
                         >
                           <Trash2 className="h-4 w-4" />
                         </button>
@@ -1117,7 +1121,7 @@ function ProduksiCssdPage() {
           )}
 
           <div className="mt-4 space-y-1.5">
-            <Label htmlFor="prod-note">Catatan (opsional)</Label>
+            <Label htmlFor="prod-note">Note (optional)</Label>
             <Textarea
               id="prod-note"
               value={note}
@@ -1134,7 +1138,7 @@ function ProduksiCssdPage() {
               disabled={saving || lines.length === 0}
               className="bg-[#4ba69d] hover:bg-[#4ba69d]/90 text-white shadow-sm"
             >
-              {saving ? "Memproses..." : "Mulai Produksi"}
+              {saving ? "Processing..." : "Start Production"}
             </Button>
           </div>
         </Card>
@@ -1145,11 +1149,11 @@ function ProduksiCssdPage() {
       <Modal
         open={previewImage !== null}
         onClose={() => setPreviewImage(null)}
-        title={previewImage?.name ?? "Gambar"}
+        title={previewImage?.name ?? "Image"}
         size="lg"
         footer={
           <Button variant="outline" onClick={() => setPreviewImage(null)}>
-            Tutup
+            Close
           </Button>
         }
       >
@@ -1169,14 +1173,14 @@ function ProduksiCssdPage() {
       <Modal
         open={scanAlert !== null}
         onClose={() => setScanAlert(null)}
-        title={scanAlert?.title ?? "Barcode Tidak Dikenal"}
+        title={scanAlert?.title ?? "Unknown Barcode"}
         size="sm"
         footer={
           <Button
             onClick={() => setScanAlert(null)}
             className="bg-[#075489] hover:bg-[#075489]/90 text-white"
           >
-            Mengerti
+            Got it
           </Button>
         }
       >

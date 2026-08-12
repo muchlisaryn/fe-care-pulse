@@ -115,7 +115,7 @@ export function QrScannerModal({ open, onClose, onScan, title = "Scan QR", hint 
         })
       : Promise.reject(
           new Error(
-            "Kamera tidak tersedia karena halaman ini dibuka lewat http. Buka lewat https (atau localhost) agar kamera bisa dipakai.",
+            "The camera is unavailable because this page was opened over http. Open it over https (or localhost) to use the camera.",
           ),
         )
 
@@ -123,7 +123,7 @@ export function QrScannerModal({ open, onClose, onScan, title = "Scan QR", hint 
       if (stopped) return
       const msg =
         (e as { message?: string })?.message ??
-        "Tidak bisa mengakses kamera. Pastikan izin kamera aktif & memakai https/localhost."
+        "Cannot access the camera. Make sure camera permission is granted and you are on https/localhost."
       setError(msg)
     })
 
@@ -154,7 +154,7 @@ export function QrScannerModal({ open, onClose, onScan, title = "Scan QR", hint 
           <p className="text-sm text-red-600">{error}</p>
         ) : (
           <p className="text-center text-xs text-gray-500">
-            {hint ?? "Arahkan kamera ke QR code."}
+            {hint ?? "Point the camera at the QR code."}
           </p>
         )}
       </div>

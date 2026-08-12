@@ -34,6 +34,8 @@ type DataTableProps<T extends object> = {
   // Jumlah baris di halaman-halaman sebelumnya, mis. `(page - 1) * perPage`.
   // Tanpa ini penomoran mengulang dari 1 di tiap halaman.
   rowNumberOffset?: number
+  // Teks bawaan tabel — dioper oleh halaman berbahasa Inggris.
+  labels?: { rowNumber?: string; actions?: string; edit?: string; delete?: string }
 }
 
 export function DataTable<T extends object>({
@@ -48,8 +50,13 @@ export function DataTable<T extends object>({
   rowNumber,
   hideRowNumber = false,
   rowNumberOffset = 0,
+  labels,
 }: DataTableProps<T>) {
   const hasActions = !!(onEdit || onDelete || extraActions?.length)
+  const rowNumberLabel = labels?.rowNumber ?? "No"
+  const actionsLabel = labels?.actions ?? "Aksi"
+  const editLabel = labels?.edit ?? "Edit"
+  const deleteLabel = labels?.delete ?? "Hapus"
 
   // Tombol aksi baris — dipakai bersama oleh tampilan tabel (desktop) & kartu (mobile).
   function renderActions(row: T, rowLoading: boolean) {
@@ -69,12 +76,12 @@ export function DataTable<T extends object>({
         ))}
         {onEdit && (
           <Button size="xs" variant="outline" disabled={rowLoading} onClick={() => onEdit(row)}>
-            Edit
+            {editLabel}
           </Button>
         )}
         {onDelete && (canDelete?.(row) ?? true) && (
           <Button size="xs" variant="destructive" disabled={rowLoading} onClick={() => onDelete(row)}>
-            {rowLoading ? "..." : "Hapus"}
+            {rowLoading ? "..." : deleteLabel}
           </Button>
         )}
       </>
@@ -101,7 +108,7 @@ export function DataTable<T extends object>({
                 {!hideRowNumber && (
                   <div className="flex items-center border-b border-gray-100 bg-gray-50/70 px-4 py-2">
                     <span className="inline-flex h-6 items-center justify-center rounded-full bg-[#075489]/10 px-2.5 text-xs font-semibold text-[#075489]">
-                      No {rowNumber ? rowNumber(row, i) : rowNumberOffset + i + 1}
+                      {rowNumberLabel} {rowNumber ? rowNumber(row, i) : rowNumberOffset + i + 1}
                     </span>
                   </div>
                 )}
@@ -135,7 +142,7 @@ export function DataTable<T extends object>({
           <tr className="border-b border-gray-100">
             {!hideRowNumber && (
               <th className="py-3 pl-4 pr-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-400 w-12">
-                No
+                {rowNumberLabel}
               </th>
             )}
             {columns.map((col, i) => (
@@ -151,7 +158,7 @@ export function DataTable<T extends object>({
             ))}
             {hasActions && (
               <th className="py-3 pl-3 pr-4 text-right text-xs font-semibold uppercase tracking-wide text-gray-400 w-36">
-                Aksi
+                {actionsLabel}
               </th>
             )}
           </tr>
