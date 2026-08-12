@@ -30,6 +30,7 @@ import productionSterilizeReducer from "./slices/productionSterilizeSlice"
 import storageReducer from "./slices/storageSlice"
 import sterileExpiryReducer from "./slices/sterileExpirySlice"
 import distributeReducer from "./slices/distributeSlice"
+import trackingCountReducer from "./slices/trackingCountSlice"
 
 export const store = configureStore({
   reducer: {
@@ -60,6 +61,7 @@ export const store = configureStore({
     storage: storageReducer,
     sterileExpiry: sterileExpiryReducer,
     distribute: distributeReducer,
+    trackingCount: trackingCountReducer,
     icd10: icd10Reducer,
     categoriCP: categoriCPReducer,
     templateCP: templateCPReducer,

@@ -94,9 +94,12 @@ export default function MonitorRuanganPage() {
     return () => clearInterval(t)
   }, [])
 
-  // Nama ruangan (sekali) untuk judul.
+  // Nama ruangan untuk judul. Baris papan sudah membawa `room_name`, jadi lookup
+  // master hanya dipakai sebagai CADANGAN saat papan kosong — selama ada order
+  // aktif, tidak ada permintaan tambahan sama sekali.
   useEffect(() => {
-    if (!token || !roomId) return
+    if (!token || !roomId || !loaded) return
+    if (roomName || orders.length > 0) return
     let active = true
     api
       .get(`/master/rooms/${roomId}`)
@@ -107,19 +110,21 @@ export default function MonitorRuanganPage() {
     return () => {
       active = false
     }
-  }, [token, roomId])
+  }, [token, roomId, loaded, roomName, orders.length])
 
-  // Ambil order aktif lintas tahap, lalu saring untuk ruangan ini + auto-refresh.
+  // Ambil order aktif ruangan ini + auto-refresh. Penyaringan ruangan dikerjakan
+  // SERVER (?room_id=): papan ini menyegarkan diri tiap 20 detik, jadi menarik
+  // seluruh order aktif rumah sakit lalu membuang hampir semuanya di sini adalah
+  // beban yang terus berulang.
   useEffect(() => {
-    if (!token) return
+    if (!token || !roomId) return
     let active = true
 
     async function load() {
       try {
-        const res = await api.get("/master/monitoring/board")
-        const all = (res.data.data as BoardOrder[]) ?? []
+        const res = await api.get("/master/monitoring/board", { params: { room_id: roomId } })
         if (active) {
-          setOrders(all.filter((o) => o.room_id === roomId))
+          setOrders((res.data.data as BoardOrder[]) ?? [])
           setError(null)
         }
       } catch {

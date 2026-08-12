@@ -44,6 +44,7 @@ import {
   type ReturnedOrder,
 } from "@/lib/store/slices/monitoringSlice"
 import { fetchReadyToDistribute } from "@/lib/store/slices/distributeSlice"
+import { fetchTrackingCounts } from "@/lib/store/slices/trackingCountSlice"
 import { DistributeReady } from "@/components/molecules/DistributeReady"
 import { SelectSearch } from "@/components/atoms/SelectSearch"
 import { useUserOptions } from "@/lib/useUserOptions"
@@ -410,6 +411,9 @@ function MonitoringCssd() {
   // Angka badge tab — count() murni di server, dipakai untuk tab yang datanya
   // memang belum dimuat.
   const counts = useAppSelector((s) => s.monitoring.counts)
+  // Badge tab "Distribution & Tracking" — endpoint TERPISAH (tracking-order/counts),
+  // dihitung dari jejak waktu order, bukan kolom status.
+  const trackingCounts = useAppSelector((s) => s.trackingCount.counts)
   const loading = useAppSelector((s) => s.monitoring.roomsLoading)
   const roomsSummaryLoading = useAppSelector((s) => s.monitoring.roomsSummaryLoading)
   const incomingLoading = useAppSelector((s) => s.monitoring.incomingLoading)
@@ -457,6 +461,7 @@ function MonitoringCssd() {
   // rentang tanggal yang sedang aktif supaya angkanya sama dengan isi daftar.
   useEffect(() => {
     dispatch(fetchMonitoringCounts({ from: dateFrom, to: dateTo }))
+    dispatch(fetchTrackingCounts({ from: dateFrom, to: dateTo }))
   }, [dispatch, dateFrom, dateTo])
 
   // Daftar order dimuat PER TAB — tab yang tidak dibuka tidak pernah ditarik
@@ -490,6 +495,7 @@ function MonitoringCssd() {
       dispatch(fetchBorrowedSummary())
       dispatch(fetchMonitoringRoomsSummary())
       dispatch(fetchMonitoringCounts({ from: rangeRef.current.from, to: rangeRef.current.to }))
+      dispatch(fetchTrackingCounts({ from: rangeRef.current.from, to: rangeRef.current.to }))
       if (activeTabRef.current === "distribusi") {
         dispatch(
           fetchMonitoringTracking({
@@ -518,6 +524,7 @@ function MonitoringCssd() {
     dispatch(fetchBorrowedSummary())
     dispatch(fetchMonitoringRoomsSummary())
     dispatch(fetchMonitoringCounts({ from: dateFrom, to: dateTo }))
+    dispatch(fetchTrackingCounts({ from: dateFrom, to: dateTo }))
     if (activeTab === "masuk") {
       dispatch(fetchMonitoringIncoming())
       return
@@ -1008,14 +1015,16 @@ function MonitoringCssd() {
   const distribusiCount = trackingTotalItems
 
   // Badge tab = PEKERJAAN YANG BELUM SELESAI saja: order siap distribusi (belum
-  // diantar) + order yang masih dipinjam. Order yang sudah dikembalikan tidak
-  // dihitung — riwayatnya tetap tampil di daftar, tapi bukan lagi tugas berjalan.
+  // diantar) + order yang sudah diantar tapi belum kembali. Order yang seluruh
+  // unitnya sudah dikembalikan tidak dihitung — riwayatnya tetap tampil di daftar,
+  // tapi bukan lagi tugas berjalan.
   //
-  // Angka tab Distribusi selalu dari endpoint count() (sudah mengikuti rentang
-  // tanggal): daftarnya kini dipaginasi server, jadi baris yang tampil hanya satu
-  // halaman dan tidak bisa lagi dipakai menghitung totalnya.
+  // Angka tab Distribusi selalu dari endpoint count() TERSENDIRI
+  // (tracking-order/counts, sudah mengikuti rentang tanggal): daftarnya dipaginasi
+  // server, jadi baris yang tampil hanya satu halaman dan tidak bisa dipakai
+  // menghitung totalnya. Penjumlahannya dikerjakan di server (`total`).
   const masukBadge = activeTab === "masuk" ? incomingFiltered.length : counts.masuk
-  const distribusiBadge = counts.siap_distribusi + counts.dipinjam
+  const distribusiBadge = trackingCounts.total
 
   const tabCount: Record<MonitoringTab, number> = {
     masuk: incomingFiltered.length,

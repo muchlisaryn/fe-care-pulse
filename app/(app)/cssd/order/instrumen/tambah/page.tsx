@@ -29,13 +29,6 @@ import {
 } from "@/lib/orderRequest"
 import api from "@/lib/axios"
 
-// Label layanan ruangan (untuk tampilan opsi ruangan).
-const LAYANAN_LABEL: Record<string, string> = {
-  igd: "ER",
-  rawat_jalan: "Outpatient",
-  rawat_inap: "Inpatient",
-}
-
 export default function TambahOrderInstrumenPage() {
   const router = useRouter()
   const dispatch = useAppDispatch()
@@ -45,9 +38,12 @@ export default function TambahOrderInstrumenPage() {
   // fetchRoomOptions selesai, dan tetap true saat halaman dibuka lagi (tidak
   // memuat ulang) — jadi dropdown hanya terkunci pada pemuatan pertama.
   const roomLoading = useAppSelector((s) => !s.rooms.optionsLoaded)
+  // Opsi ruangan menampilkan NAMA saja — layanannya tidak ikut ditulis di label.
+  // `r.layanan` tetap dipakai di bawah (penentu wajib-tidaknya identitas pasien),
+  // hanya tidak lagi tampil di dropdown.
   const roomOptions = rooms.map((r) => ({
     value: String(r.id),
-    label: r.layanan ? `${r.name} · ${LAYANAN_LABEL[r.layanan]}` : r.name,
+    label: r.name,
   }))
 
   // Identitas sesi login — dipakai sebagai nilai awal "Dipinjam Oleh".

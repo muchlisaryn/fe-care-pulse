@@ -722,7 +722,13 @@ export default function OrderInstrumenPage() {
     },
     {
       header: "Instruments",
-      cell: (row) => <span className="text-gray-700">{row.items_count ?? row.items?.length ?? 0} units</span>,
+      // PAKET dihitung per SET, SATUAN per unit — satu set berisi 10 instrumen tetap
+      // bernilai 1. `item_count` datang dari baris permintaan, jadi angkanya sudah
+      // terisi sejak order masih pengajuan; `items_count` (unit fisik) hanya cadangan
+      // untuk respons lama yang belum membawa field ini.
+      cell: (row) => (
+        <span className="text-gray-700">{row.item_count ?? row.items_count ?? 0} items</span>
+      ),
       className: "w-20",
     },
     {

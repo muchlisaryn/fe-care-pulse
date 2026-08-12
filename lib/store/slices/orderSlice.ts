@@ -90,6 +90,13 @@ export type Order = {
   items_count?: number
   paket_items_count?: number
   satuan_items_count?: number
+  /**
+   * Angka kolom "Instruments" pada daftar order: PAKET dihitung per SET, SATUAN per
+   * unit — satu set berisi 10 instrumen tetap bernilai 1. Dihitung server dari baris
+   * permintaan, jadi sudah terisi sejak order masih berstatus pengajuan (berbeda dari
+   * `items_count` yang baru ada setelah CSSD mengalokasikan unit fisik).
+   */
+  item_count?: number
   created_by: string | null
   updated_by: string | null
   // Jejak pembatalan (status "dibatalkan") — terpisah dari hapus (soft delete).

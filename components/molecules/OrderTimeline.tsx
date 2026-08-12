@@ -418,9 +418,13 @@ const LAZY_DETAIL: Record<string, { endpoint: string; codeLabel: string; codeLab
 }
 
 /**
- * Timeline tracking order. Beri `events` (sudah dimuat) ATAU `orderId` (di-LAZY-LOAD
- * dari GET orders/{id}/timeline saat dirender — dipakai di Pengembalian Instrumen
- * agar tracking-nya tidak ikut dibebankan ke payload scan).
+ * Timeline tracking order. Beri `events` (sudah dimuat) ATAU `orderId` (di-LAZY-LOAD).
+ *
+ * Mode `orderId` dimuat DUA TAHAP agar modal Pengembalian Instrumen terbuka cepat:
+ * 1. Saat dirender — hanya AKTIVITAS TERAKHIR, dari endpoint ringan tersendiri
+ *    `GET order-tracking/{id}/latest` (satu baris tabel order_events).
+ * 2. Saat tombol "Tampilkan semua tracking" ditekan — barulah seluruh riwayat
+ *    (termasuk pipeline CSSD tiap unit) ditarik dari `GET orders/{id}/timeline`.
  */
 export function OrderTimeline({
   events,
@@ -444,21 +448,34 @@ export function OrderTimeline({
   const [expanded, setExpanded] = useState(false)
   const [detailEv, setDetailEv] = useState<TimelineEvent | null>(null)
 
-  // Lazy-load seluruh timeline bila hanya orderId yang diberikan.
-  const [lazyEvents, setLazyEvents] = useState<TimelineEvent[] | null>(null)
+  // Tahap 1 — aktivitas TERAKHIR saja (endpoint ringan tersendiri).
+  const [latestEvent, setLatestEvent] = useState<TimelineEvent | null>(null)
+  const [hasMore, setHasMore] = useState(false)
   const [timelineLoading, setTimelineLoading] = useState(false)
+  // Tahap 2 — seluruh riwayat, baru diisi setelah tombol "Tampilkan semua" ditekan.
+  const [lazyEvents, setLazyEvents] = useState<TimelineEvent[] | null>(null)
+  const [allLoading, setAllLoading] = useState(false)
+
   useEffect(() => {
     if (orderId == null) return
     let active = true
     setTimelineLoading(true)
+    // Order berganti → riwayat penuh order sebelumnya dibuang & tampilan kembali
+    // ringkas, supaya tidak ada baris milik order lain yang tertinggal di layar.
+    setLatestEvent(null)
     setLazyEvents(null)
+    setExpanded(false)
     api
-      .get(`/master/orders/${orderId}/timeline`)
+      .get(`/master/order-tracking/${orderId}/latest`)
       .then((res) => {
-        if (active) setLazyEvents((res.data?.data?.timeline as TimelineEvent[]) ?? [])
+        if (!active) return
+        setLatestEvent((res.data?.data?.event as TimelineEvent | null) ?? null)
+        setHasMore(Boolean(res.data?.data?.has_more))
       })
       .catch(() => {
-        if (active) setLazyEvents([])
+        if (!active) return
+        setLatestEvent(null)
+        setHasMore(false)
       })
       .finally(() => {
         if (active) setTimelineLoading(false)
@@ -467,6 +484,26 @@ export function OrderTimeline({
       active = false
     }
   }, [orderId])
+
+  // Tarik seluruh riwayat — hanya dipanggil dari tombol "Tampilkan semua tracking",
+  // dan hanya sekali per order (hasilnya disimpan sampai ordernya berganti).
+  async function loadAllEvents() {
+    if (orderId == null) return
+    if (lazyEvents) {
+      setExpanded(true)
+      return
+    }
+    setAllLoading(true)
+    try {
+      const res = await api.get(`/master/orders/${orderId}/timeline`)
+      setLazyEvents((res.data?.data?.timeline as TimelineEvent[]) ?? [])
+      setExpanded(true)
+    } catch {
+      setLazyEvents([])
+    } finally {
+      setAllLoading(false)
+    }
+  }
 
   // Rincian tombol Detail per tahap di-LAZY-LOAD saat modalnya dibuka.
   const [lazyData, setLazyData] = useState<{ items?: TimelineItemLine[]; rows?: TimelinePackagingRow[] } | null>(null)
@@ -504,9 +541,11 @@ export function OrderTimeline({
     }
   }, [detailEv, lazyCfg, isPackaging, detailOrderId])
 
-  const data = orderId != null ? lazyEvents : events
+  // Mode `orderId`: selama belum ditekan "Tampilkan semua", yang ada di tangan
+  // hanyalah aktivitas terakhir — daftar penuhnya memang belum pernah ditarik.
+  const data = orderId != null ? (lazyEvents ?? (latestEvent ? [latestEvent] : null)) : events
 
-  if (orderId != null && timelineLoading && !data) {
+  if (orderId != null && timelineLoading && !latestEvent) {
     return (
       <div>
         <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-400">Tracking</p>
@@ -523,8 +562,20 @@ export function OrderTimeline({
   // Default ringkas: hanya event TERAKHIR (posisi order saat ini) yang tampil;
   // seluruh riwayat sebelumnya disembunyikan di balik tombol agar tidak panjang.
   const latest = data[data.length - 1]
+  // Mode `orderId`: jumlah pastinya belum diketahui sebelum riwayat penuh ditarik —
+  // servernya cuma memberi tahu masih ada riwayat lain atau tidak (`has_more`),
+  // jadi tombolnya tampil tanpa angka.
   const hiddenCount = data.length - 1
-  const collapsed = !expanded && hiddenCount > 0
+  const canExpand = orderId != null ? hasMore || hiddenCount > 0 : hiddenCount > 0
+  const collapsed = !expanded && canExpand
+  const expandLabel =
+    orderId != null && lazyEvents === null
+      ? en
+        ? "Show all tracking"
+        : "Tampilkan semua tracking"
+      : en
+        ? `Show all tracking (${hiddenCount})`
+        : `Tampilkan semua tracking (${hiddenCount})`
 
   return (
     <div>
@@ -545,11 +596,20 @@ export function OrderTimeline({
           </ol>
           <button
             type="button"
-            onClick={() => setExpanded(true)}
-            className="ml-6 mt-2 inline-flex items-center gap-1 text-xs font-medium text-[#075489] hover:underline"
+            onClick={() => (orderId != null ? loadAllEvents() : setExpanded(true))}
+            disabled={allLoading}
+            className="ml-6 mt-2 inline-flex items-center gap-1 text-xs font-medium text-[#075489] hover:underline disabled:cursor-not-allowed disabled:opacity-60"
           >
-            <ChevronDown className="h-3.5 w-3.5" />{" "}
-            {en ? `Show all tracking (${hiddenCount})` : `Tampilkan semua tracking (${hiddenCount})`}
+            {allLoading ? (
+              <>
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />{" "}
+                {en ? "Loading tracking…" : "Memuat tracking…"}
+              </>
+            ) : (
+              <>
+                <ChevronDown className="h-3.5 w-3.5" /> {expandLabel}
+              </>
+            )}
           </button>
         </>
       ) : (
