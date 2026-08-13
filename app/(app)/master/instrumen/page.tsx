@@ -1,12 +1,13 @@
 "use client"
 
 import { useEffect, useMemo, useRef, useState } from "react"
-import { Search, Box, Layers, PackageCheck, Stethoscope, Image as ImageIcon, Upload, X, ZoomIn, Waypoints, CheckCircle2, Clock } from "lucide-react"
+import { Search, Box, Layers, PackageCheck, Stethoscope, Image as ImageIcon, Upload, X, ZoomIn, CheckCircle2, Clock } from "lucide-react"
 import { Button } from "@/components/atoms/Button"
 import { Badge } from "@/components/atoms/Badge"
 import { Input } from "@/components/atoms/Input"
 import { Label } from "@/components/atoms/Label"
 import { SelectSearch } from "@/components/atoms/SelectSearch"
+import { SortHeader } from "@/components/atoms/SortHeader"
 import { Card } from "@/components/molecules/Card"
 import { StatCard } from "@/components/molecules/StatCard"
 import { DataTable, type Column } from "@/components/molecules/DataTable"
@@ -24,11 +25,6 @@ import {
   type InstrumentSort,
 } from "@/lib/store/slices/instrumentSlice"
 
-const sortOptions = [
-  { value: "", label: "Urutkan" },
-  { value: "stock_asc", label: "Sisa Stok Tersedikit" },
-  { value: "stock_desc", label: "Sisa Stok Terbanyak" },
-]
 import { fetchConditions } from "@/lib/store/slices/conditionSlice"
 import api from "@/lib/axios"
 
@@ -42,21 +38,10 @@ type Stock = {
   // lebih rinci dari `status` yang hanya enum kasar.
   stage?: string | null
   stage_label?: string | null
+  // Penanda dari server (jejak relasi + kolom audit, bukan `status`): unit ini tersedia?
+  // Dipakai untuk badge Status, hitungan Tersedia/Dipakai, dan kunci tombol Edit/Hapus.
+  is_available?: boolean
   condition: { id: number; name: string } | null
-}
-
-const statusLabel: Record<string, string> = {
-  tersedia: "Tersedia",
-  dipinjam: "Dipinjam",
-  sterilisasi: "Dalam Sterilisasi",
-  dikembalikan: "Dikembalikan",
-}
-
-const statusVariant: Record<string, "success" | "info" | "warning" | "danger" | "default"> = {
-  tersedia: "success",
-  dipinjam: "warning",
-  sterilisasi: "info",
-  dikembalikan: "default",
 }
 
 // Warna badge per tahap pipeline aktual pada daftar stok.
@@ -65,9 +50,9 @@ const stageVariant: Record<string, "success" | "info" | "warning" | "danger" | "
   pengemasan: "info",
   sterilisasi: "info",
   disimpan: "success",
+  kedaluwarsa: "danger",
   dipinjam: "warning",
   dikembalikan: "default",
-  proses: "info",
 }
 
 const kondisiBadgeVariant: Record<string, "success" | "info" | "warning" | "danger" | "default"> = {
@@ -80,15 +65,6 @@ const kondisiBadgeVariant: Record<string, "success" | "info" | "warning" | "dang
 
 // Tracking pipeline CSSD (posisi unit saat status ≠ tersedia).
 type TrackStage = { key: string; label: string; code: string | null; status: string | null; at: string | null }
-type TrackHistory = {
-  from_status: string | null
-  to_status: string
-  context: string | null
-  reference_code: string | null
-  note: string | null
-  by: string | null
-  at: string | null
-}
 type TrackingData = {
   unit: {
     id: number
@@ -102,7 +78,6 @@ type TrackingData = {
   current_stage: TrackStage | null
   stages: TrackStage[]
   order: { code: string; code_transaction: string | null; status: string; borrowed_by: string | null; room: string | null } | null
-  history: TrackHistory[]
 }
 
 // Label status tiap tahap pipeline (mentah → terbaca), mis. "dalam_proses" → "Dalam Proses".
@@ -206,7 +181,10 @@ export default function MasterInstrumenPage() {
   const [addStockOpen, setAddStockOpen] = useState(false)
   // Batas 1–100 disamakan dengan validasi server.
   const qtyValid = /^\d+$/.test(newQty) && Number(newQty) >= 1 && Number(newQty) <= 100
-  const borrowedHint = "Unit sedang dipinjam — tidak bisa diubah atau dihapus sampai dikembalikan."
+  // Alasan penguncian menyebut tahap aktual unit, bukan kalimat umum — supaya petugas
+  // langsung tahu apa yang harus dibereskan (mis. "Kedaluwarsa" → sterilkan ulang).
+  const lockedHint = (s: Stock) =>
+    `Unit sedang tidak tersedia${s.stage_label ? ` (${s.stage_label})` : ""} — hanya unit tersedia yang bisa diubah atau dihapus.`
   const [editingStockId, setEditingStockId] = useState<number | null>(null)
   const [editConditionId, setEditConditionId] = useState("")
   const [deleteStockTarget, setDeleteStockTarget] = useState<Stock | null>(null)
@@ -433,6 +411,21 @@ export default function MasterInstrumenPage() {
     },
     {
       header: "Sisa Stok",
+      // Urutan pindah ke sini dari dropdown terpisah: satu klik di kolomnya sendiri,
+      // arahnya langsung terbaca dari panah yang menyala.
+      headerCell: (
+        <SortHeader
+          label="Sisa Stok"
+          direction={sortBy === "stock_asc" ? "asc" : sortBy === "stock_desc" ? "desc" : null}
+          onChange={(next) =>
+            dispatch(
+              setInstrumentSort(
+                (next === "asc" ? "stock_asc" : next === "desc" ? "stock_desc" : "") as InstrumentSort
+              )
+            )
+          }
+        />
+      ),
       cell: (row) => (
         <span
           className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold ${
@@ -442,7 +435,7 @@ export default function MasterInstrumenPage() {
                 ? "bg-blue-100 text-blue-700"
                 : "bg-green-100 text-green-700"
           }`}
-          title="Jumlah unit berstatus tersedia"
+          title="Unit yang tidak sedang dipegang order berjalan (dihitung dari jejak order, bukan kolom status)"
         >
           {row.available_stocks_count} tersedia
         </span>
@@ -486,20 +479,9 @@ export default function MasterInstrumenPage() {
                 className="pl-9"
               />
             </div>
-            <div className="flex gap-2">
-              <Button type="submit" className="bg-[#075489] hover:bg-[#075489]/90 text-white shrink-0">
-                Cari
-              </Button>
-              <div className="flex-1 sm:w-44 sm:flex-none">
-                <SelectSearch
-                  options={sortOptions}
-                  value={sortBy}
-                  onChange={(v) => dispatch(setInstrumentSort(v as InstrumentSort))}
-                  placeholder="Urutkan"
-                  triggerClassName="h-10 px-4"
-                />
-              </div>
-            </div>
+            <Button type="submit" className="bg-[#075489] hover:bg-[#075489]/90 text-white shrink-0">
+              Cari
+            </Button>
           </form>
         </div>
 
@@ -656,8 +638,8 @@ export default function MasterInstrumenPage() {
             {!stockLoading && stocks.length > 0 && (
               <div className="flex flex-wrap items-center gap-x-6 gap-y-1 border-b border-gray-100 px-4 py-3 text-sm sm:px-6">
                 <span className="text-gray-500">Total unit: <span className="font-semibold text-gray-900">{stocks.length}</span></span>
-                <span className="text-gray-500">Tersedia: <span className="font-semibold text-[#4ba69d]">{stocks.filter((s) => s.status === "tersedia").length}</span></span>
-                <span className="text-gray-500">Dipakai/Proses: <span className="font-semibold text-amber-500">{stocks.filter((s) => s.status !== "tersedia").length}</span></span>
+                <span className="text-gray-500">Tersedia: <span className="font-semibold text-[#4ba69d]">{stocks.filter((s) => s.is_available).length}</span></span>
+                <span className="text-gray-500">Dipakai/Proses: <span className="font-semibold text-amber-500">{stocks.filter((s) => !s.is_available).length}</span></span>
               </div>
             )}
 
@@ -687,7 +669,11 @@ export default function MasterInstrumenPage() {
                   <tbody className="divide-y divide-gray-50">
                     {stocks.map((item, i) => {
                       const isEditing = editingStockId === item.id
-                      const isBorrowed = item.status === "dipinjam"
+                      // Sejalan dgn penjaga di server (assertAvailable): hanya unit
+                      // TERSEDIA yang boleh diubah/dihapus. Begitu unit masuk alur CSSD
+                      // — dipinjam, di pipeline, menunggu proses ulang, kedaluwarsa —
+                      // barisnya terkunci.
+                      const isLocked = !item.is_available
                       const kondisiName = item.condition?.name ?? "-"
                       return (
                         <tr key={item.id} className="hover:bg-gray-50 transition-colors">
@@ -706,27 +692,21 @@ export default function MasterInstrumenPage() {
                             )}
                           </td>
                           <td className="py-3 px-3">
-                            {item.status === "tersedia" ? (
-                              <Badge variant={statusVariant[item.status] ?? "default"}>
-                                {statusLabel[item.status] ?? item.status}
-                              </Badge>
+                            {/* Cabangnya ditentukan `is_available` (jejak relasi), bukan
+                                `status` — kalau tidak, unit yang dihitung sebagai
+                                "Dipakai/Proses" di atas bisa tetap ber-badge "Tersedia". */}
+                            {item.is_available ? (
+                              <Badge variant="success">Tersedia</Badge>
                             ) : (
                               <button
                                 type="button"
                                 onClick={() => openTracking(item)}
                                 title="Lihat tracking unit di pipeline CSSD"
-                                className="group inline-flex items-center gap-1.5 rounded-full transition hover:opacity-90"
+                                className="inline-flex items-center rounded-full transition hover:opacity-90"
                               >
-                                <Badge
-                                  variant={
-                                    item.stage
-                                      ? stageVariant[item.stage] ?? "info"
-                                      : statusVariant[item.status] ?? "default"
-                                  }
-                                >
-                                  {item.stage_label ?? statusLabel[item.status] ?? item.status}
+                                <Badge variant={stageVariant[item.stage ?? ""] ?? "default"}>
+                                  {item.stage_label ?? "Tidak Tersedia"}
                                 </Badge>
-                                <Waypoints className="h-3.5 w-3.5 text-gray-400 group-hover:text-[#075489]" />
                               </button>
                             )}
                           </td>
@@ -739,14 +719,13 @@ export default function MasterInstrumenPage() {
                                 </>
                               ) : (
                                 <>
-                                  {/* Unit yang sedang dipinjam terkunci: barangnya di tangan
-                                      peminjam & masih tertaut order aktif. Server juga
-                                      menolaknya, ini hanya lapisan pertama. */}
+                                  {/* Hanya unit tersedia yang boleh diubah/dihapus. Server
+                                      juga menolaknya (assertAvailable), ini lapisan pertama. */}
                                   <Button
                                     size="xs"
                                     variant="outline"
-                                    disabled={isBorrowed}
-                                    title={isBorrowed ? borrowedHint : undefined}
+                                    disabled={isLocked}
+                                    title={isLocked ? lockedHint(item) : undefined}
                                     onClick={() => { setEditingStockId(item.id); setEditConditionId(item.condition_id ? String(item.condition_id) : "") }}
                                   >
                                     Edit
@@ -754,8 +733,8 @@ export default function MasterInstrumenPage() {
                                   <Button
                                     size="xs"
                                     variant="destructive"
-                                    disabled={isBorrowed}
-                                    title={isBorrowed ? borrowedHint : undefined}
+                                    disabled={isLocked}
+                                    title={isLocked ? lockedHint(item) : undefined}
                                     onClick={() => setDeleteStockTarget(item)}
                                   >
                                     Hapus
@@ -816,8 +795,12 @@ export default function MasterInstrumenPage() {
               </span>
               <span className="text-sm text-gray-700">{tracking.unit.instrument?.name ?? "—"}</span>
               {tracking.unit.condition && <Badge variant="default">{tracking.unit.condition}</Badge>}
-              <Badge variant={statusVariant[tracking.unit.status] ?? "default"} className="ml-auto">
-                {tracking.unit.status_label}
+              {/* Tahap aktual (jejak pipeline), bukan kolom `status` unit. */}
+              <Badge
+                variant={stageVariant[tracking.current_stage?.key ?? ""] ?? "default"}
+                className="ml-auto"
+              >
+                {tracking.current_stage?.label ?? "Tersedia"}
               </Badge>
             </div>
 
@@ -896,31 +879,6 @@ export default function MasterInstrumenPage() {
               </div>
             )}
 
-            {/* Riwayat status (log) */}
-            {tracking.history.length > 0 && (
-              <details className="rounded-lg border border-gray-200">
-                <summary className="cursor-pointer px-3 py-2 text-sm font-medium text-gray-600 hover:text-gray-900">
-                  Riwayat Status ({tracking.history.length})
-                </summary>
-                <div className="divide-y divide-gray-50 border-t border-gray-100">
-                  {tracking.history.map((h, i) => (
-                    <div key={i} className="flex flex-wrap items-center gap-2 px-3 py-2 text-xs">
-                      <span className="text-gray-500">
-                        {h.from_status ? `${h.from_status} → ` : ""}
-                        <span className="font-semibold text-gray-800">{h.to_status}</span>
-                      </span>
-                      {h.reference_code && (
-                        <span className="font-mono text-[11px] font-semibold text-[#075489] bg-[#075489]/8 px-1.5 py-0.5 rounded">
-                          {h.reference_code}
-                        </span>
-                      )}
-                      {h.context && <span className="text-gray-400">({h.context})</span>}
-                      <span className="ml-auto text-gray-400">{formatDateTime(h.at)}</span>
-                    </div>
-                  ))}
-                </div>
-              </details>
-            )}
           </div>
         )}
       </Modal>

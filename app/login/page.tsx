@@ -38,12 +38,6 @@ function LoginForm() {
       setError("No Pegawai dan kata sandi wajib diisi.")
       return
     }
-    // No Pegawai selalu numerik — tolak di sini supaya kesalahan ketik tidak
-    // dikirim ke server dan pesannya lebih jelas daripada "kredensial salah".
-    if (!/^\d+$/.test(uname)) {
-      setError("No Pegawai hanya boleh berisi angka.")
-      return
-    }
     setError("")
     setLoading(true)
     try {
@@ -86,13 +80,10 @@ function LoginForm() {
             name="username"
             label="No Pegawai"
             type="text"
-            inputMode="numeric"
             placeholder="Masukkan nomor pegawai"
             autoComplete="username"
             value={username}
-            // Buang karakter non-angka saat diketik/paste agar kolom tidak
-            // pernah berisi nilai yang pasti ditolak saat submit.
-            onChange={(e) => setUsername(e.target.value.replace(/\D/g, ""))}
+            onChange={(e) => setUsername(e.target.value)}
             disabled={loading}
           />
 

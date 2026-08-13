@@ -6,6 +6,9 @@ import type { ReactNode } from "react"
 
 export type Column<T> = {
   header: string
+  // Judul kolom versi interaktif (mis. tombol urutkan) untuk tampilan tabel desktop.
+  // Tampilan kartu di mobile tetap memakai `header` sebagai label teks polos.
+  headerCell?: ReactNode
   className?: string
   cell: (row: T, index: number) => ReactNode
 }
@@ -153,7 +156,7 @@ export function DataTable<T extends object>({
                   col.className
                 )}
               >
-                {col.header}
+                {col.headerCell ?? col.header}
               </th>
             ))}
             {hasActions && (
