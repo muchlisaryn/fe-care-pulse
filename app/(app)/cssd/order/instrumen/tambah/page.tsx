@@ -442,9 +442,7 @@ export default function TambahOrderInstrumenPage() {
           <Button
             type="button"
             onClick={addPatient}
-            // Hijau teal merek (#4ba69d) — aksi menambah, dibedakan dari tombol
-            // simpan yang memakai biru tua.
-            className="w-full justify-center bg-[#4ba69d] text-white hover:bg-[#4ba69d]/90"
+            className="w-full justify-center bg-[#075489] text-white hover:bg-[#075489]/90"
           >
             <UserPlus className="h-4 w-4" />
             Add Patient

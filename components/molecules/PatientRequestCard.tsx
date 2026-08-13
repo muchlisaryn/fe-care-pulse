@@ -213,13 +213,13 @@ export function PatientRequestCard({
     })
   }
 
-  // Warna aksen per urutan pasien: garis tepi kiri + nomor + latar kepala kartu
-  // memakai warna yang sama, sehingga order satu pasien mudah dibedakan dari
-  // pasien lain saat beberapa order diisi sekaligus.
+  // Warna aksen per urutan pasien: nomor + latar kepala kartu memakai warna
+  // yang sama, sehingga order satu pasien mudah dibedakan dari pasien lain
+  // saat beberapa order diisi sekaligus.
   const accent = patientAccent(index)
 
   return (
-    <Card className="overflow-hidden border-l-4 p-0" style={{ borderLeftColor: accent }}>
+    <Card className="overflow-hidden p-0">
       {/* Kepala kartu: nomor pasien + total unit + tombol hapus pasien */}
       <div
         className="flex flex-wrap items-center justify-between gap-3 border-b border-gray-100 px-5 py-4"
