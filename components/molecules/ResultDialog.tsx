@@ -4,6 +4,7 @@ import type { ReactNode } from "react"
 import { Check, Sparkle, X } from "lucide-react"
 import { Button } from "@/components/atoms/Button"
 import { Modal } from "@/components/molecules/Modal"
+import { useT } from "@/lib/i18n"
 
 type ResultVariant = "success" | "error"
 
@@ -24,14 +25,12 @@ type ResultDialogProps = {
 }
 
 /**
- * Tampilan per hasil: judul & tombol default, warna lingkaran ikon (gradien),
+ * Tampilan per hasil: warna lingkaran ikon (gradien),
  * lingkaran-lingkaran latar (halo), aksen hiasan, tombol, dan bilah waktu.
  */
 const VARIANT: Record<
   ResultVariant,
   {
-    title: string
-    action: string
     icon: ReactNode
     badge: string
     halo: string
@@ -47,8 +46,6 @@ const VARIANT: Record<
   // dengan avatar pengguna di Header. Semua nuansa di bawah diturunkan dari
   // warna itu (gradien sedikit lebih terang ke lebih gelap, sisanya transparansi).
   success: {
-    title: "Berhasil",
-    action: "Selesai",
     icon: <Check className="h-14 w-14 text-white" strokeWidth={3} />,
     badge: "bg-gradient-to-br from-[#5cb5ac] to-[#3f8f87] shadow-lg shadow-[#4ba69d]/35",
     halo: "bg-[#4ba69d]/15",
@@ -60,8 +57,6 @@ const VARIANT: Record<
     timer: "bg-[#4ba69d]/50",
   },
   error: {
-    title: "Gagal",
-    action: "Tutup",
     icon: <X className="h-14 w-14 text-white" strokeWidth={3} />,
     badge: "bg-gradient-to-br from-rose-400 to-rose-600 shadow-lg shadow-rose-500/30",
     halo: "bg-rose-100/70",
@@ -93,7 +88,10 @@ export function ResultDialog({
   autoCloseSeconds,
 }: ResultDialogProps) {
   const v = VARIANT[variant]
-  const heading = title ?? v.title
+  // Judul & tombol bawaan mengikuti BAHASA AKTIF; yang dikirim halaman tetap menang.
+  const t = useT()
+  const heading = title ?? t(variant === "success" ? "common.success" : "common.failed")
+  const action = actionLabel ?? t(variant === "success" ? "common.done" : "common.close")
   const seconds = autoCloseSeconds ?? (variant === "success" ? 5 : 0)
 
   return (
@@ -148,7 +146,7 @@ export function ResultDialog({
           onClick={onClose}
           className={"mt-7 h-12 w-full rounded-xl text-base font-semibold " + v.button}
         >
-          {actionLabel ?? v.action}
+          {action}
         </Button>
 
         {/* Sisa waktu tutup-otomatis — berhenti saat kartu disorot / difokus,

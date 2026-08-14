@@ -26,6 +26,7 @@ import {
 } from "@/lib/store/slices/instrumentSlice"
 
 import { fetchConditions } from "@/lib/store/slices/conditionSlice"
+import { useLanguage } from "@/lib/i18n"
 import api from "@/lib/axios"
 
 type Stock = {
@@ -46,12 +47,15 @@ type Stock = {
 
 // Warna badge per tahap pipeline aktual pada daftar stok.
 const stageVariant: Record<string, "success" | "info" | "warning" | "danger" | "default"> = {
+  produksi: "info",
   pencucian: "info",
   pengemasan: "info",
   sterilisasi: "info",
+  menunggu_disimpan: "info",
   disimpan: "success",
   kedaluwarsa: "danger",
   dipinjam: "warning",
+  // Nilai warisan — unit yang sudah dikembalikan kini kembali berstatus Tersedia.
   dikembalikan: "default",
 }
 
@@ -64,7 +68,16 @@ const kondisiBadgeVariant: Record<string, "success" | "info" | "warning" | "dang
 }
 
 // Tracking pipeline CSSD (posisi unit saat status ≠ tersedia).
-type TrackStage = { key: string; label: string; code: string | null; status: string | null; at: string | null }
+type TrackStage = {
+  key: string
+  label: string
+  code: string | null
+  status: string | null
+  at: string | null
+  // No. invoice order yang terkait tahap ini — hanya terisi pada tahap yang memang
+  // menyangkut order (unit keluar gudang & dipinjam).
+  invoice?: string | null
+}
 type TrackingData = {
   unit: {
     id: number
@@ -80,7 +93,9 @@ type TrackingData = {
   order: { code: string; code_transaction: string | null; status: string; borrowed_by: string | null; room: string | null } | null
 }
 
-// Label status tiap tahap pipeline (mentah → terbaca), mis. "dalam_proses" → "Dalam Proses".
+// Label status tiap tahap pipeline (mentah → terbaca), mis. "dalam_proses" →
+// "Dalam Proses". Statusnya nilai mentah dari server, jadi hasilnya masih perlu
+// dilewatkan glosarium (`tn`) di tempat pemakaian agar ikut bahasa aktif.
 function pipelineStatusLabel(s: string | null): string {
   if (!s) return "—"
   return s.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())
@@ -98,11 +113,11 @@ const pipelineStatusVariant: Record<string, "success" | "info" | "warning" | "da
   batal: "default",
 }
 
-function formatDateTime(value: string | null): string {
+function formatDateTime(value: string | null, lang: string): string {
   if (!value) return "—"
   const d = new Date(value)
   if (Number.isNaN(d.getTime())) return value
-  return d.toLocaleString("id-ID", {
+  return d.toLocaleString(lang === "id" ? "id-ID" : "en-GB", {
     day: "2-digit",
     month: "short",
     year: "numeric",
@@ -115,10 +130,14 @@ const emptyForm = { code: "", name: "" }
 
 export default function MasterInstrumenPage() {
   const dispatch = useAppDispatch()
+  // `t` = teks antarmuka (kamus tetap); `tn` = nama/label yang datang dari server
+  // (kondisi, tahap pipeline) — lewat glosarium, karena datanya bisa bertambah.
+  const { t, tn, lang } = useLanguage()
   const { items, totalItems, totalPages, page, search, sortBy, loading, loaded, dirty } =
     useAppSelector((s) => s.instruments)
   const conditions = useAppSelector((s) => s.conditions.items)
-  const kondisiOptions = conditions.map((c) => ({ value: String(c.id), label: c.name }))
+  // Nama kondisi ikut diterjemahkan di dropdown, tapi NILAINYA tetap id aslinya.
+  const kondisiOptions = conditions.map((c) => ({ value: String(c.id), label: tn(c.name) }))
   // Kondisi bawaan unit baru: "Baik" bila ada di master Kondisi, kalau tidak ketemu
   // pakai entri pertama agar unit tetap punya kondisi (bukan null).
   const defaultCondition =
@@ -184,7 +203,9 @@ export default function MasterInstrumenPage() {
   // Alasan penguncian menyebut tahap aktual unit, bukan kalimat umum — supaya petugas
   // langsung tahu apa yang harus dibereskan (mis. "Kedaluwarsa" → sterilkan ulang).
   const lockedHint = (s: Stock) =>
-    `Unit sedang tidak tersedia${s.stage_label ? ` (${s.stage_label})` : ""} — hanya unit tersedia yang bisa diubah atau dihapus.`
+    t("masterInstrument.lockedHint", {
+      stage: s.stage_label ? ` (${tn(s.stage_label)})` : "",
+    })
   const [editingStockId, setEditingStockId] = useState<number | null>(null)
   const [editConditionId, setEditConditionId] = useState("")
   const [deleteStockTarget, setDeleteStockTarget] = useState<Stock | null>(null)
@@ -368,7 +389,7 @@ export default function MasterInstrumenPage() {
 
   const columns: Column<Instrument>[] = [
     {
-      header: "Kode",
+      header: t("masterInstrument.colCode"),
       cell: (row) => (
         <span className="font-mono text-xs font-semibold text-[#075489] bg-[#075489]/8 px-2 py-1 rounded">
           {row.code}
@@ -377,14 +398,14 @@ export default function MasterInstrumenPage() {
       className: "w-32",
     },
     {
-      header: "Nama Instrumen",
+      header: t("masterInstrument.colName"),
       cell: (row) => (
         <div className="flex items-center gap-2.5">
           {row.image_url ? (
             <button
               type="button"
               onClick={() => setPreviewImage({ src: row.image_url!, name: row.name })}
-              title="Lihat gambar"
+              title={t("masterInstrument.viewImage")}
               className="group relative shrink-0 cursor-zoom-in overflow-hidden rounded border border-gray-200 transition hover:ring-2 hover:ring-[#075489]/40"
             >
               {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -403,19 +424,19 @@ export default function MasterInstrumenPage() {
       ),
     },
     {
-      header: "Total Unit",
+      header: t("masterInstrument.colTotalUnits"),
       cell: (row) => (
         <span className="font-semibold text-gray-900">{row.stocks_count}</span>
       ),
       className: "w-24",
     },
     {
-      header: "Sisa Stok",
+      header: t("masterInstrument.colRemaining"),
       // Urutan pindah ke sini dari dropdown terpisah: satu klik di kolomnya sendiri,
       // arahnya langsung terbaca dari panah yang menyala.
       headerCell: (
         <SortHeader
-          label="Sisa Stok"
+          label={t("masterInstrument.colRemaining")}
           direction={sortBy === "stock_asc" ? "asc" : sortBy === "stock_desc" ? "desc" : null}
           onChange={(next) =>
             dispatch(
@@ -435,9 +456,9 @@ export default function MasterInstrumenPage() {
                 ? "bg-blue-100 text-blue-700"
                 : "bg-green-100 text-green-700"
           }`}
-          title="Unit yang tidak sedang dipegang order berjalan (dihitung dari jejak order, bukan kolom status)"
+          title={t("masterInstrument.remainingHint")}
         >
-          {row.available_stocks_count} tersedia
+          {row.available_stocks_count} {t("masterInstrument.remainingSuffix")}
         </span>
       ),
       className: "w-32",
@@ -452,19 +473,19 @@ export default function MasterInstrumenPage() {
             <Stethoscope className="h-6 w-6" />
           </div>
           <div>
-            <h1 className="text-2xl font-bold text-gray-900">Master Instrumen</h1>
-            <p className="text-sm text-gray-500 mt-0.5">Kelola data instrumen medis</p>
+            <h1 className="text-2xl font-bold text-gray-900">{t("masterInstrument.title")}</h1>
+            <p className="text-sm text-gray-500 mt-0.5">{t("masterInstrument.subtitle")}</p>
           </div>
         </div>
         <Button onClick={openTambah} className="bg-[#075489] hover:bg-[#075489]/90 text-white">
-          + Tambah Instrumen
+          {t("masterInstrument.addInstrument")}
         </Button>
       </div>
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-        <StatCard title="Total Jenis Instrumen" value={String(stats.total_instruments)} icon={Box} />
-        <StatCard title="Total Unit Stok" value={String(stats.total_units)} icon={Layers} />
-        <StatCard title="Unit Tersedia" value={String(stats.available_units)} icon={PackageCheck} />
+        <StatCard title={t("masterInstrument.statTypes")} value={String(stats.total_instruments)} icon={Box} />
+        <StatCard title={t("masterInstrument.statUnits")} value={String(stats.total_units)} icon={Layers} />
+        <StatCard title={t("masterInstrument.statAvailable")} value={String(stats.available_units)} icon={PackageCheck} />
       </div>
 
       <Card className="p-0">
@@ -473,7 +494,7 @@ export default function MasterInstrumenPage() {
             <div className="relative flex-1">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 pointer-events-none" />
               <Input
-                placeholder="Cari nama instrumen..."
+                placeholder={t("masterInstrument.searchPlaceholder")}
                 value={searchInput}
                 onChange={(e) => setSearchInput(e.target.value)}
                 className="pl-9"
@@ -486,7 +507,7 @@ export default function MasterInstrumenPage() {
         </div>
 
         {loading ? (
-          <div className="py-16 text-center text-sm text-gray-400">Memuat data...</div>
+          <div className="py-16 text-center text-sm text-gray-400">{t("common.loading")}</div>
         ) : (
           <DataTable
             rowNumberOffset={(page - 1) * 20}
@@ -502,7 +523,7 @@ export default function MasterInstrumenPage() {
             onEdit={openEdit}
             onDelete={(row) => setDeleteInstrumenTarget(row)}
             isRowLoading={(row) => deletingId === row.id}
-            emptyMessage="Belum ada data instrumen."
+            emptyMessage={t("masterInstrument.emptyInstruments")}
           />
         )}
 
@@ -526,32 +547,32 @@ export default function MasterInstrumenPage() {
       <Modal
         open={modal !== null}
         onClose={() => setModal(null)}
-        title={modal === "tambah" ? "Tambah Instrumen" : "Edit Instrumen"}
+        title={modal === "tambah" ? t("masterInstrument.addModalTitle") : t("masterInstrument.editModalTitle")}
         size="sm"
         footer={
           <>
-            <Button variant="outline" onClick={() => setModal(null)}>Batal</Button>
+            <Button variant="outline" onClick={() => setModal(null)}>{t("common.cancel")}</Button>
             <Button onClick={handleSave} disabled={saving || !form.code.trim() || !form.name.trim()} className="bg-[#075489] hover:bg-[#075489]/90 text-white">
-              {saving ? "Menyimpan..." : "Simpan"}
+              {saving ? t("common.saving") : t("common.save")}
             </Button>
           </>
         }
       >
         <div className="space-y-4">
           <div className="space-y-1.5">
-            <Label htmlFor="ins-kode">Kode Instrumen</Label>
+            <Label htmlFor="ins-kode">{t("masterInstrument.fieldCode")}</Label>
             <Input
               id="ins-kode"
-              placeholder="Contoh: INS-001"
+              placeholder={t("masterInstrument.fieldCodeHint")}
               value={form.code}
               onChange={(e) => setForm((f) => ({ ...f, code: e.target.value }))}
             />
           </div>
           <div className="space-y-1.5">
-            <Label htmlFor="ins-nama">Nama Instrumen</Label>
+            <Label htmlFor="ins-nama">{t("masterInstrument.fieldName")}</Label>
             <Input
               id="ins-nama"
-              placeholder="Contoh: Stetoskop"
+              placeholder={t("masterInstrument.fieldNameHint")}
               value={form.name}
               onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
             />
@@ -559,12 +580,12 @@ export default function MasterInstrumenPage() {
 
           {/* Gambar instrumen (opsional) */}
           <div className="space-y-1.5">
-            <Label>Gambar (opsional)</Label>
+            <Label>{t("masterInstrument.fieldImage")}</Label>
             <div className="flex items-center gap-4">
               <div className="flex h-20 w-20 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-gray-200 bg-gray-50">
                 {previewSrc ? (
                   // eslint-disable-next-line @next/next/no-img-element
-                  <img src={previewSrc} alt="Pratinjau gambar instrumen" className="h-full w-full object-cover" />
+                  <img src={previewSrc} alt={t("masterInstrument.fieldImage")} className="h-full w-full object-cover" />
                 ) : (
                   <ImageIcon className="h-7 w-7 text-gray-300" />
                 )}
@@ -579,7 +600,7 @@ export default function MasterInstrumenPage() {
                     className="border-[#075489] text-[#075489] hover:bg-[#075489]/10"
                   >
                     <Upload className="h-3.5 w-3.5" />
-                    {previewSrc ? "Ganti" : "Pilih Gambar"}
+                    {previewSrc ? t("masterInstrument.imageReplace") : t("masterInstrument.imagePick")}
                   </Button>
                   {previewSrc && (
                     <Button
@@ -590,11 +611,11 @@ export default function MasterInstrumenPage() {
                       className="border-red-300 text-red-500 hover:bg-red-50"
                     >
                       <X className="h-3.5 w-3.5" />
-                      Hapus
+                      {t("common.delete")}
                     </Button>
                   )}
                 </div>
-                <p className="text-xs text-gray-400">JPG/PNG/WEBP, maks 2 MB.</p>
+                <p className="text-xs text-gray-400">{t("masterInstrument.imageHint")}</p>
               </div>
               <input
                 ref={fileInputRef}
@@ -618,7 +639,7 @@ export default function MasterInstrumenPage() {
                   <Layers className="h-5 w-5" />
                 </div>
                 <div>
-                  <h2 className="text-base font-semibold text-gray-900">Stock Instrumen</h2>
+                  <h2 className="text-base font-semibold text-gray-900">{t("masterInstrument.stockTitle")}</h2>
                   <div className="mt-1 flex items-center gap-2">
                     <span className="font-mono text-xs font-semibold text-[#075489] bg-[#075489]/8 px-2 py-0.5 rounded">
                       {stockModal.code}
@@ -637,32 +658,32 @@ export default function MasterInstrumenPage() {
 
             {!stockLoading && stocks.length > 0 && (
               <div className="flex flex-wrap items-center gap-x-6 gap-y-1 border-b border-gray-100 px-4 py-3 text-sm sm:px-6">
-                <span className="text-gray-500">Total unit: <span className="font-semibold text-gray-900">{stocks.length}</span></span>
-                <span className="text-gray-500">Tersedia: <span className="font-semibold text-[#4ba69d]">{stocks.filter((s) => s.is_available).length}</span></span>
-                <span className="text-gray-500">Dipakai/Proses: <span className="font-semibold text-amber-500">{stocks.filter((s) => !s.is_available).length}</span></span>
+                <span className="text-gray-500">{t("masterInstrument.stockTotal")}: <span className="font-semibold text-gray-900">{stocks.length}</span></span>
+                <span className="text-gray-500">{t("masterInstrument.stockAvailable")}: <span className="font-semibold text-[#4ba69d]">{stocks.filter((s) => s.is_available).length}</span></span>
+                <span className="text-gray-500">{t("masterInstrument.stockInUse")}: <span className="font-semibold text-amber-500">{stocks.filter((s) => !s.is_available).length}</span></span>
               </div>
             )}
 
             <div className="flex-1 overflow-x-auto overflow-y-auto">
               {stockLoading ? (
-                <div className="py-10 text-center text-sm text-gray-400">Memuat stock...</div>
+                <div className="py-10 text-center text-sm text-gray-400">{t("masterInstrument.stockLoading")}</div>
               ) : stocks.length === 0 ? (
                 <div className="flex flex-col items-center gap-2 py-14 text-gray-400">
                   <div className="flex h-14 w-14 items-center justify-center rounded-full bg-gray-50">
                     <Layers className="h-7 w-7" />
                   </div>
-                  <p className="text-sm font-medium text-gray-500">Belum ada stock untuk instrumen ini.</p>
-                  <p className="text-xs">Tambahkan unit pertama lewat form di bawah.</p>
+                  <p className="text-sm font-medium text-gray-500">{t("masterInstrument.stockEmpty")}</p>
+                  <p className="text-xs">{t("masterInstrument.stockEmptyHint")}</p>
                 </div>
               ) : (
                 <table className="w-full min-w-[640px] text-sm">
                   <thead>
                     <tr className="border-b border-gray-100">
                       <th className="py-3 pl-4 pr-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-400 w-10">No</th>
-                      <th className="py-3 px-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-400">Kode Stock</th>
-                      <th className="py-3 px-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-400">Nama Instrumen</th>
-                      <th className="py-3 px-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-400 w-44">Kondisi</th>
-                      <th className="py-3 px-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-400 w-36">Status</th>
+                      <th className="py-3 px-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-400">{t("masterInstrument.colStockCode")}</th>
+                      <th className="py-3 px-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-400">{t("masterInstrument.colName")}</th>
+                      <th className="py-3 px-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-400 w-44">{t("masterInstrument.colCondition")}</th>
+                      <th className="py-3 px-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-400 w-36">{t("common.status")}</th>
                       <th className="py-3 pl-3 pr-4 w-48" />
                     </tr>
                   </thead>
@@ -686,9 +707,9 @@ export default function MasterInstrumenPage() {
                           <td className="py-3 px-3 text-gray-700">{stockModal.name}</td>
                           <td className="py-3 px-3">
                             {isEditing ? (
-                              <SelectSearch options={kondisiOptions} value={editConditionId} onChange={setEditConditionId} placeholder="-- Pilih kondisi --" />
+                              <SelectSearch options={kondisiOptions} value={editConditionId} onChange={setEditConditionId} placeholder={t("masterInstrument.pickCondition")} />
                             ) : (
-                              <Badge variant={kondisiBadgeVariant[kondisiName] ?? "default"}>{kondisiName}</Badge>
+                              <Badge variant={kondisiBadgeVariant[kondisiName] ?? "default"}>{tn(kondisiName)}</Badge>
                             )}
                           </td>
                           <td className="py-3 px-3">
@@ -696,16 +717,16 @@ export default function MasterInstrumenPage() {
                                 `status` — kalau tidak, unit yang dihitung sebagai
                                 "Dipakai/Proses" di atas bisa tetap ber-badge "Tersedia". */}
                             {item.is_available ? (
-                              <Badge variant="success">Tersedia</Badge>
+                              <Badge variant="success">{t("masterInstrument.available")}</Badge>
                             ) : (
                               <button
                                 type="button"
                                 onClick={() => openTracking(item)}
-                                title="Lihat tracking unit di pipeline CSSD"
+                                title={t("masterInstrument.trackingViewTitle")}
                                 className="inline-flex items-center rounded-full transition hover:opacity-90"
                               >
                                 <Badge variant={stageVariant[item.stage ?? ""] ?? "default"}>
-                                  {item.stage_label ?? "Tidak Tersedia"}
+                                  {item.stage_label ? tn(item.stage_label) : t("masterInstrument.unavailable")}
                                 </Badge>
                               </button>
                             )}
@@ -714,8 +735,8 @@ export default function MasterInstrumenPage() {
                             <div className="flex justify-end gap-2">
                               {isEditing ? (
                                 <>
-                                  <Button size="xs" onClick={handleSaveStockEdit} disabled={stockBusy} className="bg-[#075489] hover:bg-[#075489]/90 text-white">Simpan</Button>
-                                  <Button size="xs" variant="outline" onClick={() => setEditingStockId(null)}>Batal</Button>
+                                  <Button size="xs" onClick={handleSaveStockEdit} disabled={stockBusy} className="bg-[#075489] hover:bg-[#075489]/90 text-white">{t("common.save")}</Button>
+                                  <Button size="xs" variant="outline" onClick={() => setEditingStockId(null)}>{t("common.cancel")}</Button>
                                 </>
                               ) : (
                                 <>
@@ -728,7 +749,7 @@ export default function MasterInstrumenPage() {
                                     title={isLocked ? lockedHint(item) : undefined}
                                     onClick={() => { setEditingStockId(item.id); setEditConditionId(item.condition_id ? String(item.condition_id) : "") }}
                                   >
-                                    Edit
+                                    {t("common.edit")}
                                   </Button>
                                   <Button
                                     size="xs"
@@ -737,7 +758,7 @@ export default function MasterInstrumenPage() {
                                     title={isLocked ? lockedHint(item) : undefined}
                                     onClick={() => setDeleteStockTarget(item)}
                                   >
-                                    Hapus
+                                    {t("common.delete")}
                                   </Button>
                                 </>
                               )}
@@ -762,7 +783,7 @@ export default function MasterInstrumenPage() {
                   }}
                   className="bg-[#4ba69d] hover:bg-[#4ba69d]/90 text-white"
                 >
-                  + Tambah
+                  {t("masterInstrument.addStock")}
                 </Button>
               </div>
             </div>
@@ -774,18 +795,18 @@ export default function MasterInstrumenPage() {
       <Modal
         open={trackTarget !== null}
         onClose={() => setTrackTarget(null)}
-        title="Tracking Unit Instrumen"
+        title={t("masterInstrument.trackingTitle")}
         size="lg"
         footer={
           <Button variant="outline" onClick={() => setTrackTarget(null)}>
-            Tutup
+            {t("common.close")}
           </Button>
         }
       >
         {trackingLoading ? (
-          <div className="py-10 text-center text-sm text-gray-400">Memuat tracking...</div>
+          <div className="py-10 text-center text-sm text-gray-400">{t("masterInstrument.trackingLoading")}</div>
         ) : !tracking ? (
-          <div className="py-10 text-center text-sm text-gray-400">Data tracking tidak tersedia.</div>
+          <div className="py-10 text-center text-sm text-gray-400">{t("masterInstrument.trackingEmpty")}</div>
         ) : (
           <div className="space-y-5">
             {/* Identitas unit */}
@@ -794,22 +815,22 @@ export default function MasterInstrumenPage() {
                 {tracking.unit.code}
               </span>
               <span className="text-sm text-gray-700">{tracking.unit.instrument?.name ?? "—"}</span>
-              {tracking.unit.condition && <Badge variant="default">{tracking.unit.condition}</Badge>}
+              {tracking.unit.condition && <Badge variant="default">{tn(tracking.unit.condition)}</Badge>}
               {/* Tahap aktual (jejak pipeline), bukan kolom `status` unit. */}
               <Badge
                 variant={stageVariant[tracking.current_stage?.key ?? ""] ?? "default"}
                 className="ml-auto"
               >
-                {tracking.current_stage?.label ?? "Tersedia"}
+                {tracking.current_stage?.label ? tn(tracking.current_stage.label) : t("masterInstrument.available")}
               </Badge>
             </div>
 
             {/* Tahap saat ini + kode produksi */}
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <div className="rounded-lg border border-[#075489]/20 bg-[#075489]/5 px-4 py-3">
-                <p className="text-xs font-semibold uppercase tracking-wide text-[#075489]/70">Tahap Saat Ini</p>
+                <p className="text-xs font-semibold uppercase tracking-wide text-[#075489]/70">{t("masterInstrument.trackingCurrentStage")}</p>
                 <p className="mt-0.5 text-lg font-bold text-[#075489]">
-                  {tracking.current_stage?.label ?? "—"}
+                  {tracking.current_stage?.label ? tn(tracking.current_stage.label) : "—"}
                 </p>
                 <div className="mt-1.5 flex flex-wrap items-center gap-2">
                   {tracking.current_stage?.code && (
@@ -819,19 +840,28 @@ export default function MasterInstrumenPage() {
                   )}
                   {tracking.current_stage?.status && (
                     <Badge variant={pipelineStatusVariant[tracking.current_stage.status] ?? "info"}>
-                      {pipelineStatusLabel(tracking.current_stage.status)}
+                      {tn(pipelineStatusLabel(tracking.current_stage.status))}
                     </Badge>
                   )}
                 </div>
               </div>
               <div className="rounded-lg border border-gray-200 bg-gray-50 px-4 py-3">
-                <p className="text-xs font-semibold uppercase tracking-wide text-gray-400">Kode Produksi</p>
+                <p className="text-xs font-semibold uppercase tracking-wide text-gray-400">{t("masterInstrument.trackingProductionCode")}</p>
                 <p className="mt-0.5 font-mono text-lg font-bold text-gray-800">
                   {tracking.production_code ?? "—"}
                 </p>
                 {tracking.order && (
                   <p className="mt-1 text-xs text-gray-500">
                     Order <span className="font-semibold text-gray-700">{tracking.order.code}</span>
+                    {/* No. invoice terbit setelah order diterima CSSD — bisa masih kosong. */}
+                    {tracking.order.code_transaction ? (
+                      <>
+                        {" · Invoice "}
+                        <span className="font-semibold text-[#4ba69d]">
+                          {tracking.order.code_transaction}
+                        </span>
+                      </>
+                    ) : null}
                     {tracking.order.room ? ` · ${tracking.order.room}` : ""}
                     {tracking.order.borrowed_by ? ` · ${tracking.order.borrowed_by}` : ""}
                   </p>
@@ -842,7 +872,7 @@ export default function MasterInstrumenPage() {
             {/* Perjalanan unit antar tahap */}
             {tracking.stages.length > 0 && (
               <div className="space-y-1.5">
-                <Label>Perjalanan Unit</Label>
+                <Label>{t("masterInstrument.trackingJourney")}</Label>
                 <div className="divide-y divide-gray-100 rounded-lg border border-gray-200">
                   {tracking.stages.map((stage) => {
                     const isCurrent = stage.key === tracking.current_stage?.key
@@ -857,20 +887,29 @@ export default function MasterInstrumenPage() {
                           <CheckCircle2 className="h-4 w-4 shrink-0 text-[#4ba69d]" />
                         )}
                         <span className={`text-sm ${isCurrent ? "font-semibold text-[#075489]" : "text-gray-700"}`}>
-                          {stage.label}
+                          {tn(stage.label)}
                         </span>
                         {stage.code && (
                           <span className="font-mono text-[11px] font-semibold text-gray-600 bg-gray-100 px-1.5 py-0.5 rounded">
                             {stage.code}
                           </span>
                         )}
+                        {/* No. invoice order yang mengeluarkan/meminjam unit ini. */}
+                        {stage.invoice && (
+                          <span
+                            title={t("masterInstrument.trackingInvoiceTitle")}
+                            className="font-mono text-[11px] font-semibold text-[#4ba69d] bg-[#4ba69d]/10 px-1.5 py-0.5 rounded"
+                          >
+                            {stage.invoice}
+                          </span>
+                        )}
                         <div className="ml-auto flex items-center gap-2">
                           {stage.status && (
                             <Badge variant={pipelineStatusVariant[stage.status] ?? "default"}>
-                              {pipelineStatusLabel(stage.status)}
+                              {tn(pipelineStatusLabel(stage.status))}
                             </Badge>
                           )}
-                          <span className="hidden text-xs text-gray-400 sm:inline">{formatDateTime(stage.at)}</span>
+                          <span className="hidden text-xs text-gray-400 sm:inline">{formatDateTime(stage.at, lang)}</span>
                         </div>
                       </div>
                     )
@@ -887,11 +926,11 @@ export default function MasterInstrumenPage() {
       <Modal
         open={previewImage !== null}
         onClose={() => setPreviewImage(null)}
-        title={previewImage?.name ?? "Gambar Instrumen"}
+        title={previewImage?.name ?? t("masterInstrument.imageModalTitle")}
         size="lg"
         footer={
           <Button variant="outline" onClick={() => setPreviewImage(null)}>
-            Tutup
+            {t("common.close")}
           </Button>
         }
       >
@@ -911,25 +950,25 @@ export default function MasterInstrumenPage() {
       <Modal
         open={addStockOpen}
         onClose={stockBusy ? () => {} : () => setAddStockOpen(false)}
-        title="Tambah Stock"
+        title={t("masterInstrument.addStockTitle")}
         size="sm"
         footer={
           <>
             <Button variant="outline" onClick={() => setAddStockOpen(false)} disabled={stockBusy}>
-              Batal
+              {t("common.cancel")}
             </Button>
             <Button
               onClick={handleAddStock}
               disabled={stockBusy || !qtyValid}
               className="bg-[#4ba69d] hover:bg-[#4ba69d]/90 text-white"
             >
-              {stockBusy ? "Menyimpan..." : "Tambah"}
+              {stockBusy ? t("common.saving") : t("common.add")}
             </Button>
           </>
         }
       >
         <div className="space-y-1.5">
-          <Label htmlFor="stock-qty">Jumlah Unit</Label>
+          <Label htmlFor="stock-qty">{t("masterInstrument.addStockQty")}</Label>
           <Input
             id="stock-qty"
             type="number"
@@ -949,7 +988,7 @@ export default function MasterInstrumenPage() {
         onClose={() => setDeleteStockTarget(null)}
         onConfirm={handleDeleteStock}
         loading={stockBusy}
-        description="Apakah Anda yakin ingin menghapus stock ini? Tindakan ini tidak dapat dibatalkan."
+        description={t("masterInstrument.deleteStockDesc")}
       />
     </div>
   )

@@ -1,6 +1,7 @@
 "use client"
 
 import { ChevronLeft, ChevronRight } from "lucide-react"
+import { useT } from "@/lib/i18n"
 import { cn } from "@/lib/utils"
 
 type PaginationProps = {
@@ -20,8 +21,16 @@ export function Pagination({
   totalItems,
   itemsPerPage,
   onPageChange,
-  labels = { showing: "Menampilkan", of: "dari", items: "data" },
+  labels,
 }: PaginationProps) {
+  // Teks bawaan mengikuti BAHASA AKTIF; `labels` dari halaman tetap menang.
+  const t = useT()
+  const text = labels ?? {
+    showing: t("common.showing"),
+    of: t("common.of"),
+    items: t("common.items"),
+  }
+
   if (totalPages <= 1) return null
 
   const from = (currentPage - 1) * itemsPerPage + 1
@@ -42,8 +51,8 @@ export function Pagination({
   return (
     <div className="flex items-center justify-between px-5 py-3 border-t border-gray-100">
       <p className="text-xs text-gray-500">
-        {labels.showing} <span className="font-semibold text-gray-700">{from}–{to}</span>{" "}
-        {labels.of} <span className="font-semibold text-gray-700">{totalItems}</span> {labels.items}
+        {text.showing} <span className="font-semibold text-gray-700">{from}–{to}</span>{" "}
+        {text.of} <span className="font-semibold text-gray-700">{totalItems}</span> {text.items}
       </p>
 
       <div className="flex items-center gap-1">

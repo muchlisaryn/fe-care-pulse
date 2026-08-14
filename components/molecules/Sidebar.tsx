@@ -26,6 +26,7 @@ import {
   type LucideIcon,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { useLanguage } from "@/lib/i18n"
 import { useAppSelector } from "@/lib/store/hooks"
 import type { AuthMenuGroup } from "@/lib/store/slices/authSlice"
 // URL menu order masuk — tempat badge notifikasi, sekaligus penentu siapa yang
@@ -88,6 +89,11 @@ export function Sidebar({ className, collapsed = false, onExpand, onClose }: Sid
   const pathname = usePathname()
   const rawMenus = useAppSelector((s) => s.auth.menus)
   const incomingCount = useAppSelector((s) => s.notif.incomingCount)
+  // Nama menu & judul seksi datang dari database dan bisa berubah kapan saja, jadi
+  // diterjemahkan lewat glosarium (`tn`), bukan kamus statis. Kunci React tetap
+  // memakai nama ASLI supaya status buka/tutup menu tidak ikut ter-reset saat
+  // bahasanya diganti.
+  const { tn } = useLanguage()
 
   // Badge untuk sebuah menu: bila menu (atau salah satu submenunya) mengarah ke
   // halaman order masuk, tampilkan jumlah order masuk.
@@ -195,7 +201,7 @@ export function Sidebar({ className, collapsed = false, onExpand, onClose }: Sid
           >
             <span className="flex items-center gap-3">
               <Icon className="h-5 w-5 shrink-0" />
-              <span>{menu.name}</span>
+              <span>{tn(menu.name)}</span>
             </span>
             <span className="flex items-center gap-2">
               {!isOpen && <NotifBadge count={menuBadge(menu)} />}
@@ -225,7 +231,7 @@ export function Sidebar({ className, collapsed = false, onExpand, onClose }: Sid
                         : "text-gray-500 hover:bg-gray-100 hover:text-gray-900"
                     )}
                   >
-                    <span>{sub.name}</span>
+                    <span>{tn(sub.name)}</span>
                     <NotifBadge count={sub.url === INCOMING_MENU_URL ? incomingCount : 0} />
                   </Link>
                 )
@@ -250,7 +256,7 @@ export function Sidebar({ className, collapsed = false, onExpand, onClose }: Sid
         )}
       >
         <Icon className="h-5 w-5 shrink-0" />
-        <span>{menu.name}</span>
+        <span>{tn(menu.name)}</span>
         <NotifBadge count={menuBadge(menu)} className="ml-auto" />
       </Link>
     )
@@ -318,7 +324,7 @@ export function Sidebar({ className, collapsed = false, onExpand, onClose }: Sid
           >
             <div className="min-w-52 rounded-lg border border-gray-200 bg-white py-1 shadow-lg">
               <p className="px-3 py-1.5 text-[10px] font-bold uppercase tracking-widest text-gray-400">
-                {hoveredMenu.name}
+                {tn(hoveredMenu.name)}
               </p>
               {hoveredMenu.menu?.map((sub, subIdx) => {
                 if (!sub.url) return null
@@ -338,7 +344,7 @@ export function Sidebar({ className, collapsed = false, onExpand, onClose }: Sid
                         : "text-gray-700 hover:bg-gray-50"
                     )}
                   >
-                    {sub.name}
+                    {tn(sub.name)}
                   </Link>
                 )
               })}
@@ -380,7 +386,7 @@ export function Sidebar({ className, collapsed = false, onExpand, onClose }: Sid
               <div key={sectionKey} className="mb-1">
                 {section.title_menu && (
                   <p className="px-3 pb-1 pt-2 text-[10px] font-bold uppercase tracking-widest text-gray-400">
-                    {section.title_menu}
+                    {tn(section.title_menu)}
                   </p>
                 )}
                 <div className="flex flex-col gap-0.5">

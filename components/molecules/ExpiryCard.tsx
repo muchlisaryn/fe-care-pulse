@@ -1,4 +1,7 @@
+"use client"
+
 import { CalendarClock } from "lucide-react"
+import { useLanguage } from "@/lib/i18n"
 
 /**
  * Penanda masa kedaluwarsa steril. Unit yang sudah masuk masa peringatan (H-7) atau
@@ -51,8 +54,11 @@ export function ExpiryCard({
   expired = false,
   alert = false,
   className = "",
-  locale = "id",
+  locale,
 }: ExpiryCardProps) {
+  // Tanpa prop `locale`, kartu mengikuti bahasa yang sedang dipilih di header.
+  const { lang } = useLanguage()
+  locale ??= lang
   // Belum perlu perhatian → cukup tanggalnya, tanpa kartu.
   if (!alert && !expired) {
     return (

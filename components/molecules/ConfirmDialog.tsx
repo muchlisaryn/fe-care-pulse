@@ -4,6 +4,7 @@ import type { ReactNode } from "react"
 import { TriangleAlert } from "lucide-react"
 import { Button } from "@/components/atoms/Button"
 import { Modal } from "@/components/molecules/Modal"
+import { useT } from "@/lib/i18n"
 
 type ConfirmDialogProps = {
   open: boolean
@@ -25,14 +26,23 @@ export function ConfirmDialog({
   open,
   onClose,
   onConfirm,
-  title = "Hapus Data",
-  description = "Apakah Anda yakin ingin menghapus data ini? Tindakan ini tidak dapat dibatalkan.",
+  title,
+  description,
   loading = false,
-  confirmLabel = "Hapus",
-  loadingLabel = "Menghapus...",
-  cancelLabel = "Batal",
+  confirmLabel,
+  loadingLabel,
+  cancelLabel,
   size = "sm",
 }: ConfirmDialogProps) {
+  // Teks bawaan mengikuti BAHASA AKTIF, bukan lagi tetap bahasa Indonesia. Halaman
+  // yang mengirim `labels` sendiri tetap menang — propnya hanya jadi penimpa.
+  const t = useT()
+  title ??= t("common.confirmDelete")
+  description ??= t("common.confirmDeleteDesc")
+  confirmLabel ??= t("common.delete")
+  loadingLabel ??= t("common.deleting")
+  cancelLabel ??= t("common.cancel")
+
   return (
     <Modal
       open={open}

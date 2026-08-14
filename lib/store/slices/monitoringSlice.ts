@@ -141,7 +141,7 @@ export type RoomSummary = {
  * sebagai `per_page` supaya jumlah halaman dari server cocok dengan yang dipakai
  * komponen Pagination.
  */
-export const TRACKING_PER_PAGE = 30
+export const TRACKING_PER_PAGE = 10
 
 type MonitoringState = {
   /** Daftar ruangan LENGKAP dengan instrumennya — berat, hanya dimuat saat dibutuhkan. */

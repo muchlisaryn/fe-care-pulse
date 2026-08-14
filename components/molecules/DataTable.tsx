@@ -1,6 +1,7 @@
 "use client"
 
 import { Button } from "@/components/atoms/Button"
+import { useT } from "@/lib/i18n"
 import { cn } from "@/lib/utils"
 import type { ReactNode } from "react"
 
@@ -48,18 +49,22 @@ export function DataTable<T extends object>({
   onDelete,
   canDelete,
   extraActions,
-  emptyMessage = "Tidak ada data.",
+  emptyMessage,
   isRowLoading,
   rowNumber,
   hideRowNumber = false,
   rowNumberOffset = 0,
   labels,
 }: DataTableProps<T>) {
+  // Teks bawaan mengikuti BAHASA AKTIF; `labels`/`emptyMessage` dari halaman tetap
+  // menang karena banyak tabel perlu kalimat kosong yang khas halamannya.
+  const t = useT()
   const hasActions = !!(onEdit || onDelete || extraActions?.length)
   const rowNumberLabel = labels?.rowNumber ?? "No"
-  const actionsLabel = labels?.actions ?? "Aksi"
-  const editLabel = labels?.edit ?? "Edit"
-  const deleteLabel = labels?.delete ?? "Hapus"
+  const actionsLabel = labels?.actions ?? t("common.actions")
+  const editLabel = labels?.edit ?? t("common.edit")
+  const deleteLabel = labels?.delete ?? t("common.delete")
+  const emptyText = emptyMessage ?? t("common.noData")
 
   // Tombol aksi baris — dipakai bersama oleh tampilan tabel (desktop) & kartu (mobile).
   function renderActions(row: T, rowLoading: boolean) {
@@ -96,7 +101,7 @@ export function DataTable<T extends object>({
       {/* Mobile: tiap baris jadi kartu (label : nilai) agar rapi & tak terpotong. */}
       <div className="space-y-3 p-4 md:hidden">
         {data.length === 0 ? (
-          <p className="py-10 text-center text-sm text-gray-400">{emptyMessage}</p>
+          <p className="py-10 text-center text-sm text-gray-400">{emptyText}</p>
         ) : (
           data.map((row, i) => {
             const rowLoading = isRowLoading?.(row) ?? false
@@ -173,7 +178,7 @@ export function DataTable<T extends object>({
                 colSpan={columns.length + (hasActions ? 1 : 0) + (hideRowNumber ? 0 : 1)}
                 className="py-10 text-center text-sm text-gray-400"
               >
-                {emptyMessage}
+                {emptyText}
               </td>
             </tr>
           ) : (

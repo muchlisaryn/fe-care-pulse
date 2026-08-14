@@ -1707,7 +1707,7 @@ function MonitoringCssd() {
               </section>
 
               {/* Riwayat peminjaman: dibuat → diterima CSSD → dipinjam ruangan lain → selesai */}
-              <OrderTimeline orderId={returnOrder.id} locale="en" />
+              <OrderTimeline orderId={returnOrder.id} />
 
               {/* Data pengembalian */}
               <section className="space-y-3">
@@ -2110,7 +2110,7 @@ function MonitoringCssd() {
             )}
 
             {/* Timeline tracking: dibuat → di-ACC → dipindah antar ruangan → dikembalikan */}
-            <OrderTimeline orderId={historyOrder.id} locale="en" />
+            <OrderTimeline orderId={historyOrder.id} />
 
             {/* Grouping sama seperti Pengembalian: per paket/satuan + header nama &
                 barcode_no; read-only (kondisi keluar → masuk + status). */}

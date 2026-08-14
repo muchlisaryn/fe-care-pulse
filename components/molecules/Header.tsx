@@ -2,9 +2,11 @@
 
 import { useEffect, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
-import { Menu, User, ShieldCheck, LogOut } from "lucide-react"
+import { Menu, User, ShieldCheck, KeyRound, LogOut } from "lucide-react"
 import Link from "next/link"
 import { Logo } from "@/components/atoms/Logo"
+import { LanguageSwitch } from "@/components/atoms/LanguageSwitch"
+import { useT } from "@/lib/i18n"
 import { cn } from "@/lib/utils"
 import { useAppDispatch, useAppSelector } from "@/lib/store/hooks"
 import { logout } from "@/lib/store/slices/authSlice"
@@ -21,6 +23,7 @@ export function Header({ className, onToggleSidebar, onOpenMobileSidebar }: Head
   const dispatch = useAppDispatch()
   const router = useRouter()
   const { name, username } = useAppSelector((s) => s.auth)
+  const t = useT()
   const [open, setOpen] = useState(false)
   const dropdownRef = useRef<HTMLDivElement>(null)
 
@@ -71,7 +74,12 @@ export function Header({ className, onToggleSidebar, onOpenMobileSidebar }: Head
         <Logo width={120} height={36} />
       </div>
 
-      <div className="relative" ref={dropdownRef}>
+      {/* Pemilih bahasa duduk di samping tombol profil — keduanya satu kelompok
+          aksi milik pengguna di ujung kanan header. */}
+      <div className="flex items-center gap-1">
+        <LanguageSwitch />
+
+        <div className="relative" ref={dropdownRef}>
         <button
           onClick={() => setOpen((v) => !v)}
           className="flex items-center gap-3 rounded-lg px-2 py-1.5 transition-colors hover:bg-gray-100"
@@ -107,7 +115,17 @@ export function Header({ className, onToggleSidebar, onOpenMobileSidebar }: Head
                 <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-gray-100">
                   <User className="h-4 w-4 text-gray-600" />
                 </span>
-                Lihat Profil
+                {t("header.viewProfile")}
+              </Link>
+              <Link
+                href="/pengaturan/kata-sandi"
+                onClick={() => setOpen(false)}
+                className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm text-gray-700 transition-colors hover:bg-gray-50"
+              >
+                <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-gray-100">
+                  <KeyRound className="h-4 w-4 text-gray-600" />
+                </span>
+                {t("header.changePassword")}
               </Link>
               <Link
                 href="/pengaturan/sesi"
@@ -117,7 +135,7 @@ export function Header({ className, onToggleSidebar, onOpenMobileSidebar }: Head
                 <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-gray-100">
                   <ShieldCheck className="h-4 w-4 text-gray-600" />
                 </span>
-                Sesi Aktif
+                {t("header.activeSessions")}
               </Link>
             </div>
 
@@ -129,11 +147,12 @@ export function Header({ className, onToggleSidebar, onOpenMobileSidebar }: Head
                 <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-red-50">
                   <LogOut className="h-4 w-4 text-red-500" />
                 </span>
-                Keluar
+                {t("header.logout")}
               </button>
             </div>
           </div>
         )}
+        </div>
       </div>
     </header>
   )

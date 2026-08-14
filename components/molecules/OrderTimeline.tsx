@@ -5,6 +5,7 @@ import { ChevronDown, ChevronUp, ListTree, Loader2, Search } from "lucide-react"
 import { Badge } from "@/components/atoms/Badge"
 import { Button } from "@/components/atoms/Button"
 import { Modal } from "@/components/molecules/Modal"
+import { useLanguage } from "@/lib/i18n"
 import api from "@/lib/axios"
 
 // Satu baris tabel Detail packaging: tanggal | code (barcode_no) | nama | nama petugas.
@@ -430,11 +431,11 @@ export function OrderTimeline({
   events,
   orderId,
   scopeOrderId,
-  locale = "id",
+  locale,
 }: {
   events?: TimelineEvent[]
   orderId?: number
-  /** Bahasa teks timeline — halaman berbahasa Inggris mengirim "en". */
+  /** Bahasa teks timeline. Kosong = ikut bahasa yang dipilih di header. */
   locale?: TimelineLocale
   /**
    * Order yang dipakai MENYARING rincian Detail tiap tahap — satu batch pipeline
@@ -443,7 +444,10 @@ export function OrderTimeline({
    */
   scopeOrderId?: number
 }) {
-  const en = locale === "en"
+  // Tanpa prop `locale`, timeline mengikuti bahasa yang dipilih di header.
+  const { lang } = useLanguage()
+  const active: TimelineLocale = locale ?? lang
+  const en = active === "en"
   const detailOrderId = scopeOrderId ?? orderId
   const [expanded, setExpanded] = useState(false)
   const [detailEv, setDetailEv] = useState<TimelineEvent | null>(null)
@@ -591,7 +595,7 @@ export function OrderTimeline({
               showConnector={false}
               padBottom={false}
               onDetail={setDetailEv}
-              locale={locale}
+              locale={active}
             />
           </ol>
           <button
@@ -622,7 +626,7 @@ export function OrderTimeline({
                 showConnector={i < data.length - 1}
                 padBottom={i < data.length - 1}
                 onDetail={setDetailEv}
-                locale={locale}
+                locale={active}
               />
             ))}
           </ol>
@@ -664,14 +668,14 @@ export function OrderTimeline({
               </p>
             </div>
           ) : isPackaging ? (
-            <PackagingTable rows={lazyData?.rows ?? []} locale={locale} />
+            <PackagingTable rows={lazyData?.rows ?? []} locale={active} />
           ) : (
             <LazyItemsTable
               items={lazyData?.items ?? []}
               codeLabel={
                 (en ? lazyCfg?.codeLabelEn : lazyCfg?.codeLabel) ?? (en ? "Number" : "Nomor")
               }
-              locale={locale}
+              locale={active}
             />
           ))}
       </Modal>

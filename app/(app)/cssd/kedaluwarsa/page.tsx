@@ -122,7 +122,7 @@ export default function KedaluwarsaPage() {
           daysToExpiry={b.days_to_expiry}
           expired={b.expired}
           alert={b.alert}
-          locale="en"
+         
         />
       ),
     },

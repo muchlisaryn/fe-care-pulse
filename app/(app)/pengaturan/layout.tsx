@@ -3,7 +3,7 @@
 import { useMemo } from "react"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
-import { Printer, Settings, Circle, type LucideIcon } from "lucide-react"
+import { Printer, Settings, KeyRound, Circle, type LucideIcon } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useAppSelector } from "@/lib/store/hooks"
 
@@ -11,6 +11,7 @@ import { useAppSelector } from "@/lib/store/hooks"
 const ICON_MAP: Record<string, LucideIcon> = {
   printer: Printer,
   settings: Settings,
+  key: KeyRound,
 }
 function iconFor(name?: string | null): LucideIcon {
   return (name && ICON_MAP[name]) || Circle

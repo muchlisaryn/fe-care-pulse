@@ -23,6 +23,7 @@ import { Card } from "@/components/molecules/Card"
 import { StatCard } from "@/components/molecules/StatCard"
 import { PageHeader } from "@/components/molecules/PageHeader"
 import { Modal } from "@/components/molecules/Modal"
+import { ResultDialog } from "@/components/molecules/ResultDialog"
 import { LoadMoreSentinel } from "@/components/molecules/LoadMoreSentinel"
 import { ExpiryCard } from "@/components/molecules/ExpiryCard"
 import { RackPickerModal } from "@/components/molecules/RackPickerModal"
@@ -36,12 +37,13 @@ import {
   type StorageIncomingUnit,
   type StorageInventoryRow,
 } from "@/lib/store/slices/storageSlice"
+import { useLanguage } from "@/lib/i18n"
 import api from "@/lib/axios"
 
 type StorageTab = "simpan" | "inventaris"
 
-// Kelompok unit pada modal simpan ke rak: tiap paket = satu grup (satu lokasi
-// rak untuk seluruh paket); tiap instrumen satuan = grup berisi satu unit.
+// Kelompok unit pada modal simpan ke rak. Satu grup = satu BUNGKUS steril
+// (satu nomor label kemasan) = satu benda yang ditaruh di satu lokasi rak.
 type StoreUnitGroup = {
   key: string
   source: "satuan" | "paket"
@@ -51,41 +53,54 @@ type StoreUnitGroup = {
   units: StorageIncomingUnit[]
 }
 
-// Judul grup pada modal simpan: paket → nama paket, satuan → nama instrumen.
-function groupTitle(g: StoreUnitGroup): string {
-  return (g.source === "paket" ? g.packageName : g.units[0]?.instrument) ?? "—"
+// Judul grup pada modal simpan: paket → nama paket; satuan → nama instrumennya.
+// Satu bungkus satuan bisa berisi lebih dari satu jenis instrumen, jadi namanya
+// diringkas ("Kom Kecil +2 more") alih-alih hanya menampilkan jenis yang pertama.
+function groupTitle(
+  g: StoreUnitGroup,
+  t: (key: string, vars?: Record<string, string | number>) => string,
+): string {
+  if (g.source === "paket") return g.packageName ?? "—"
+  const names = [...new Set(g.units.map((u) => u.instrument).filter(Boolean))] as string[]
+  if (names.length === 0) return "—"
+  return names.length === 1
+    ? names[0]
+    : `${names[0]} ${t("common.andMore", { n: names.length - 1 })}`
 }
 
-function formatDate(value: string | null) {
+function formatDate(value: string | null, lang: string) {
   if (!value) return "—"
   const d = new Date(value)
   if (Number.isNaN(d.getTime())) return value
-  return d.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" })
+  return d.toLocaleDateString(lang === "id" ? "id-ID" : "en-GB", { day: "2-digit", month: "short", year: "numeric" })
 }
 
-// Alasan sebuah baris tidak bisa dipesan — dikirim server dalam bahasa Indonesia,
-// halaman ini berbahasa Inggris. Alasan yang belum dikenal ditampilkan apa adanya
-// daripada hilang.
-const BLOCKED_LABEL: Record<string, string> = {
-  Kedaluwarsa: "Expired — reprocess before it can be ordered",
-  "Tanpa tanggal kedaluwarsa": "No sterile expiry date — cannot be guaranteed sterile",
-  "Sebungkus dengan unit kedaluwarsa": "Same package as an expired unit — the whole package is rejected",
+// Alasan sebuah baris tidak bisa dipesan — dikirim server dalam bahasa Indonesia.
+// Yang dipetakan di sini KUNCI kamusnya, bukan teksnya, supaya kalimatnya ikut
+// bahasa aktif. Alasan yang belum dikenal ditampilkan apa adanya daripada hilang.
+const BLOCKED_KEY: Record<string, string> = {
+  Kedaluwarsa: "storage.blockedExpired",
+  "Tanpa tanggal kedaluwarsa": "storage.blockedNoExpiry",
+  "Sebungkus dengan unit kedaluwarsa": "storage.blockedSamePackage",
 }
 
-function blockedLabel(reason: string | null): string {
-  if (!reason) return "Cannot be ordered"
-  return BLOCKED_LABEL[reason] ?? reason
+function blockedLabel(reason: string | null, t: (key: string) => string): string {
+  if (!reason) return t("storage.blockedDefault")
+  const key = BLOCKED_KEY[reason]
+  return key ? t(key) : reason
 }
 
-function errMsg(e: unknown): string {
+function errMsg(e: unknown, t: (key: string) => string): string {
   const x = e as { response?: { data?: { message?: string } } }
-  return x.response?.data?.message ?? "Something went wrong."
+  return x.response?.data?.message ?? t("common.somethingWrong")
 }
 
 const STORAGE_TABS: StorageTab[] = ["simpan", "inventaris"]
 
 function StorageSterilPage() {
   const dispatch = useAppDispatch()
+  // `t` = teks antarmuka; `tn` = label yang datang dari server (alasan tolak, dll).
+  const { t, tn, lang } = useLanguage()
   const searchParams = useSearchParams()
   const { incoming, productionIncoming, inventory, summary } = useAppSelector((s) => s.storage)
 
@@ -150,6 +165,12 @@ function StorageSterilPage() {
   const [rackById, setRackById] = useState<Record<number, string>>({})
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // Hasil penyimpanan ke rak. Dulu modalnya hanya menutup diam-diam, sehingga
+  // petugas tidak tahu berapa unit yang benar-benar masuk gudang — padahal server
+  // memang melewati unit yang keburu diambil / ditarik ke proses ulang.
+  const [result, setResult] = useState<{ variant: "success" | "error"; description: string } | null>(
+    null,
+  )
   // Foto instrumen yang sedang di-zoom (klik thumbnail) — null = tidak ada.
   const [zoom, setZoom] = useState<{ url: string; name: string } | null>(null)
   // Pilihan lokasi rak dari Master Rak (untuk dropdown saat simpan ke gudang).
@@ -256,6 +277,9 @@ function StorageSterilPage() {
     setError(null)
     setBulkRack("")
     setModalSearch("")
+    // Sisa state pemilih rak dari batch sebelumnya jangan terbawa ke modal ini.
+    setPickerTarget(null)
+    setScanNotice(null)
     const init: Record<number, string> = {}
     order.units.forEach((u) => {
       init[u.id] = u.rack_code ?? ""
@@ -263,29 +287,38 @@ function StorageSterilPage() {
     setRackById(init)
   }
 
-  // Unit modal dikelompokkan: paket (per package_name) jadi satu grup → satu rak.
-  // Satuan dengan JENIS instrumen yang sama juga digabung jadi satu grup → satu rak
-  // (karena akan disimpan di rak yang sama). Nomor label kemasan (barcode_no) ikut
-  // jadi kunci: bungkus steril berbeda label = barang berbeda meski isinya sejenis.
+  /**
+   * Unit modal dikelompokkan per NOMOR LABEL KEMASAN (`barcode_no`) — satu label =
+   * satu bungkus steril = satu benda fisik, dan satu benda fisik hanya bisa ditaruh
+   * di SATU rak.
+   *
+   * Labelnya dipakai apa adanya sebagai kunci, tanpa ikut menyertakan jenis
+   * (paket/satuan) maupun nama isinya: satu bungkus boleh berisi instrumen dengan
+   * nama berbeda-beda (isi paket, atau beberapa instrumen satuan dalam satu pouch).
+   * Dulu nama ikut jadi kunci, sehingga satu bungkus terpecah jadi beberapa baris
+   * yang masing-masing minta lokasi rak sendiri padahal barangnya cuma satu.
+   *
+   * Unit TANPA nomor label (data lama sebelum tahap packaging) tidak punya identitas
+   * bungkus yang bisa dipercaya — dikelompokkan seperti dulu, per jenis + nama.
+   */
   const unitGroups = useMemo<StoreUnitGroup[]>(() => {
     if (!active) return []
     const groups: StoreUnitGroup[] = []
     const byKey = new Map<string, StoreUnitGroup>()
     for (const u of active.units) {
-      // Paket → gabung per nama paket; satuan → gabung per jenis instrumen.
-      const name = u.source === "paket" ? u.package_name ?? "Package" : u.instrument ?? `#${u.id}`
-      const key = `${u.source}|${name}|${u.barcode_no ?? ""}`
+      const fallbackName =
+        u.source === "paket" ? u.package_name ?? "Package" : u.instrument ?? `#${u.id}`
+      const key = u.barcode_no ? `label|${u.barcode_no}` : `${u.source}|${fallbackName}`
       let g = byKey.get(key)
       if (!g) {
-        g = {
-          key,
-          source: u.source,
-          packageName: u.source === "paket" ? u.package_name ?? "Package" : null,
-          barcodeNo: u.barcode_no,
-          units: [],
-        }
+        g = { key, source: u.source, packageName: null, barcodeNo: u.barcode_no, units: [] }
         byKey.set(key, g)
         groups.push(g)
+      }
+      // Begitu ada isi berasal paket, seluruh bungkusnya diperlakukan sebagai paket.
+      if (u.source === "paket") {
+        g.source = "paket"
+        g.packageName ??= u.package_name ?? "Package"
       }
       g.units.push(u)
     }
@@ -301,7 +334,7 @@ function StorageSterilPage() {
     if (!q) return unitGroups
     return unitGroups.filter((g) =>
       [
-        groupTitle(g),
+        groupTitle(g, t),
         g.barcodeNo,
         ...g.units.flatMap((u) => [u.instrument, u.code]),
       ].some((v) => v?.toLowerCase().includes(q)),
@@ -310,6 +343,9 @@ function StorageSterilPage() {
 
   // Set satu lokasi rak untuk semua unit (belum tersimpan) dalam satu grup/paket.
   function setGroupRack(group: StoreUnitGroup, value: string) {
+    // Rak per grup membatalkan klaim tombol "Semua" — kalau tidak, tombolnya tetap
+    // berbunyi "All: RAK A1" padahal sudah tidak semua grup ada di rak itu.
+    setBulkRack("")
     setRackById((prev) => {
       const next = { ...prev }
       group.units.forEach((u) => {
@@ -331,6 +367,12 @@ function StorageSterilPage() {
     })
   }
 
+  // Minimal satu unit yang belum tersimpan sudah diberi lokasi rak? Selama belum,
+  // tombol simpan dimatikan — dulu tombolnya hidup lalu menolak dengan pesan merah.
+  const hasRackToSave = (active?.units ?? []).some(
+    (u) => !u.stored && (rackById[u.id] ?? "").trim() !== "",
+  )
+
   // Grup yang sedang jadi target modal "Pilih Rak" (null bila targetnya semua).
   const pickerGroup =
     pickerTarget?.type === "group" ? unitGroups.find((g) => g.key === pickerTarget.key) ?? null : null
@@ -341,12 +383,12 @@ function StorageSterilPage() {
     if (!pickerTarget) return
     if (pickerTarget.type === "all") {
       setAllRack(name)
-      setScanNotice(`Rack "${name}" → all instruments.`)
+      setScanNotice(t("storage.rackToAll", { rack: name }))
       return
     }
     if (!pickerGroup) return
     setGroupRack(pickerGroup, name)
-    setScanNotice(`Rack "${name}" → ${groupTitle(pickerGroup)}.`)
+    setScanNotice(t("storage.rackToGroup", { rack: name, group: groupTitle(pickerGroup, t) }))
   }
 
   // Tutup modal simpan + reset state pemilih rak sekaligus.
@@ -358,11 +400,12 @@ function StorageSterilPage() {
     setActive(null)
   }
 
-  // Notifikasi scan hilang sendiri setelah beberapa detik.
+  // Notifikasi scan hilang sendiri setelah beberapa detik. Penanda waktunya
+  // sengaja TIDAK dinamai `t` — nama itu sudah dipakai penerjemah di atas.
   useEffect(() => {
     if (!scanNotice) return
-    const t = setTimeout(() => setScanNotice(null), 4000)
-    return () => clearTimeout(t)
+    const timer = setTimeout(() => setScanNotice(null), 4000)
+    return () => clearTimeout(timer)
   }, [scanNotice])
 
   async function saveStorage() {
@@ -371,20 +414,39 @@ function StorageSterilPage() {
       .filter((u) => !u.stored && (rackById[u.id] ?? "").trim())
       .map((u) => ({ instrument_stock_id: u.id, rack_code: rackById[u.id].trim() }))
     if (items.length === 0) {
-      setError("Set a rack location for at least one unit that is not stored yet.")
+      setError(t("storage.noRackChosen"))
       return
     }
     setSaving(true)
     setError(null)
+    const storedBefore = active.stored_count
     try {
-      await api.post(active.store_url ?? `/master/orders/${active.id}/store`, { items })
+      const res = await api.post(active.store_url ?? `/master/orders/${active.id}/store`, { items })
+      // Server melewati (tanpa error) unit yang sudah tersimpan, sudah diambil, atau
+      // ditarik kembali ke produksi — jadi jumlah yang benar-benar masuk dibaca dari
+      // batch yang dikembalikannya, bukan diasumsikan sama dengan yang dikirim.
+      const after = res.data?.data as StorageIncomingOrder | undefined
+      const savedNow = after ? after.stored_count - storedBefore : items.length
+      const skipped = items.length - savedNow
+      setResult(
+        skipped > 0
+          ? {
+              variant: "error",
+              description: t("storage.storedPartial", {
+                saved: savedNow,
+                total: items.length,
+                skipped,
+              }),
+            }
+          : { variant: "success", description: t("storage.storedCount", { n: savedNow }) },
+      )
       closeModal()
       // Unit pindah dari "Perlu Disimpan" ke "Inventaris": muat ulang tab yang
       // sedang terbuka. Tab satunya ikut segar sendiri karena selalu di-fetch
       // ulang saat dibuka.
       loadTab()
     } catch (e) {
-      setError(errMsg(e))
+      setError(errMsg(e, t))
     } finally {
       setSaving(false)
     }
@@ -492,7 +554,7 @@ function StorageSterilPage() {
     return (
       <Asterisk
         className="ml-auto h-4 w-4 shrink-0 text-red-600"
-        aria-label="Some units need attention (7 days before sterile expiry)"
+        aria-label={t("storage.alertMark")}
       />
     )
   }
@@ -514,9 +576,9 @@ function StorageSterilPage() {
           daysToExpiry={s.days_to_expiry}
           expired={s.expired}
           alert={s.alert}
-          locale="en"
+         
         />
-        {!s.alert && !s.expired && <Badge variant="success">In Storage</Badge>}
+        {!s.alert && !s.expired && <Badge variant="success">{t("storage.inStorage")}</Badge>}
       </span>
     )
   }
@@ -537,7 +599,7 @@ function StorageSterilPage() {
             <button
               type="button"
               onClick={() => setZoom({ url: r.unit.image_url as string, name: r.unit.instrument ?? r.unit.code ?? "Instrument" })}
-              title="Click to enlarge"
+              title={t("storage.clickToEnlarge")}
               className="h-6 w-6 shrink-0 cursor-zoom-in overflow-hidden rounded border border-gray-200"
             >
               {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -564,20 +626,20 @@ function StorageSterilPage() {
             daysToExpiry={r.days_to_expiry}
             expired={r.expired}
             alert={r.alert}
-            locale="en"
+           
           />
           {/* Barang yang tidak layak TETAP tampil di daftar — petugas perlu tahu
               fisiknya ada di rak tapi harus diproses ulang — hanya ditandai bahwa ia
               tidak bisa dipesan, beserta alasannya. Aturannya sama persis dengan yang
               dipakai saat distribusi, jadi penanda ini tidak bisa meleset. */}
           {r.can_distribute === false && (
-            <span title={blockedLabel(r.blocked_reason)}>
-              <Badge variant="danger">Not orderable</Badge>
+            <span title={blockedLabel(r.blocked_reason, t)}>
+              <Badge variant="danger">{t("storage.notOrderable")}</Badge>
             </span>
           )}
           {r.barcode_no ? (
             <span
-              title="Package label number"
+              title={t("storage.packageLabelNo")}
               className="font-mono text-xs font-semibold text-[#4ba69d] bg-[#4ba69d]/10 px-1.5 py-0.5 rounded"
             >
               {r.barcode_no}
@@ -603,14 +665,14 @@ function StorageSterilPage() {
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Sterile Storage"
-        subtitle="Store sterile instruments on warehouse racks & monitor their expiry"
+        title={t("storage.title")}
+        subtitle={t("storage.subtitle")}
       />
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-        <StatCard title="Instruments in Sterile Storage" value={`${summary.total}`} icon={Warehouse} />
-        <StatCard title="Expiring Soon" value={`${summary.alert}`} icon={CalendarClock} positive={false} />
-        <StatCard title="Already Expired" value={`${summary.expired}`} icon={AlertTriangle} positive={false} />
+        <StatCard title={t("storage.statTotal")} value={`${summary.total}`} icon={Warehouse} />
+        <StatCard title={t("storage.statAlert")} value={`${summary.alert}`} icon={CalendarClock} positive={false} />
+        <StatCard title={t("storage.statExpired")} value={`${summary.expired}`} icon={AlertTriangle} positive={false} />
       </div>
 
       <Card className="p-0">
@@ -623,10 +685,10 @@ function StorageSterilPage() {
                 // null = tabnya belum pernah dibuka, jadi angkanya belum diketahui.
                 {
                   key: "simpan",
-                  label: "To Be Stored",
+                  label: t("storage.tabToStore"),
                   count: incoming.loaded ? incoming.total + productionIncoming.total : null,
                 },
-                { key: "inventaris", label: "Storage Inventory", count: summary.total },
+                { key: "inventaris", label: t("storage.tabInventory"), count: summary.total },
               ] as { key: StorageTab; label: string; count: number | null }[]
             ).map((t) => {
               const activeT = tab === t.key
@@ -664,8 +726,8 @@ function StorageSterilPage() {
               <Input
                 placeholder={
                   tab === "simpan"
-                    ? "Search order / borrower / room..."
-                    : "Search unit code, instrument, rack, or order..."
+                    ? t("storage.searchIncoming")
+                    : t("storage.searchInventory")
                 }
                 value={searchInput}
                 onChange={(e) => setSearchInput(e.target.value)}
@@ -673,17 +735,17 @@ function StorageSterilPage() {
               />
             </div>
             <Button type="submit" className="bg-[#075489] hover:bg-[#075489]/90 text-white shrink-0">
-              Search
+              {t("common.search")}
             </Button>
           </form>
         </div>
 
         {tab === "simpan" ? (
           incoming.loading || (!incoming.loaded && !productionIncoming.loaded) ? (
-            <div className="py-16 text-center text-sm text-gray-400">Loading data...</div>
+            <div className="py-16 text-center text-sm text-gray-400">{t("common.loading")}</div>
           ) : incomingAll.length === 0 ? (
             <div className="py-16 text-center text-sm text-gray-400">
-              {q ? "No matching batch." : "No sterile order / batch needs storing yet."}
+              {q ? t("storage.noMatchingBatch") : t("storage.noIncoming")}
             </div>
           ) : (
             <div className="space-y-2 p-4">
@@ -697,7 +759,7 @@ function StorageSterilPage() {
                       <div className="min-w-0">
                         <div className="flex flex-wrap items-center gap-2">
                           <span className="text-sm font-semibold text-gray-900">
-                            {order.source === "produksi" ? `Batch ${order.code}` : (order.borrowed_by ?? "—")}
+                            {order.source === "produksi" ? `${t("storage.batchPrefix")} ${order.code}` : (order.borrowed_by ?? "—")}
                           </span>
                           {order.source !== "produksi" && (
                             <span className="font-mono text-xs font-semibold text-[#075489] bg-[#075489]/10 px-2 py-0.5 rounded">
@@ -706,13 +768,13 @@ function StorageSterilPage() {
                           )}
                           {order.stored_count > 0 && order.stored_count < order.unit_count && (
                             <Badge variant="warning">
-                              {order.stored_count}/{order.unit_count} stored
+                              {t("storage.storedOf", { stored: order.stored_count, total: order.unit_count })}
                             </Badge>
                           )}
                         </div>
                         <div className="mt-1 flex flex-wrap gap-x-4 gap-y-0.5 text-xs text-gray-500">
-                          <span>{order.unit_count} unit</span>
-                          <span>Expiry: {formatDate(order.expiry_date)}</span>
+                          <span>{order.unit_count} {t("storage.unitsSuffix")}</span>
+                          <span>{t("storage.expiry")}: {formatDate(order.expiry_date, lang)}</span>
                         </div>
                       </div>
                     </div>
@@ -721,7 +783,7 @@ function StorageSterilPage() {
                       onClick={() => openStore(order)}
                       className="shrink-0 self-center rounded-md border border-[#075489] bg-[#075489] px-3 py-1.5 text-xs font-medium text-white hover:bg-[#075489]/90"
                     >
-                      Store on Rack
+                      {t("storage.storeOnRack")}
                     </button>
                   </div>
                 </div>
@@ -731,7 +793,7 @@ function StorageSterilPage() {
             </div>
           )
         ) : inventory.loading ? (
-          <div className="py-16 text-center text-sm text-gray-400">Loading data...</div>
+          <div className="py-16 text-center text-sm text-gray-400">{t("common.loading")}</div>
         ) : (
           <div className="space-y-3 p-4">
             {/* Toolbar: pengelompokan agar tidak menampilkan terlalu banyak baris.
@@ -743,14 +805,14 @@ function StorageSterilPage() {
                 onChange={(e) => setGroupBy(e.target.value as "rak" | "batch")}
                 className="w-auto"
               >
-                <option value="rak">By Rack</option>
-                <option value="batch">By Batch</option>
+                <option value="rak">{t("storage.byRack")}</option>
+                <option value="batch">{t("storage.byBatch")}</option>
               </Select>
             </div>
 
             {inventory.items.length === 0 ? (
               <div className="py-16 text-center text-sm text-gray-400">
-                {q ? "No matching instrument." : "No instrument in sterile storage yet."}
+                {q ? t("storage.noMatchingInstrument") : t("storage.noInventory")}
               </div>
             ) : (
             <div className="space-y-2">
@@ -774,7 +836,7 @@ function StorageSterilPage() {
                           <Boxes className="h-4 w-4 shrink-0 text-[#075489]" />
                         )}
                         <span className="font-semibold text-gray-800">{g.key}</span>
-                        <span className="text-xs text-gray-400">{countItems(g.items)} items</span>
+                        <span className="text-xs text-gray-400">{countItems(g.items)} {t("storage.itemsSuffix")}</span>
                         {/* Kedaluwarsa TIDAK ditampilkan di tingkat rak/batch maupun
                             jenis instrumen: satu rak berisi banyak tanggal berbeda,
                             sehingga satu tanggal di sini menyesatkan. Cukup bintang
@@ -802,11 +864,11 @@ function StorageSterilPage() {
                                     <ChevronRight className="h-3.5 w-3.5 shrink-0 text-gray-400" />
                                   )}
                                   <Badge variant={isPaket ? "info" : "default"}>
-                                    {isPaket ? "Package" : "Single"}
+                                    {isPaket ? t("common.package") : t("common.single")}
                                   </Badge>
                                   <span className="font-medium text-gray-800">{kind.name}</span>
                                   <span className="text-xs text-gray-400">
-                                    {isPaket ? `${kind.sets.length} sets` : `${kind.units.length} units`}
+                                    {isPaket ? `${kind.sets.length} ${t("storage.setsSuffix")}` : `${kind.units.length} ${t("storage.unitsSuffix")}`}
                                   </span>
                                   {renderAlertMark(kind.units)}
                                 </button>
@@ -834,21 +896,21 @@ function StorageSterilPage() {
                                               <span className="text-gray-700">
                                                 {kind.name}
                                                 <span className="ml-1 text-xs text-gray-400">
-                                                  (set {i + 1})
+                                                  ({t("storage.setIndex", { n: i + 1 })})
                                                 </span>
                                               </span>
                                               {set.barcodeNo ? (
                                                 <span
-                                                  title="Package label number"
+                                                  title={t("storage.packageLabelNo")}
                                                   className="font-mono text-xs font-semibold text-[#4ba69d] bg-[#4ba69d]/10 px-1.5 py-0.5 rounded"
                                                 >
                                                   {set.barcodeNo}
                                                 </span>
                                               ) : (
-                                                <span className="text-xs text-gray-400">no label</span>
+                                                <span className="text-xs text-gray-400">{t("storage.noLabel")}</span>
                                               )}
                                               <span className="text-xs text-gray-400">
-                                                {set.units.length} units
+                                                {set.units.length} {t("storage.unitsSuffix")}
                                               </span>
                                               {renderExpiryMeta(set.units)}
                                             </button>
@@ -885,21 +947,22 @@ function StorageSterilPage() {
       <Modal
         open={active !== null}
         onClose={saving ? () => {} : closeModal}
-        title="Store in Warehouse"
+        title={t("storage.modalTitle")}
         size="xl"
         footer={
           <div className="flex w-full flex-col items-stretch gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
             {error ? <p className="text-sm text-red-600">{error}</p> : null}
             <div className="flex shrink-0 justify-end gap-2 sm:ml-auto">
               <Button variant="outline" onClick={closeModal} disabled={saving}>
-                Cancel
+                {t("common.cancel")}
               </Button>
               <Button
                 onClick={saveStorage}
-                disabled={saving}
+                disabled={saving || !hasRackToSave}
+                title={hasRackToSave ? undefined : t("storage.needRackFirst")}
                 className="bg-[#075489] hover:bg-[#075489]/90 text-white"
               >
-                {saving ? "Saving..." : "Store in Warehouse"}
+                {saving ? t("common.saving") : t("storage.modalTitle")}
               </Button>
             </div>
           </div>
@@ -915,7 +978,7 @@ function StorageSterilPage() {
                     tombol rak lebar tetap di kanan. */}
                 <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
                   <p className="min-w-0 flex-1 text-sm font-medium text-gray-800">
-                    Set the rack location for all instruments
+                    {t("storage.setRackForAll")}
                   </p>
                   {/* Pilih satu rak → isi otomatis ke SEMUA instrumen batch ini. */}
                   <Button
@@ -923,9 +986,9 @@ function StorageSterilPage() {
                     variant="outline"
                     onClick={() => setPickerTarget({ type: "all" })}
                     className="w-full shrink-0 sm:w-52"
-                    title="Pick one rack for every instrument in this batch"
+                    title={t("storage.pickRackAllTitle")}
                   >
-                    <span className="truncate">{bulkRack ? `All: ${bulkRack}` : "Pick Rack (All)"}</span>
+                    <span className="truncate">{bulkRack ? `${t("storage.allPrefix")}: ${bulkRack}` : t("storage.pickRackAll")}</span>
                   </Button>
                 </div>
                 {scanNotice && (
@@ -940,7 +1003,7 @@ function StorageSterilPage() {
             <div className="relative w-full">
               <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
               <Input
-                placeholder="Search instrument code or name..."
+                placeholder={t("storage.searchInModal")}
                 value={modalSearch}
                 onChange={(e) => setModalSearch(e.target.value)}
                 className="pl-9 pr-9"
@@ -949,7 +1012,7 @@ function StorageSterilPage() {
                 <button
                   type="button"
                   onClick={() => setModalSearch("")}
-                  title="Clear search"
+                  title={t("storage.clearSearch")}
                   className="absolute right-2 top-1/2 flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-md text-gray-400 hover:bg-gray-100 hover:text-gray-600"
                 >
                   <X className="h-3.5 w-3.5" />
@@ -962,7 +1025,7 @@ function StorageSterilPage() {
             <div className="space-y-2">
               {filteredGroups.length === 0 && (
                 <div className="py-10 text-center text-sm text-gray-400">
-                  No matching package / instrument.
+                  {t("storage.noMatchingGroup")}
                 </div>
               )}
               {filteredGroups.map((g) => {
@@ -971,11 +1034,15 @@ function StorageSterilPage() {
                 const allStored = !firstUnstored
                 const groupRack = firstUnstored ? rackById[firstUnstored.id] ?? "" : g.units[0]?.rack_code ?? ""
                 const isPaket = g.source === "paket"
-                const title = groupTitle(g)
-                // Paket → gambar SET (katalog); satuan → gambar instrumen. Fallback komponen pertama.
+                const title = groupTitle(g, t)
+                // Paket → gambar SET (katalog); satuan → gambar instrumen. Dicari dari
+                // seluruh isi bungkus, bukan unit pertama: satu bungkus bisa campuran,
+                // dan unit pertamanya belum tentu yang membawa foto set.
                 const photo = isPaket
-                  ? g.units[0]?.package_image ?? g.units[0]?.image_url ?? null
-                  : g.units[0]?.image_url ?? null
+                  ? g.units.find((u) => u.package_image)?.package_image ??
+                    g.units.find((u) => u.image_url)?.image_url ??
+                    null
+                  : g.units.find((u) => u.image_url)?.image_url ?? null
                 return (
                   <div
                     key={g.key}
@@ -1001,7 +1068,7 @@ function StorageSterilPage() {
                             e.stopPropagation()
                             setZoom({ url: photo, name: title ?? "Instrument" })
                           }}
-                          title="Click to enlarge"
+                          title={t("storage.clickToEnlarge")}
                           className="group relative h-7 w-7 shrink-0 cursor-zoom-in overflow-hidden rounded-md border border-gray-200"
                         >
                           {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -1020,7 +1087,7 @@ function StorageSterilPage() {
                       )}
                       {/* Hanya paket yang diberi badge; satuan langsung tampil nama instrumennya. */}
                       <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
-                        {isPaket && <Badge variant="info">Package</Badge>}
+                        {isPaket && <Badge variant="info">{t("common.package")}</Badge>}
                         <span className="truncate text-sm font-medium text-gray-800">{title}</span>
                         {/* Nomor label kemasan yang tercetak di bungkus sterilnya. */}
                         {g.barcodeNo ? (
@@ -1030,7 +1097,7 @@ function StorageSterilPage() {
                         ) : (
                           <span className="text-xs text-gray-400">—</span>
                         )}
-                        <span className="text-xs text-gray-400">{g.units.length} units</span>
+                        <span className="text-xs text-gray-400">{g.units.length} {t("storage.unitsSuffix")}</span>
                       </div>
                       </div>
                       {/* Lokasi rak: tombol "Pilih Rak" → modal berisi scan QR atau
@@ -1041,7 +1108,7 @@ function StorageSterilPage() {
                             <Badge variant="success">
                               <span className="inline-flex items-center gap-1">
                                 <MapPin className="h-3 w-3" />
-                                {groupRack || "Stored"}
+                                {groupRack || t("storage.stored")}
                               </span>
                             </Badge>
                           </div>
@@ -1053,16 +1120,17 @@ function StorageSterilPage() {
                             className={
                               "w-full " + (groupRack ? "border-[#075489] text-[#075489]" : "")
                             }
-                            title="Pick a rack for this item — scan the QR or choose from the list"
+                            title={t("storage.pickRackTitle")}
                           >
-                            <span className="truncate">{groupRack || "Pick Rack"}</span>
+                            <span className="truncate">{groupRack || t("storage.pickRack")}</span>
                           </Button>
                         )}
                       </div>
                     </div>
-                    {/* Kode unit hanya untuk paket (rincian isi set). Satuan cukup
-                        nama instrumennya di header — tanpa kode. */}
-                    {isPaket && (
+                    {/* Rincian isi bungkus. Ditampilkan untuk paket, dan untuk bungkus
+                        satuan yang berisi lebih dari satu instrumen — di situ header
+                        hanya memuat ringkasan namanya, jadi isinya perlu dirinci. */}
+                    {(isPaket || g.units.length > 1) && (
                     <div className="mt-2 flex flex-wrap gap-1.5">
                       {g.units.map((u) => (
                         <span
@@ -1078,7 +1146,7 @@ function StorageSterilPage() {
                                 e.stopPropagation()
                                 setZoom({ url: u.image_url as string, name: u.instrument ?? u.code ?? "Instrument" })
                               }}
-                              title="Click to enlarge"
+                              title={t("storage.clickToEnlarge")}
                               className="h-4 w-4 shrink-0 cursor-zoom-in overflow-hidden rounded-sm border border-gray-200"
                             >
                               {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -1120,12 +1188,22 @@ function StorageSterilPage() {
         }
         target={
           pickerTarget?.type === "all"
-            ? "all instruments in this batch"
+            ? t("storage.pickerTargetAll")
             : pickerGroup
-              ? groupTitle(pickerGroup)
+              ? groupTitle(pickerGroup, t)
               : null
         }
         onSelect={handleRackPicked}
+      />
+
+      {/* Hasil simpan ke rak — termasuk peringatan bila ada unit yang dilewati */}
+      <ResultDialog
+        open={result !== null}
+        onClose={() => setResult(null)}
+        variant={result?.variant ?? "success"}
+        description={result?.description}
+        title={result?.variant === "error" ? t("storage.resultPartial") : t("storage.resultStored")}
+        actionLabel={result?.variant === "error" ? t("common.close") : t("common.done")}
       />
 
       {/* Zoom foto instrumen — overlay layar penuh, klik di mana saja untuk menutup */}

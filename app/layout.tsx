@@ -4,6 +4,7 @@ import "./globals.css";
 import { cn } from "@/lib/utils";
 import { StoreProvider } from "@/lib/store/provider";
 import { ToastProvider } from "@/components/molecules/ToastProvider";
+import { LanguageProvider } from "@/lib/i18n";
 
 const inter = Inter({subsets:['latin'],variable:'--font-sans'});
 
@@ -34,7 +35,9 @@ export default function RootLayout({
     >
       <body className="min-h-full flex flex-col">
         <StoreProvider>
-          <ToastProvider>{children}</ToastProvider>
+          <LanguageProvider>
+            <ToastProvider>{children}</ToastProvider>
+          </LanguageProvider>
         </StoreProvider>
       </body>
     </html>

@@ -1,28 +1,19 @@
 "use client"
 
 import { useState, useEffect } from "react"
+import Link from "next/link"
+import { KeyRound } from "lucide-react"
 import { Button } from "@/components/atoms/Button"
 import { Input } from "@/components/atoms/Input"
 import { Label } from "@/components/atoms/Label"
 import { Card } from "@/components/molecules/Card"
 import { PageHeader } from "@/components/molecules/PageHeader"
 import { useAppDispatch, useAppSelector } from "@/lib/store/hooks"
-import { updateProfile, updateToken } from "@/lib/store/slices/authSlice"
+import { updateProfile } from "@/lib/store/slices/authSlice"
 import { saveAuth, loadAuth } from "@/lib/auth"
 import api from "@/lib/axios"
 
 type ProfileForm = { name: string; username: string; email: string }
-type PasswordForm = {
-  current_password: string
-  password: string
-  password_confirmation: string
-}
-
-const emptyPassword: PasswordForm = {
-  current_password: "",
-  password: "",
-  password_confirmation: "",
-}
 
 export default function ProfilPage() {
   const dispatch = useAppDispatch()
@@ -35,10 +26,6 @@ export default function ProfilPage() {
   })
   const [profileMsg, setProfileMsg] = useState<{ type: "success" | "error"; text: string } | null>(null)
   const [profileSaving, setProfileSaving] = useState(false)
-
-  const [passwordForm, setPasswordForm] = useState<PasswordForm>(emptyPassword)
-  const [passwordMsg, setPasswordMsg] = useState<{ type: "success" | "error"; text: string } | null>(null)
-  const [passwordSaving, setPasswordSaving] = useState(false)
 
   useEffect(() => {
     setProfile({
@@ -68,32 +55,6 @@ export default function ProfilPage() {
       setProfileMsg({ type: "error", text: msg })
     } finally {
       setProfileSaving(false)
-    }
-  }
-
-  async function handlePasswordSave(e: React.FormEvent) {
-    e.preventDefault()
-    if (passwordForm.password !== passwordForm.password_confirmation) {
-      setPasswordMsg({ type: "error", text: "Konfirmasi password tidak sesuai." })
-      return
-    }
-    setPasswordMsg(null)
-    setPasswordSaving(true)
-    try {
-      const res = await api.put("/auth/change-password", passwordForm)
-      const newToken: string = res.data.data.token
-      dispatch(updateToken(newToken))
-      const stored = loadAuth()
-      if (stored) saveAuth(stored.username, newToken, stored.menus, stored.name, stored.email)
-      setPasswordForm(emptyPassword)
-      setPasswordMsg({ type: "success", text: "Password berhasil diubah." })
-    } catch (err: unknown) {
-      const msg =
-        (err as { response?: { data?: { message?: string } } })?.response?.data?.message
-        ?? "Gagal mengubah password."
-      setPasswordMsg({ type: "error", text: msg })
-    } finally {
-      setPasswordSaving(false)
     }
   }
 
@@ -184,83 +145,21 @@ export default function ProfilPage() {
             </form>
           </Card>
 
-          {/* Change password form */}
-          <Card>
-            <h2 className="mb-5 text-base font-semibold text-gray-900">Ubah Kata Sandi</h2>
-
-            {passwordMsg && (
-              <div
-                className={`mb-4 rounded-lg border px-4 py-3 text-sm ${
-                  passwordMsg.type === "success"
-                    ? "border-green-200 bg-green-50 text-green-700"
-                    : "border-red-200 bg-red-50 text-red-600"
-                }`}
-              >
-                {passwordMsg.text}
-              </div>
-            )}
-
-            <form onSubmit={handlePasswordSave} className="space-y-4">
-              <div className="space-y-1.5">
-                <Label htmlFor="pw-current">Kata Sandi Saat Ini</Label>
-                <Input
-                  id="pw-current"
-                  type="password"
-                  placeholder="••••••••"
-                  value={passwordForm.current_password}
-                  onChange={(e) => setPasswordForm((p) => ({ ...p, current_password: e.target.value }))}
-                  disabled={passwordSaving}
-                />
-              </div>
-              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                <div className="space-y-1.5">
-                  <Label htmlFor="pw-new">Kata Sandi Baru</Label>
-                  <Input
-                    id="pw-new"
-                    type="password"
-                    placeholder="••••••••"
-                    value={passwordForm.password}
-                    onChange={(e) => setPasswordForm((p) => ({ ...p, password: e.target.value }))}
-                    disabled={passwordSaving}
-                  />
-                </div>
-                <div className="space-y-1.5">
-                  <Label htmlFor="pw-confirm">Konfirmasi Kata Sandi</Label>
-                  <Input
-                    id="pw-confirm"
-                    type="password"
-                    placeholder="••••••••"
-                    value={passwordForm.password_confirmation}
-                    onChange={(e) =>
-                      setPasswordForm((p) => ({ ...p, password_confirmation: e.target.value }))
-                    }
-                    disabled={passwordSaving}
-                  />
-                </div>
-              </div>
-              <div className="flex justify-end gap-3 pt-1">
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() => { setPasswordForm(emptyPassword); setPasswordMsg(null) }}
-                  disabled={passwordSaving}
-                >
-                  Reset
-                </Button>
-                <Button
-                  type="submit"
-                  disabled={
-                    passwordSaving ||
-                    !passwordForm.current_password ||
-                    !passwordForm.password ||
-                    !passwordForm.password_confirmation
-                  }
-                  className="bg-[#075489] hover:bg-[#075489]/90 text-white"
-                >
-                  {passwordSaving ? "Menyimpan..." : "Ubah Password"}
-                </Button>
-              </div>
-            </form>
+          {/* Ubah kata sandi punya halamannya sendiri (/pengaturan/kata-sandi) —
+              di sini cukup penunjuk arah, bukan formulir kedua. */}
+          <Card className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <h2 className="text-base font-semibold text-gray-900">Kata Sandi</h2>
+              <p className="mt-0.5 text-sm text-gray-500">
+                Ganti kata sandi akun di halaman terpisah.
+              </p>
+            </div>
+            <Link href="/pengaturan/kata-sandi" className="shrink-0">
+              <Button variant="outline" className="border-[#075489] text-[#075489] hover:bg-[#075489]/10">
+                <KeyRound className="h-4 w-4" />
+                Ubah Kata Sandi
+              </Button>
+            </Link>
           </Card>
         </div>
       </div>
