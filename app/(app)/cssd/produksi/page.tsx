@@ -21,6 +21,7 @@ import { CleaningTab } from "@/components/molecules/CleaningTab"
 import { ProductionPackagingTab } from "@/components/molecules/ProductionPackagingTab"
 import { ProductionSterilizationTab } from "@/components/molecules/ProductionSterilizationTab"
 import { useToast } from "@/components/molecules/ToastProvider"
+import { useLanguage } from "@/lib/i18n"
 import api from "@/lib/axios"
 
 // Tab halaman Produksi CSSD: form produksi + tahapan pipeline reprocessing.
@@ -46,9 +47,9 @@ type ProduksiLine = {
   items?: PaketItem[] // rincian isi paket (untuk type `paket`) — ditampilkan sebagai detail
 }
 
-function errMsg(e: unknown): string {
+function errMsg(e: unknown, fallback: string): string {
   const x = e as { response?: { data?: { message?: string } } }
-  return x.response?.data?.message ?? "Something went wrong."
+  return x.response?.data?.message ?? fallback
 }
 
 // Date lokal → "YYYY-MM-DD" untuk <input type="date">.
@@ -78,6 +79,8 @@ function ProduksiCssdPage() {
   const router = useRouter()
   const dispatch = useAppDispatch()
   const toast = useToast()
+  // `t` = teks antarmuka (kamus), `tn` = nama dari database (instrumen / paket).
+  const { t, tn } = useLanguage()
 
   // Tab aktif: form produksi atau salah satu tahap pipeline. Disinkronkan ke URL
   // (?tab=cleaning) agar tiap tahap punya URL sendiri & bisa di-deep-link.
@@ -291,7 +294,7 @@ function ProduksiCssdPage() {
     setScanInput(code)
 
     if (scannedCodes.includes(code)) {
-      toast.error(`Label "${code}" is already selected.`)
+      toast.error(t("production.scanAlreadySelected", { code }))
       return
     }
 
@@ -303,8 +306,8 @@ function ProduksiCssdPage() {
       const index = sterActive.findIndex((o) => o.barcode_no === code)
       if (index < 0) {
         setScanAlert({
-          title: "Label Not in List",
-          message: `Label "${code}" is valid, but it is not in the list currently shown. Check the date range or the active sub-tab, then scan again.`,
+          title: t("production.scanNotInListTitle"),
+          message: t("production.scanNotInListMsg", { code }),
         })
         return
       }
@@ -313,7 +316,7 @@ function ProduksiCssdPage() {
       // yang memuatnya, baru digulirkan ke posisinya.
       setPage(Math.floor(index / ITEMS_PER_PAGE) + 1)
       setScannedCodes((prev) => [...prev, code])
-      toast.success(`${label?.name ?? code} selected.`)
+      toast.success(t("production.scanSelected", { name: tn(label?.name) || code }))
       // Kolom dikosongkan begitu tercentang → siap menerima barcode berikutnya.
       setScanInput("")
 
@@ -327,7 +330,10 @@ function ProduksiCssdPage() {
         }),
       )
     } catch (e) {
-      setScanAlert({ title: "Unknown Barcode", message: errMsg(e) })
+      setScanAlert({
+        title: t("production.scanUnknownTitle"),
+        message: errMsg(e, t("common.somethingWrong")),
+      })
     } finally {
       setScanChecking(false)
     }
@@ -521,9 +527,9 @@ function ProduksiCssdPage() {
   const options = useMemo(
     () =>
       mode === "satuan"
-        ? instruments.map((i) => ({ value: String(i.id), label: i.name }))
-        : catalogs.map((c) => ({ value: String(c.id), label: c.name })),
-    [mode, instruments, catalogs],
+        ? instruments.map((i) => ({ value: String(i.id), label: tn(i.name) }))
+        : catalogs.map((c) => ({ value: String(c.id), label: tn(c.name) })),
+    [mode, instruments, catalogs, tn],
   )
 
   // Pindah mode → reset pilihan yang sedang diisi.
@@ -593,7 +599,7 @@ function ProduksiCssdPage() {
   async function submit() {
     if (saving) return
     if (lines.length === 0) {
-      setFormError("Add at least one instrument type / package.")
+      setFormError(t("production.errNoLines"))
       return
     }
     const items = lines.map((l) => ({
@@ -604,7 +610,7 @@ function ProduksiCssdPage() {
         : { instrument_catalog_id: l.refId, package_name: l.name }),
     }))
     if (items.some((it) => !it.quantity || it.quantity <= 0)) {
-      setFormError("Quantity for each line must be greater than 0.")
+      setFormError(t("production.errQty"))
       return
     }
     setSaving(true)
@@ -617,9 +623,9 @@ function ProduksiCssdPage() {
       // lalu alihkan ke tab Cleaning (efek lazy-load akan memuat ulang datanya).
       dispatch(invalidateCleaning())
       changeTab("cleaning")
-      toast.success(res.data?.message ?? "Production batch created and moved to the Cleaning stage.")
+      toast.success(res.data?.message ?? t("production.successProduction"))
     } catch (e) {
-      const msg = errMsg(e)
+      const msg = errMsg(e, t("common.somethingWrong"))
       setFormError(msg)
       toast.error(msg)
     } finally {
@@ -629,20 +635,17 @@ function ProduksiCssdPage() {
 
   return (
     <div className="space-y-6">
-      <PageHeader
-        title="CSSD Production"
-        subtitle="Start production & monitor the reprocessing stages: Cleaning → Inspection → Sterilization"
-      />
+      <PageHeader title={t("production.title")} subtitle={t("production.subtitle")} />
 
       {/* Tab: form produksi baru + tahapan pipeline */}
       <Card className="p-0">
         <div className="flex gap-5 overflow-x-auto border-b border-gray-200 px-5 pt-4 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
           {(
             [
-              { key: "produksi", label: "New Production" },
-              { key: "cleaning", label: "Cleaning & Disinfection" },
-              { key: "packaging", label: "Inspection & Packaging" },
-              { key: "sterilization", label: "Sterilization" },
+              { key: "produksi", label: t("production.tabNew") },
+              { key: "cleaning", label: t("production.tabCleaning") },
+              { key: "packaging", label: t("production.tabPackaging") },
+              { key: "sterilization", label: t("production.tabSterilization") },
             ] as { key: ProduksiTab; label: string }[]
           ).map((t) => {
             const active = tab === t.key
@@ -673,7 +676,7 @@ function ProduksiCssdPage() {
               {/* Pencarian: murni frontend — menyaring data yang sudah dimuat
                   langsung saat mengetik, tanpa menunggu tombol & tanpa request. */}
               <div className="flex-1 space-y-1.5">
-                <Label htmlFor="pipeline-search">Search</Label>
+                <Label htmlFor="pipeline-search">{t("common.search")}</Label>
                 <div className="relative">
                   {/* Ikon kiri sekaligus indikator: berputar selama barcode divalidasi. */}
                   {scanChecking ? (
@@ -707,9 +710,7 @@ function ProduksiCssdPage() {
                       if (scanMode && !e.relatedTarget) refocusScanField()
                     }}
                     placeholder={
-                      scanMode
-                        ? "Waiting for barcode scan..."
-                        : "Search batch code, set name, or unit code..."
+                      scanMode ? t("production.scanWaiting") : t("production.searchPlaceholder")
                     }
                     className={
                       "pl-9 " +
@@ -728,7 +729,7 @@ function ProduksiCssdPage() {
                         setSearch("")
                         setPage(1)
                       }}
-                      title={scanMode ? "Back to text search" : "Enable barcode scan mode"}
+                      title={scanMode ? t("production.scanDisable") : t("production.scanEnable")}
                       aria-pressed={scanMode}
                       className={
                         "absolute right-1.5 top-1/2 inline-flex -translate-y-1/2 items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition-colors " +
@@ -738,14 +739,14 @@ function ProduksiCssdPage() {
                       }
                     >
                       <ScanLine className="h-3.5 w-3.5" />
-                      Scan
+                      {t("production.scanButton")}
                     </button>
                   )}
                 </div>
               </div>
 
               <div className="space-y-1.5">
-                <Label htmlFor="pipeline-date-from">From Date</Label>
+                <Label htmlFor="pipeline-date-from">{t("production.dateFrom")}</Label>
                 <Input
                   id="pipeline-date-from"
                   type="date"
@@ -756,7 +757,7 @@ function ProduksiCssdPage() {
                 />
               </div>
               <div className="space-y-1.5">
-                <Label htmlFor="pipeline-date-to">To Date</Label>
+                <Label htmlFor="pipeline-date-to">{t("production.dateTo")}</Label>
                 <Input
                   id="pipeline-date-to"
                   type="date"
@@ -768,11 +769,11 @@ function ProduksiCssdPage() {
               </div>
               <div className="flex justify-end gap-2">
                 <Button type="submit" className="bg-[#075489] hover:bg-[#075489]/90 text-white shrink-0">
-                  Apply
+                  {t("production.apply")}
                 </Button>
                 {hasFilter && (
                   <Button type="button" variant="outline" onClick={resetFilter} className="shrink-0">
-                    Reset
+                    {t("common.reset")}
                   </Button>
                 )}
               </div>
@@ -788,8 +789,8 @@ function ProduksiCssdPage() {
           {tab === "cleaning" && (
             <div className="mb-3 inline-flex max-w-full overflow-x-auto rounded-lg border border-gray-200 p-0.5 text-sm [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
               {([
-                { key: "proses" as const, label: "Cleaning Process", count: cleaningProses.length },
-                { key: "history" as const, label: "History", count: cleaningHistory.length },
+                { key: "proses" as const, label: t("production.viewCleaningProcess"), count: cleaningProses.length },
+                { key: "history" as const, label: t("production.viewHistory"), count: cleaningHistory.length },
               ]).map((v) => (
                 <button
                   key={v.key}
@@ -812,8 +813,8 @@ function ProduksiCssdPage() {
           {tab === "packaging" && (
             <div className="mb-3 inline-flex max-w-full overflow-x-auto rounded-lg border border-gray-200 p-0.5 text-sm [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
               {([
-                { key: "pending" as const, label: "Packaging Process", count: packagingPending.length },
-                { key: "history" as const, label: "History", count: packagingHistory.length },
+                { key: "pending" as const, label: t("production.viewPackagingProcess"), count: packagingPending.length },
+                { key: "history" as const, label: t("production.viewHistory"), count: packagingHistory.length },
               ]).map((v) => (
                 <button
                   key={v.key}
@@ -838,9 +839,9 @@ function ProduksiCssdPage() {
           {tab === "sterilization" && (
             <div className="mb-3 inline-flex max-w-full overflow-x-auto rounded-lg border border-gray-200 p-0.5 text-sm [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
               {([
-                { key: "proses" as const, label: "Sterilization Process", count: sterProses.length },
-                { key: "validasi" as const, label: "Result Validation", count: sterValidasi.length },
-                { key: "history" as const, label: "History", count: sterHistory.length },
+                { key: "proses" as const, label: t("production.viewSterilizationProcess"), count: sterProses.length },
+                { key: "validasi" as const, label: t("production.viewResultValidation"), count: sterValidasi.length },
+                { key: "history" as const, label: t("production.viewHistory"), count: sterHistory.length },
               ]).map((v) => (
                 <button
                   key={v.key}
@@ -865,26 +866,26 @@ function ProduksiCssdPage() {
             </div>
           )}
           {pipelineLoading ? (
-            <div className="py-16 text-center text-sm text-gray-400">Loading data...</div>
+            <div className="py-16 text-center text-sm text-gray-400">{t("common.loading")}</div>
           ) : activeCount === 0 ? (
             <div className="py-16 text-center text-sm text-gray-400">
               {q || dateFrom || dateTo
-                ? "No matching data."
+                ? t("production.emptyNoMatch")
                 : tab === "packaging"
                   ? pkgView === "history"
-                    ? "No packaged batch history yet."
-                    : "No batch needs packaging yet."
+                    ? t("production.emptyPackagingHistory")
+                    : t("production.emptyPackagingPending")
                   : tab === "sterilization"
                     ? sterView === "validasi"
-                      ? "No batch is awaiting validation."
+                      ? t("production.emptyValidation")
                       : sterView === "history"
-                        ? "No sterilization batch history yet."
-                        : "No batch is ready for sterilization yet."
+                        ? t("production.emptySterHistory")
+                        : t("production.emptySterReady")
                     : tab === "cleaning"
                       ? cleanView === "history"
-                        ? "No cleaning history yet."
-                        : "No batch is in the cleaning stage yet."
-                      : "No order is in this stage yet."}
+                        ? t("production.emptyCleaningHistory")
+                        : t("production.emptyCleaningProcess")
+                      : t("production.emptyDefault")}
             </div>
           ) : (
             <>
@@ -920,7 +921,7 @@ function ProduksiCssdPage() {
                 totalItems={activeCount}
                 itemsPerPage={ITEMS_PER_PAGE}
                 onPageChange={setPage}
-                labels={{ showing: "Showing", of: "of", items: "items" }}
+                labels={{ showing: t("common.showing"), of: t("common.of"), items: t("common.items") }}
               />
             </>
           )}
@@ -933,7 +934,7 @@ function ProduksiCssdPage() {
         {/* Form tambah baris */}
         <Card className="space-y-4 p-5 lg:col-span-2">
           <div className="flex items-center gap-2">
-            <h2 className="text-sm font-semibold text-gray-800">Add Instruments to Produce</h2>
+            <h2 className="text-sm font-semibold text-gray-800">{t("production.addTitle")}</h2>
           </div>
 
           {/* Mode satuan / paket */}
@@ -950,22 +951,26 @@ function ProduksiCssdPage() {
                     : "border-gray-200 text-gray-500 hover:bg-gray-50")
                 }
               >
-                {m === "satuan" ? "Single" : "Package / Set"}
+                {m === "satuan" ? t("production.modeSingle") : t("production.modePackage")}
               </button>
             ))}
           </div>
 
           <div className="space-y-1.5">
-            <Label>{mode === "satuan" ? "Instrument Type" : "Instrument Package / Set"}</Label>
+            <Label>
+              {mode === "satuan" ? t("production.fieldInstrumentType") : t("production.fieldPackage")}
+            </Label>
             <SelectSearch
               options={options}
               value={pickId}
               onChange={handlePick}
               loading={optionsLoading}
-              placeholder={mode === "satuan" ? "Search instrument..." : "Search package..."}
-              searchPlaceholder="Search..."
-              loadingText="Loading options..."
-              emptyText="Not found."
+              placeholder={
+                mode === "satuan" ? t("production.searchInstrument") : t("production.searchPackage")
+              }
+              searchPlaceholder={t("common.searchPlaceholder")}
+              loadingText={t("common.loadingOptions")}
+              emptyText={t("common.notFound")}
             />
           </div>
 
@@ -973,14 +978,14 @@ function ProduksiCssdPage() {
           {mode === "paket" && pickId && (
             <div className="rounded-lg border border-gray-100 bg-gray-50 px-3 py-2 text-xs">
               {loadingPaket ? (
-                <span className="text-gray-400">Loading package contents...</span>
+                <span className="text-gray-400">{t("production.packageLoading")}</span>
               ) : paketItems.length === 0 ? (
-                <span className="text-gray-400">This package has no content details.</span>
+                <span className="text-gray-400">{t("production.packageEmpty")}</span>
               ) : (
                 <div className="flex flex-wrap gap-1.5">
                   {paketItems.map((it) => (
                     <span key={it.instrument_id} className="rounded bg-white px-1.5 py-0.5 text-gray-600 ring-1 ring-gray-200">
-                      {it.instrument?.name ?? `#${it.instrument_id}`} ×{it.quantity}
+                      {tn(it.instrument?.name) || `#${it.instrument_id}`} ×{it.quantity}
                     </span>
                   ))}
                 </div>
@@ -990,7 +995,7 @@ function ProduksiCssdPage() {
 
           <div className="flex items-end gap-2">
             <div className="w-24 space-y-1.5">
-              <Label htmlFor="prod-qty">Quantity</Label>
+              <Label htmlFor="prod-qty">{t("common.quantity")}</Label>
               <Input
                 id="prod-qty"
                 type="number"
@@ -1005,7 +1010,7 @@ function ProduksiCssdPage() {
               disabled={!pickId || !(Number(pickQty) > 0)}
               className="bg-[#075489] hover:bg-[#075489]/90 text-white"
             >
-              Add
+              {t("common.add")}
             </Button>
           </div>
         </Card>
@@ -1014,18 +1019,18 @@ function ProduksiCssdPage() {
         <Card className="flex flex-col p-5 lg:col-span-3">
           <div className="mb-4 flex items-center justify-between">
             <div className="flex items-center gap-2">
-              <h2 className="text-sm font-semibold text-gray-800">Production List</h2>
+              <h2 className="text-sm font-semibold text-gray-800">{t("production.listTitle")}</h2>
             </div>
             {lines.length > 0 && (
               <span className="inline-flex items-center rounded-full bg-[#075489]/10 px-2.5 py-1 text-xs font-semibold text-[#075489]">
-                {lines.length} types
+                {t("production.typesCount", { n: lines.length })}
               </span>
             )}
           </div>
 
           {lines.length === 0 ? (
             <div className="flex flex-1 flex-col items-center justify-center gap-3 rounded-xl border border-dashed border-gray-200 bg-gray-50/50 py-14 text-center">
-              <p className="text-sm text-gray-400">No instruments yet. Add them from the left panel.</p>
+              <p className="text-sm text-gray-400">{t("production.listEmpty")}</p>
             </div>
           ) : (
             <div className="space-y-2.5">
@@ -1049,15 +1054,15 @@ function ProduksiCssdPage() {
                       {l.image ? (
                         <button
                           type="button"
-                          onClick={() => setPreviewImage({ src: l.image!, name: l.name })}
-                          title="View image"
+                          onClick={() => setPreviewImage({ src: l.image!, name: tn(l.name) })}
+                          title={t("production.viewImage")}
                           className={
                             "group/thumb relative h-10 w-10 shrink-0 cursor-zoom-in overflow-hidden rounded-lg ring-1 transition hover:ring-2 " +
                             (isPaket ? "ring-[#4ba69d]/30 hover:ring-[#4ba69d]/60" : "ring-[#075489]/20 hover:ring-[#075489]/50")
                           }
                         >
                           {/* eslint-disable-next-line @next/next/no-img-element */}
-                          <img src={l.image} alt={l.name} className="h-full w-full object-cover" />
+                          <img src={l.image} alt={tn(l.name)} className="h-full w-full object-cover" />
                           <span className="absolute inset-0 hidden items-center justify-center bg-black/30 text-white group-hover/thumb:flex">
                             <ZoomIn className="h-4 w-4" />
                           </span>
@@ -1074,22 +1079,24 @@ function ProduksiCssdPage() {
                       )}
                       <div className="min-w-0 flex-1">
                         <div className="flex flex-wrap items-center gap-2">
-                          <span className="truncate text-sm font-semibold text-gray-800">{l.name}</span>
-                          <Badge variant={isPaket ? "info" : "default"}>{isPaket ? "Package" : "Single"}</Badge>
+                          <span className="truncate text-sm font-semibold text-gray-800">{tn(l.name)}</span>
+                          <Badge variant={isPaket ? "info" : "default"}>
+                            {isPaket ? t("common.package") : t("common.single")}
+                          </Badge>
                         </div>
 
                         {/* Detail isi paket: instrumen × total unit (per-set × jumlah set) */}
                         {isPaket && l.items && l.items.length > 0 && (
                           <div className="mt-1.5 flex flex-wrap items-center gap-1">
                             <span className="inline-flex items-center gap-1 text-[11px] text-gray-400">
-                              <Package className="h-3 w-3" /> Contains:
+                              <Package className="h-3 w-3" /> {t("production.contains")}
                             </span>
                             {l.items.map((it) => (
                               <span
                                 key={it.instrument_id}
                                 className="rounded-md bg-[#4ba69d]/10 px-1.5 py-0.5 text-[11px] font-medium text-[#4ba69d] ring-1 ring-[#4ba69d]/20"
                               >
-                                {it.instrument?.name ?? `#${it.instrument_id}`} ×{it.quantity * sets}
+                                {tn(it.instrument?.name) || `#${it.instrument_id}`} ×{it.quantity * sets}
                               </span>
                             ))}
                           </div>
@@ -1103,12 +1110,14 @@ function ProduksiCssdPage() {
                           onChange={(e) => setLineQty(i, e.target.value)}
                           className="h-9 w-16 text-center font-semibold"
                         />
-                        <span className="w-6 text-[11px] text-gray-400">{isPaket ? "set" : "unit"}</span>
+                        <span className="w-6 text-[11px] text-gray-400">
+                          {isPaket ? t("common.set") : t("common.unit")}
+                        </span>
                         <button
                           type="button"
                           onClick={() => removeLine(i)}
                           className="rounded-md p-1.5 text-gray-400 transition-colors hover:bg-red-50 hover:text-red-600"
-                          title="Delete"
+                          title={t("common.delete")}
                         >
                           <Trash2 className="h-4 w-4" />
                         </button>
@@ -1121,7 +1130,7 @@ function ProduksiCssdPage() {
           )}
 
           <div className="mt-4 space-y-1.5">
-            <Label htmlFor="prod-note">Note (optional)</Label>
+            <Label htmlFor="prod-note">{t("production.noteOptional")}</Label>
             <Textarea
               id="prod-note"
               value={note}
@@ -1138,7 +1147,7 @@ function ProduksiCssdPage() {
               disabled={saving || lines.length === 0}
               className="bg-[#4ba69d] hover:bg-[#4ba69d]/90 text-white shadow-sm"
             >
-              {saving ? "Processing..." : "Start Production"}
+              {saving ? t("production.processing") : t("production.startProduction")}
             </Button>
           </div>
         </Card>
@@ -1149,11 +1158,11 @@ function ProduksiCssdPage() {
       <Modal
         open={previewImage !== null}
         onClose={() => setPreviewImage(null)}
-        title={previewImage?.name ?? "Image"}
+        title={previewImage?.name ?? t("production.imageTitle")}
         size="lg"
         footer={
           <Button variant="outline" onClick={() => setPreviewImage(null)}>
-            Close
+            {t("common.close")}
           </Button>
         }
       >
@@ -1173,14 +1182,14 @@ function ProduksiCssdPage() {
       <Modal
         open={scanAlert !== null}
         onClose={() => setScanAlert(null)}
-        title={scanAlert?.title ?? "Unknown Barcode"}
+        title={scanAlert?.title ?? t("production.scanUnknownTitle")}
         size="sm"
         footer={
           <Button
             onClick={() => setScanAlert(null)}
             className="bg-[#075489] hover:bg-[#075489]/90 text-white"
           >
-            Got it
+            {t("production.gotIt")}
           </Button>
         }
       >

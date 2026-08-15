@@ -21,14 +21,18 @@ import { Modal } from "@/components/molecules/Modal"
 import { ConfirmDialog } from "@/components/molecules/ConfirmDialog"
 import { useToast } from "@/components/molecules/ToastProvider"
 import api from "@/lib/axios"
+import { useLanguage, type Lang } from "@/lib/i18n"
 import { useAppSelector } from "@/lib/store/hooks"
 import type { CleaningOrder, CleaningUnit } from "@/lib/store/slices/cleaningSlice"
 
-function formatDateTime(value: string | null) {
+// Nama bulan ikut bahasa aktif.
+const localeOf = (lang: Lang) => (lang === "id" ? "id-ID" : "en-GB")
+
+function formatDateTime(value: string | null, lang: Lang) {
   if (!value) return "—"
   const d = new Date(value)
   if (Number.isNaN(d.getTime())) return value
-  return d.toLocaleString("en-GB", {
+  return d.toLocaleString(localeOf(lang), {
     day: "2-digit",
     month: "short",
     year: "numeric",
@@ -38,11 +42,11 @@ function formatDateTime(value: string | null) {
 }
 
 // Tanggal saja (tanpa jam) — dipakai untuk tanggal produksi di samping kode batch.
-function formatDate(value: string | null) {
+function formatDate(value: string | null, lang: Lang) {
   if (!value) return "—"
   const d = new Date(value)
   if (Number.isNaN(d.getTime())) return value
-  return d.toLocaleDateString("en-GB", {
+  return d.toLocaleDateString(localeOf(lang), {
     day: "2-digit",
     month: "short",
     year: "numeric",
@@ -135,6 +139,7 @@ export function CleaningTab({
   // Operator default = user yang sedang login (untuk auto-isi ID Operator).
   const currentUser = useAppSelector((s) => s.auth.name ?? s.auth.username ?? "")
   const toast = useToast()
+  const { t } = useLanguage()
 
   const [active, setActive] = useState<CleaningOrder | null>(null)
   const [operator, setOperator] = useState("")
@@ -259,11 +264,11 @@ export function CleaningTab({
   async function saveWashing() {
     if (!active || saving) return
     if (!washReady) {
-      setError("Complete Washer Machine, Temperature, Wash Start Time, Duration, and Detergent Type.")
+      setError(t("prodClean.errRequired"))
       return
     }
     if (tempBelowStd || durationBelowStd) {
-      setError("Temperature / duration is below the selected washer machine standard. Adjust it first.")
+      setError(t("prodClean.errBelowStd"))
       return
     }
     setSaving(true)
@@ -273,15 +278,15 @@ export function CleaningTab({
       const w = res.data?.data?.washing as { alert?: boolean; alert_message?: string | null } | undefined
       onChanged()
       if (w?.alert) {
-        setAlertMsg(w.alert_message ?? "Washing parameters are outside the machine thresholds.")
-        toast.error(w.alert_message ?? "Washing parameters are outside the machine thresholds.")
+        setAlertMsg(w.alert_message ?? t("prodClean.alertOutside"))
+        toast.error(w.alert_message ?? t("prodClean.alertOutside"))
       } else {
-        toast.success(res.data?.message ?? "Washing record saved.")
+        toast.success(res.data?.message ?? t("prodClean.savedRecord"))
         setActive(null)
       }
     } catch (err) {
       const e = err as { response?: { data?: { message?: string } } }
-      const msg = e.response?.data?.message ?? "Failed to save the washing record."
+      const msg = e.response?.data?.message ?? t("prodClean.failSaveRecord")
       setError(msg)
       toast.error(msg)
     } finally {
@@ -293,7 +298,7 @@ export function CleaningTab({
   async function failWashing() {
     if (!active || failing) return
     if (!failReason.trim()) {
-      setError("Enter the failure reason first.")
+      setError(t("prodClean.errFailReason"))
       return
     }
     setFailing(true)
@@ -309,10 +314,10 @@ export function CleaningTab({
       setFailMode(false)
       setFailReason("")
       onChanged()
-      toast.success(res.data?.message ?? "Washing marked as failed.")
+      toast.success(res.data?.message ?? t("prodClean.markedFailed"))
     } catch (err) {
       const e = err as { response?: { data?: { message?: string } } }
-      const msg = e.response?.data?.message ?? "Failed to mark the washing as failed."
+      const msg = e.response?.data?.message ?? t("prodClean.failMarkFailed")
       setError(msg)
       toast.error(msg)
     } finally {
@@ -332,7 +337,7 @@ export function CleaningTab({
   async function completeWashing() {
     if (!confirmTarget || completingId) return
     if (!completedAt) {
-      setConfirmError("Set the cleaning completion date & time.")
+      setConfirmError(t("prodClean.errCompletionTime"))
       return
     }
     setCompletingId(confirmTarget.id)
@@ -344,10 +349,10 @@ export function CleaningTab({
       })
       setConfirmTarget(null)
       onChanged()
-      toast.success(res.data?.message ?? "Cleaning & disinfection completed.")
+      toast.success(res.data?.message ?? t("prodClean.cleaningCompleted"))
     } catch (err) {
       const e = err as { response?: { data?: { message?: string } } }
-      const msg = e.response?.data?.message ?? "Failed to complete the cleaning."
+      const msg = e.response?.data?.message ?? t("prodClean.failCompleteCleaning")
       setConfirmError(msg)
       toast.error(msg)
     } finally {
@@ -363,10 +368,10 @@ export function CleaningTab({
       const res = await api.delete(`/master/cleaning/${cancelTarget.id}/cancel`)
       setCancelTarget(null)
       onChanged()
-      toast.success(res.data?.message ?? "Washing canceled & stock returned.")
+      toast.success(res.data?.message ?? t("prodClean.washCanceled"))
     } catch (err) {
       const e = err as { response?: { data?: { message?: string } } }
-      toast.error(e.response?.data?.message ?? "Failed to cancel the washing.")
+      toast.error(e.response?.data?.message ?? t("prodClean.failCancelWashing"))
     } finally {
       setCancelling(false)
     }
@@ -418,20 +423,20 @@ export function CleaningTab({
       <Modal
         open={active !== null}
         onClose={() => setActive(null)}
-        title="Washing Record"
+        title={t("prodClean.modalTitle")}
         size="lg"
         footer={
           <div className="flex w-full flex-col items-stretch gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
             {error ? (
               <p className="text-sm text-red-600">{error}</p>
             ) : canceledActive ? (
-              <span className="text-xs text-gray-400">Batch canceled.</span>
+              <span className="text-xs text-gray-400">{t("prodClean.batchCanceledShort")}</span>
             ) : washedActive ? (
-              <span className="text-xs text-gray-400">Washing completed.</span>
+              <span className="text-xs text-gray-400">{t("prodClean.washingCompletedShort")}</span>
             ) : null}
             <div className="flex shrink-0 justify-end gap-2 sm:ml-auto">
               <Button variant="outline" onClick={() => setActive(null)}>
-                Close
+                {t("common.close")}
               </Button>
               {!washedActive && !canceledActive && (
                 <Button
@@ -439,7 +444,7 @@ export function CleaningTab({
                   disabled={saving || !washReady || tempBelowStd || durationBelowStd}
                   className="bg-[#075489] hover:bg-[#075489]/90 text-white"
                 >
-                  {saving ? "Saving..." : "Save"}
+                  {saving ? t("common.saving") : t("common.save")}
                 </Button>
               )}
             </div>
@@ -452,10 +457,8 @@ export function CleaningTab({
               <div className="flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 px-4 py-3">
                 <XCircle className="mt-0.5 h-5 w-5 shrink-0 text-red-500" />
                 <div>
-                  <p className="text-sm font-semibold text-red-700">Batch canceled</p>
-                  <p className="text-xs text-red-600/90">
-                    All units have been returned to their original stock. This batch is kept as history.
-                  </p>
+                  <p className="text-sm font-semibold text-red-700">{t("prodClean.canceledTitle")}</p>
+                  <p className="text-xs text-red-600/90">{t("prodClean.canceledDesc")}</p>
                 </div>
               </div>
             )}
@@ -466,14 +469,9 @@ export function CleaningTab({
               <div className="flex items-start gap-2 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3">
                 <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-amber-500" />
                 <div>
-                  <p className="text-sm font-semibold text-amber-700">
-                    Temperature/time failure alert
-                  </p>
+                  <p className="text-sm font-semibold text-amber-700">{t("prodClean.alertTitle")}</p>
                   <p className="text-xs text-amber-700/90">{alertMsg}</p>
-                  <p className="mt-1 text-xs text-amber-600">
-                    Washing cannot be completed yet. Fix the parameters and save again, or mark
-                    it as failed.
-                  </p>
+                  <p className="mt-1 text-xs text-amber-600">{t("prodClean.alertHint")}</p>
                 </div>
               </div>
             )}
@@ -481,29 +479,30 @@ export function CleaningTab({
             {!washedActive && !canceledActive && (
               <div className="space-y-1.5">
                 <Label>
-                  Washer Machine <span className="text-red-500">*</span>
+                  {t("prodClean.washerMachine")} <span className="text-red-500">*</span>
                 </Label>
                 <SelectSearch
                   options={machines.map((m) => ({ value: String(m.id), label: m.name }))}
                   value={washerMachineId ? String(washerMachineId) : ""}
                   onChange={selectMachine}
                   loading={machinesLoading}
-                  placeholder="Select washer machine..."
-                  searchPlaceholder="Search machine name..."
-                  loadingText="Loading options..."
-                  emptyText="Not found."
+                  placeholder={t("prodClean.machinePlaceholder")}
+                  searchPlaceholder={t("prodClean.machineSearch")}
+                  loadingText={t("common.loadingOptions")}
+                  emptyText={t("common.notFound")}
                 />
                 {activeMachine && (
                   <div className="flex flex-wrap items-center gap-2 rounded-lg border border-[#075489]/30 bg-[#075489]/5 px-3 py-2 text-xs">
                     <span className="font-medium text-gray-800">{activeMachine.name}</span>
                     {stdText(activeMachine.temperature, "°C") && (
                       <span className="text-gray-500">
-                        Standard temperature {stdText(activeMachine.temperature, "°C")}
+                        {t("prodClean.stdTemp")} {stdText(activeMachine.temperature, "°C")}
                       </span>
                     )}
-                    {stdText(activeMachine.duration_minutes, " min") && (
+                    {stdText(activeMachine.duration_minutes, ` ${t("prodSter.minSuffix")}`) && (
                       <span className="text-gray-500">
-                        Standard duration {stdText(activeMachine.duration_minutes, " min")}
+                        {t("prodClean.stdDuration")}{" "}
+                        {stdText(activeMachine.duration_minutes, ` ${t("prodSter.minSuffix")}`)}
                       </span>
                     )}
                   </div>
@@ -519,14 +518,14 @@ export function CleaningTab({
             <div className="grid grid-cols-1 items-start gap-4 sm:grid-cols-2">
               <div className="space-y-1.5">
                 <Label htmlFor="wash-temp">
-                  Temperature (°C) <span className="text-red-500">*</span>
+                  {t("prodClean.temperature")} <span className="text-red-500">*</span>
                 </Label>
                 <Input
                   id="wash-temp"
                   type="number"
                   value={temperature}
                   onChange={(e) => setTemperature(e.target.value)}
-                  placeholder="e.g. 60"
+                  placeholder={t("prodClean.tempPlaceholder")}
                   disabled={washedActive}
                   min={activeMachine?.temperature ?? undefined}
                   error={tempBelowStd}
@@ -534,13 +533,15 @@ export function CleaningTab({
                 />
                 {activeMachine && stdText(activeMachine.temperature, "°C") && tempBelowStd && (
                   <p className="text-xs text-red-600">
-                    Below the machine standard ({stdText(activeMachine.temperature, "°C")}).
+                    {t("prodClean.belowStd", {
+                      value: stdText(activeMachine.temperature, "°C") ?? "",
+                    })}
                   </p>
                 )}
               </div>
               <div className="space-y-1.5">
                 <Label htmlFor="wash-duration">
-                  Duration (minutes) <span className="text-red-500">*</span>
+                  {t("prodClean.duration")} <span className="text-red-500">*</span>
                 </Label>
                 <Input
                   id="wash-duration"
@@ -548,20 +549,25 @@ export function CleaningTab({
                   min={activeMachine?.duration_minutes ?? 0}
                   value={duration}
                   onChange={(e) => setDuration(e.target.value)}
-                  placeholder="e.g. 20"
+                  placeholder={t("prodClean.durationPlaceholder")}
                   disabled={washedActive}
                   error={durationBelowStd}
                   aria-invalid={durationBelowStd}
                 />
-                {activeMachine && stdText(activeMachine.duration_minutes, " min") && durationBelowStd && (
-                  <p className="text-xs text-red-600">
-                    Below the machine standard ({stdText(activeMachine.duration_minutes, " min")}).
-                  </p>
-                )}
+                {activeMachine &&
+                  stdText(activeMachine.duration_minutes, ` ${t("prodSter.minSuffix")}`) &&
+                  durationBelowStd && (
+                    <p className="text-xs text-red-600">
+                      {t("prodClean.belowStd", {
+                        value:
+                          stdText(activeMachine.duration_minutes, ` ${t("prodSter.minSuffix")}`) ?? "",
+                      })}
+                    </p>
+                  )}
               </div>
               <div className="space-y-1.5">
                 <Label htmlFor="wash-time">
-                  Wash Start Time <span className="text-red-500">*</span>
+                  {t("prodClean.washStart")} <span className="text-red-500">*</span>
                 </Label>
                 <Input
                   id="wash-time"
@@ -573,13 +579,13 @@ export function CleaningTab({
               </div>
               <div className="space-y-1.5">
                 <Label htmlFor="wash-detergent">
-                  Detergent / Enzymatic Type <span className="text-red-500">*</span>
+                  {t("prodClean.detergent")} <span className="text-red-500">*</span>
                 </Label>
                 <Input
                   id="wash-detergent"
                   value={detergent}
                   onChange={(e) => setDetergent(e.target.value)}
-                  placeholder="e.g. Enzymatic, Neutral Detergent"
+                  placeholder={t("prodClean.detergentPlaceholder")}
                   disabled={washedActive}
                 />
               </div>
@@ -592,13 +598,13 @@ export function CleaningTab({
               (failMode ? (
                 <div className="space-y-2 rounded-lg border border-red-200 bg-red-50 px-4 py-3">
                   <Label htmlFor="fail-reason" className="text-red-700">
-                    Washing Failure Reason
+                    {t("prodClean.failReasonLabel")}
                   </Label>
                   <Textarea
                     id="fail-reason"
                     value={failReason}
                     onChange={(e) => setFailReason(e.target.value)}
-                    placeholder="e.g. Temperature not reached, soil indicator still present"
+                    placeholder={t("prodClean.failReasonPlaceholder")}
                   />
                   <div className="flex justify-end gap-2">
                     <Button
@@ -609,14 +615,14 @@ export function CleaningTab({
                       }}
                       disabled={failing}
                     >
-                      Cancel
+                      {t("common.cancel")}
                     </Button>
                     <Button
                       onClick={failWashing}
                       disabled={failing || !failReason.trim()}
                       className="bg-red-600 hover:bg-red-700 text-white"
                     >
-                      {failing ? "Processing..." : "Confirm Failure"}
+                      {failing ? t("production.processing") : t("prodClean.confirmFailure")}
                     </Button>
                   </div>
                 </div>
@@ -627,7 +633,7 @@ export function CleaningTab({
                   className="inline-flex items-center gap-1.5 rounded-lg border border-red-300 bg-red-50 px-3 py-2 text-sm font-medium text-red-600 transition-colors hover:bg-red-100"
                 >
                   <XCircle className="h-4 w-4" />
-                  Mark Washing as Failed
+                  {t("prodClean.markFailed")}
                 </button>
               ))}
 
@@ -635,10 +641,8 @@ export function CleaningTab({
               <div className="flex items-start gap-3 rounded-lg border border-dashed border-gray-300 bg-gray-50 px-4 py-3">
                 <Package className="mt-0.5 h-5 w-5 shrink-0 text-gray-400" />
                 <div>
-                  <p className="text-sm font-medium text-gray-700">Packaging Stage</p>
-                  <p className="text-xs text-gray-500">
-                    Washing completed. The packaging stage will be available next.
-                  </p>
+                  <p className="text-sm font-medium text-gray-700">{t("prodClean.packagingStage")}</p>
+                  <p className="text-xs text-gray-500">{t("prodClean.packagingStageDesc")}</p>
                 </div>
               </div>
             )}
@@ -650,14 +654,14 @@ export function CleaningTab({
       <Modal
         open={confirmTarget !== null}
         onClose={completingId ? () => {} : () => setConfirmTarget(null)}
-        title="Complete Cleaning & Disinfection"
+        title={t("prodClean.completeTitle")}
         size="sm"
         footer={
           <div className="flex w-full flex-col items-stretch gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
             {confirmError ? (
               <p className="text-sm text-red-600">{confirmError}</p>
             ) : (
-              <span className="text-xs text-gray-400">The order will continue to Inspection &amp; Packaging.</span>
+              <span className="text-xs text-gray-400">{t("prodClean.completeHint")}</span>
             )}
             <div className="flex shrink-0 justify-end gap-2">
               <Button
@@ -665,14 +669,14 @@ export function CleaningTab({
                 onClick={() => setConfirmTarget(null)}
                 disabled={completingId !== null}
               >
-                Cancel
+                {t("common.cancel")}
               </Button>
               <Button
                 onClick={completeWashing}
                 disabled={completingId !== null}
                 className="bg-[#075489] hover:bg-[#075489]/90 text-white"
               >
-                {completingId !== null ? "Completing..." : "Complete"}
+                {completingId !== null ? t("prodClean.completing") : t("prodClean.complete")}
               </Button>
             </div>
           </div>
@@ -685,15 +689,15 @@ export function CleaningTab({
                 <CheckCircle2 className="h-5 w-5 text-[#075489]" />
               </div>
               <p className="pt-1.5 text-sm leading-relaxed text-gray-600">
-                Make sure the cleaning &amp; disinfection process for{" "}
+                {t("prodClean.completeDescPre")}
                 <span className="font-semibold text-gray-900">
                   {confirmTarget.code_transaction ?? confirmTarget.code}
-                </span>{" "}
-                is complete.
+                </span>
+                {t("prodClean.completeDescPost")}
               </p>
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="complete-time">Cleaning Completion Time</Label>
+              <Label htmlFor="complete-time">{t("prodClean.completionTime")}</Label>
               <Input
                 id="complete-time"
                 type="datetime-local"
@@ -702,9 +706,7 @@ export function CleaningTab({
                 disabled
                 className="cursor-not-allowed bg-gray-50"
               />
-              <p className="text-xs text-gray-400">
-                Recorded automatically from the current time &mdash; cannot be changed.
-              </p>
+              <p className="text-xs text-gray-400">{t("prodClean.completionTimeHint")}</p>
             </div>
           </div>
         )}
@@ -716,13 +718,15 @@ export function CleaningTab({
         onClose={() => setCancelTarget(null)}
         onConfirm={cancelWashing}
         loading={cancelling}
-        title="Cancel Washing"
-        confirmLabel="Cancel Batch"
-        loadingLabel="Canceling..."
-        cancelLabel="Back"
+        title={t("prodClean.cancelTitle")}
+        confirmLabel={t("prodClean.cancelConfirm")}
+        loadingLabel={t("prodClean.canceling")}
+        cancelLabel={t("common.back")}
         description={
           cancelTarget
-            ? `Cancel batch ${cancelTarget.code_transaction ?? cancelTarget.code}? All units will be returned to their original stock (available).`
+            ? t("prodClean.cancelDesc", {
+                code: cancelTarget.code_transaction ?? cancelTarget.code,
+              })
             : undefined
         }
       />
@@ -789,13 +793,17 @@ type UnitGroup = {
 // per nama paket — 2 set "SET PARTUS" melebur jadi satu baris, kuantitasnya dihitung
 // dari jumlah `package_no` berbeda (batch lama tanpa package_no dianggap satu set).
 // Semua nilai dari snapshot production_item (u.name / u.code / u.image_url).
-function groupUnits(units: CleaningUnit[]): UnitGroup[] {
+function groupUnits(
+  units: CleaningUnit[],
+  tn: (t: string | null | undefined) => string,
+  fallback: string,
+): UnitGroup[] {
   const groups: UnitGroup[] = []
   const index = new Map<string, UnitGroup>()
 
   for (const u of units) {
     const isPaket = u.source === "paket"
-    const name = (isPaket ? u.package_name : u.name) ?? "Instrument"
+    const name = tn(isPaket ? u.package_name : u.name) || fallback
     const key = `${isPaket ? "paket" : "satuan"}|${name}`
 
     // Satu kolom foto: sudah berisi foto paket / foto instrumen sesuai jenis baris.
@@ -819,7 +827,7 @@ function groupUnits(units: CleaningUnit[]): UnitGroup[] {
     if (isPaket) g.packageNos.add(String(u.package_no ?? ""))
 
     if (isPaket) {
-      const itemName = u.name ?? "Instrument"
+      const itemName = tn(u.name) || fallback
       let b = g.breakdown.find((x) => x.name === itemName)
       if (!b) {
         b = { name: itemName, codes: [] }
@@ -833,11 +841,13 @@ function groupUnits(units: CleaningUnit[]): UnitGroup[] {
 }
 
 // Rincian isi sebuah paket dalam order: instrumen penyusun + jumlah unitnya.
-function paketBreakdown(order: CleaningOrder, packageName: string) {
+// `name` sengaja dibiarkan APA ADANYA (bahasa database) karena dipakai sebagai kunci
+// pencarian foto; terjemahannya dilakukan saat render.
+function paketBreakdown(order: CleaningOrder, packageName: string, fallback: string) {
   const map = new Map<string, { name: string; qty: number }>()
   for (const u of order.units ?? []) {
     if (u.source !== "paket" || u.package_name !== packageName) continue
-    const name = u.name ?? "Instrument"
+    const name = u.name ?? fallback
     const cur = map.get(name) ?? { name, qty: 0 }
     cur.qty += 1
     map.set(name, cur)
@@ -865,6 +875,7 @@ function CleaningOrderCard({
   // dengan membuka kartunya.
   compact?: boolean
 }) {
+  const { t, tn, lang } = useLanguage()
   const washed = isWashed(order)
   const canceled = isCanceled(order)
   // Sudah diproses = parameter pencucian sudah diisi tapi belum ditandai selesai.
@@ -894,24 +905,24 @@ function CleaningOrderCard({
               {/* Baris 1: status | kode produksi | tanggal produksi. */}
               <div className="flex flex-wrap items-center gap-2">
                 {washed ? (
-                  <Badge variant="success">Wash Complete</Badge>
+                  <Badge variant="success">{t("prodClean.badgeWashComplete")}</Badge>
                 ) : canceled ? (
-                  <Badge variant="default">Canceled</Badge>
+                  <Badge variant="default">{t("prodClean.badgeCanceled")}</Badge>
                 ) : order.washing?.status === "gagal" ? (
-                  <Badge variant="danger">Wash Failed</Badge>
+                  <Badge variant="danger">{t("prodClean.badgeWashFailed")}</Badge>
                 ) : inProcess ? (
-                  <Badge variant="info">In Process</Badge>
+                  <Badge variant="info">{t("prodClean.badgeInProcess")}</Badge>
                 ) : (
-                  <Badge variant="warning">Not Processed</Badge>
+                  <Badge variant="warning">{t("prodClean.badgeNotProcessed")}</Badge>
                 )}
                 {!washed && !canceled && order.washing?.alert && (
-                  <Badge variant="warning">Check Parameters</Badge>
+                  <Badge variant="warning">{t("prodClean.badgeCheckParams")}</Badge>
                 )}
                 <span className="font-mono text-xs font-semibold text-[#075489] bg-[#075489]/8 px-2 py-0.5 rounded">
                   {order.code_transaction ?? order.code}
                 </span>
                 {order.processed_at && (
-                  <span className="text-xs text-gray-500">{formatDate(order.processed_at)}</span>
+                  <span className="text-xs text-gray-500">{formatDate(order.processed_at, lang)}</span>
                 )}
               </div>
 
@@ -934,7 +945,11 @@ function CleaningOrderCard({
                               }
                             : undefined
                         }
-                        title={isPaket ? "View set contents" : `${it.name} ×${it.quantity}`}
+                        title={
+                          isPaket
+                            ? t("prodClean.viewSetContents")
+                            : `${tn(it.name)} ×${it.quantity}`
+                        }
                         className={
                           "inline-flex max-w-[200px] items-center gap-1 rounded-md px-1.5 py-0.5 text-xs ring-1 " +
                           (isPaket
@@ -947,9 +962,9 @@ function CleaningOrderCard({
                       >
                         {imageByName[it.name] && (
                           // eslint-disable-next-line @next/next/no-img-element
-                          <img src={imageByName[it.name]} alt={it.name} className="h-5 w-5 shrink-0 rounded object-cover" />
+                          <img src={imageByName[it.name]} alt={tn(it.name)} className="h-5 w-5 shrink-0 rounded object-cover" />
                         )}
-                        <span className="truncate font-medium">{it.name}</span>
+                        <span className="truncate font-medium">{tn(it.name)}</span>
                         {isPaket ? (
                           <ChevronDown className={"h-3 w-3 shrink-0 transition-transform " + (open ? "rotate-180" : "")} />
                         ) : (
@@ -960,24 +975,24 @@ function CleaningOrderCard({
                   })}
                   {order.items.length > 4 && (
                     <span className="rounded-md bg-[#075489]/8 px-1.5 py-0.5 text-xs font-medium text-[#075489]">
-                      +{order.items.length - 4} more
+                      {t("common.andMore", { n: order.items.length - 4 })}
                     </span>
                   )}
                 </div>
               ) : (
                 <p className="mt-2.5 truncate text-sm font-semibold text-gray-900">
-                  {order.borrowed_by ?? "—"}
+                  {tn(order.borrowed_by) || "—"}
                 </p>
               )}
 
               {/* Mesin cuci: nama mesin + tanggal & jam mulai cuci (di bawah nama instrumen). */}
               {!compact && order.washing?.washer_machine?.name && (
                 <p className="mt-2.5 text-xs text-gray-500">
-                  Processed by machine:{" "}
+                  {t("prodClean.processedByMachine")}{" "}
                   <span className="font-medium text-gray-700">
                     {order.washing.washer_machine.name}
                   </span>
-                  {order.washing.washed_at && `, ${formatDateTime(order.washing.washed_at)}`}
+                  {order.washing.washed_at && `, ${formatDateTime(order.washing.washed_at, lang)}`}
                 </p>
               )}
 
@@ -987,9 +1002,11 @@ function CleaningOrderCard({
                   onClick={(e) => e.stopPropagation()}
                   className="mt-1.5 rounded-md border border-gray-100 bg-gray-50 px-2 py-1.5"
                 >
-                  <p className="mb-1 text-[11px] font-semibold text-gray-500">{openPaket} contents:</p>
+                  <p className="mb-1 text-[11px] font-semibold text-gray-500">
+                    {t("prodClean.paketContents", { name: tn(openPaket) })}
+                  </p>
                   <div className="flex flex-wrap gap-1.5">
-                    {paketBreakdown(order, openPaket).map((p) => (
+                    {paketBreakdown(order, openPaket, t("common.instrument")).map((p) => (
                       <span
                         key={p.name}
                         className="inline-flex items-center gap-1.5 rounded-md bg-white py-1 pl-1 pr-2 text-[11px] text-gray-600 ring-1 ring-gray-200"
@@ -999,15 +1016,15 @@ function CleaningOrderCard({
                             type="button"
                             onClick={(e) => {
                               e.stopPropagation()
-                              setZoom({ url: imageByName[p.name], name: p.name })
+                              setZoom({ url: imageByName[p.name], name: tn(p.name) })
                             }}
-                            title="Click to enlarge"
+                            title={t("prodSter.clickToEnlarge")}
                             className="group relative h-7 w-7 shrink-0 cursor-zoom-in overflow-hidden rounded-md border border-gray-200"
                           >
                             {/* eslint-disable-next-line @next/next/no-img-element */}
                             <img
                               src={imageByName[p.name]}
-                              alt={p.name}
+                              alt={tn(p.name)}
                               className="h-full w-full object-cover transition-transform group-hover:scale-105"
                             />
                             <span className="absolute inset-0 flex items-center justify-center bg-black/0 text-white opacity-0 transition group-hover:bg-black/30 group-hover:opacity-100">
@@ -1019,7 +1036,7 @@ function CleaningOrderCard({
                             <Package className="h-3.5 w-3.5 text-[#075489]" />
                           </span>
                         )}
-                        <span className="font-medium text-gray-800">{p.name}</span>
+                        <span className="font-medium text-gray-800">{tn(p.name)}</span>
                         <span className="text-gray-400">×{p.qty}</span>
                       </span>
                     ))}
@@ -1030,7 +1047,8 @@ function CleaningOrderCard({
               {/* Catatan (opsional) dari tahap Mulai Produksi. */}
               {!compact && order.note && (
                 <p className="mt-1.5 text-xs text-gray-500">
-                  <span className="font-medium text-gray-600">Note:</span> {order.note}
+                  <span className="font-medium text-gray-600">{t("prodClean.noteLabel")}</span>{" "}
+                  {order.note}
                 </p>
               )}
 
@@ -1038,7 +1056,10 @@ function CleaningOrderCard({
                   di sini cukup tampilkan waktu selesai cuci saat batch sudah selesai. */}
               {!canceled && washed && (
                 <div className="mt-1 flex flex-wrap gap-x-4 gap-y-0.5 text-xs text-gray-500">
-                  <span>Wash completed: {formatDateTime(order.washing?.completed_at ?? null)}</span>
+                  <span>
+                    {t("prodClean.washCompletedAt")}{" "}
+                    {formatDateTime(order.washing?.completed_at ?? null, lang)}
+                  </span>
                 </div>
               )}
             </div>
@@ -1053,7 +1074,7 @@ function CleaningOrderCard({
                 disabled={completing}
                 className="rounded-md border border-[#075489] bg-[#075489] px-2 py-1 text-xs font-medium text-white hover:bg-[#075489]/90 disabled:opacity-60"
               >
-                {completing ? "Processing..." : "Complete"}
+                {completing ? t("production.processing") : t("prodClean.complete")}
               </button>
             ) : (
               <>
@@ -1064,7 +1085,7 @@ function CleaningOrderCard({
                     onClick={onCancel}
                     className="rounded-md border border-red-300 px-2 py-1 text-xs font-medium text-red-600 hover:bg-red-50"
                   >
-                    Cancel
+                    {t("common.cancel")}
                   </button>
                 )}
                 <button
@@ -1072,7 +1093,7 @@ function CleaningOrderCard({
                   onClick={onOpen}
                   className="rounded-md border border-[#075489] px-2 py-1 text-xs font-medium text-[#075489] hover:bg-[#075489]/10"
                 >
-                  Process
+                  {t("prodClean.process")}
                 </button>
               </>
             )
@@ -1092,7 +1113,7 @@ function CleaningOrderCard({
             type="button"
             onClick={() => setZoom(null)}
             className="absolute right-4 top-4 rounded-full bg-white/10 p-2 text-white hover:bg-white/20"
-            title="Close"
+            title={t("common.close")}
           >
             <X className="h-5 w-5" />
           </button>
@@ -1122,6 +1143,7 @@ function InstrumentList({
   collapsible?: boolean
   defaultOpen?: boolean
 }) {
+  const { t, tn } = useLanguage()
   const [open, setOpen] = useState(defaultOpen)
   const [zoom, setZoom] = useState<{ url: string; name: string } | null>(null)
   const hasUnits = (order.units?.length ?? 0) > 0
@@ -1131,7 +1153,7 @@ function InstrumentList({
   // Semua nama/kode/foto dibaca dari snapshot production_item (u.name, u.code,
   // u.image_url), bukan relasi ke master, agar daftar batch lama tidak ikut berubah
   // saat master diubah.
-  const grouped = hasUnits ? groupUnits(order.units) : []
+  const grouped = hasUnits ? groupUnits(order.units, tn, t("common.instrument")) : []
 
   return (
     <div className="space-y-2">
@@ -1143,7 +1165,7 @@ function InstrumentList({
         >
           <span className="flex items-center gap-1.5">
             <ListChecks className="h-4 w-4" />
-            Instrument List
+            {t("prodClean.instrumentList")}
           </span>
           <ChevronDown
             className={"h-4 w-4 transition-transform " + (open ? "rotate-180" : "")}
@@ -1152,7 +1174,7 @@ function InstrumentList({
       ) : (
         <p className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-gray-400">
           <ListChecks className="h-4 w-4" />
-          Instrument List
+          {t("prodClean.instrumentList")}
         </p>
       )}
 
@@ -1166,7 +1188,7 @@ function InstrumentList({
                     <button
                       type="button"
                       onClick={() => setZoom({ url: g.image as string, name: g.name })}
-                      title="Click to enlarge"
+                      title={t("prodSter.clickToEnlarge")}
                       className="group relative h-8 w-8 shrink-0 cursor-zoom-in overflow-hidden rounded-md border border-gray-200"
                     >
                       {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -1179,7 +1201,7 @@ function InstrumentList({
                     <Package className="h-4 w-4 shrink-0 text-[#075489]" />
                   )}
                   <span className="truncate text-sm font-medium text-gray-800">{g.name}</span>
-                  {g.kind === "paket" && <Badge variant="info">Package</Badge>}
+                  {g.kind === "paket" && <Badge variant="info">{t("common.package")}</Badge>}
                 </span>
                 {/* Kuantitas: satuan = jumlah unit, paket = jumlah SET (bukan jumlah
                     instrumen di dalamnya). Pada satuan, kode unit muncul saat di-hover. */}
@@ -1216,16 +1238,18 @@ function InstrumentList({
           {order.items.map((it, i) => (
             <li key={`${it.name}-${i}`} className="flex items-center justify-between gap-2 px-3 py-2">
               <span className="flex items-center gap-2 text-sm text-gray-800">
-                {it.name}
-                {it.type === "paket" && <Badge variant="info">Package</Badge>}
+                {tn(it.name)}
+                {it.type === "paket" && <Badge variant="info">{t("common.package")}</Badge>}
               </span>
-              <span className="text-xs text-gray-400">{it.quantity} unit</span>
+              <span className="text-xs text-gray-400">
+                {it.quantity} {t("common.unit")}
+              </span>
             </li>
           ))}
         </ul>
       ) : (
         <p className="rounded-lg border border-dashed border-gray-200 px-3 py-2 text-xs text-gray-400">
-          No instrument details yet.
+          {t("prodClean.noInstrumentDetails")}
         </p>
       )}
 
@@ -1241,7 +1265,7 @@ function InstrumentList({
             type="button"
             onClick={() => setZoom(null)}
             className="absolute right-4 top-4 rounded-full bg-white/10 p-2 text-white hover:bg-white/20"
-            title="Close"
+            title={t("common.close")}
           >
             <X className="h-5 w-5" />
           </button>

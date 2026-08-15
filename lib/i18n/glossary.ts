@@ -115,6 +115,18 @@ const PHRASE: Record<string, { en: string; id: string }> = {
   "gagal": { en: "Failed", id: "Gagal" },
   "batal": { en: "Canceled", id: "Batal" },
   "berhasil": { en: "Passed", id: "Berhasil" },
+  "tidak berhasil": { en: "Failed", id: "Tidak Berhasil" },
+
+  // ── Hasil indikator biologi sterilisasi ───────────────────────────────────
+  "negatif": { en: "Negative", id: "Negatif" },
+  "positif": { en: "Positive", id: "Positif" },
+
+  // ── Metode sterilisasi (disimpan apa adanya oleh backend) ─────────────────
+  "uap": { en: "Steam (Autoclave)", id: "Uap (Autoclave)" },
+  "eo": { en: "Ethylene Oxide (EO)", id: "Etilen Oksida (EO)" },
+  "plasma": { en: "Plasma H2O2", id: "Plasma H2O2" },
+  "panas_kering": { en: "Dry Heat", id: "Panas Kering" },
+  "panas kering": { en: "Dry Heat", id: "Panas Kering" },
 
   // ── Kondisi instrumen (master Kondisi — data, bisa bertambah) ──────────────
   "baik": { en: "Good", id: "Baik" },

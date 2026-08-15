@@ -12,6 +12,7 @@ import { Barcode } from "@/components/atoms/Barcode"
 import { Modal } from "@/components/molecules/Modal"
 import { useToast } from "@/components/molecules/ToastProvider"
 import api from "@/lib/axios"
+import { useLanguage, type Lang } from "@/lib/i18n"
 import { isEscposPrinter, printCssdLabels, type CssdLabelPayload } from "@/lib/printServer"
 import type {
   PackagingType,
@@ -99,11 +100,14 @@ function groupLabelEntries(
   return entries
 }
 
-function formatDateTime(value: string | null) {
+// Nama bulan ikut bahasa aktif.
+const localeOf = (lang: Lang) => (lang === "id" ? "id-ID" : "en-GB")
+
+function formatDateTime(value: string | null, lang: Lang) {
   if (!value) return "—"
   const d = new Date(value)
   if (Number.isNaN(d.getTime())) return value
-  return d.toLocaleString("en-GB", {
+  return d.toLocaleString(localeOf(lang), {
     day: "2-digit",
     month: "short",
     year: "numeric",
@@ -112,16 +116,16 @@ function formatDateTime(value: string | null) {
   })
 }
 
-function formatDate(value: string | null) {
+function formatDate(value: string | null, lang: Lang) {
   if (!value) return "—"
   const d = new Date(value)
   if (Number.isNaN(d.getTime())) return value
-  return d.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" })
+  return d.toLocaleDateString(localeOf(lang), { day: "2-digit", month: "short", year: "numeric" })
 }
 
-function errMsg(e: unknown): string {
+function errMsg(e: unknown, fallback: string): string {
   const x = e as { response?: { data?: { message?: string } } }
-  return x.response?.data?.message ?? "Something went wrong."
+  return x.response?.data?.message ?? fallback
 }
 
 type UnitGroup = { key: string; name: string; image: string | null; units: ProdPackagingUnit[] }
@@ -130,14 +134,18 @@ type UnitGroup = { key: string; name: string; image: string | null; units: ProdP
 // dari production_item — sehingga 2 set bernama sama jadi 2 grup terpisah, bukan
 // melebur. Unit `satuan` tetap dikelompokkan per instrumen. Batch lama tanpa
 // package_no (null) melebur jadi satu grup seperti perilaku sebelumnya.
-function groupUnits(units: ProdPackagingUnit[]): UnitGroup[] {
+function groupUnits(
+  units: ProdPackagingUnit[],
+  tn: (t: string | null | undefined) => string,
+  labels: { pkg: string; instrument: string },
+): UnitGroup[] {
   const groups: UnitGroup[] = []
   const index = new Map<string, UnitGroup>()
   for (const u of units) {
     const isPaket = u.source === "paket"
     const name = isPaket
-      ? u.package_name ?? "Package"
-      : u.instrument?.name ?? u.package_name ?? "Instrument"
+      ? tn(u.package_name) || labels.pkg
+      : tn(u.instrument?.name) || tn(u.package_name) || labels.instrument
     // Baris paket pakai foto paket (snapshot), baris satuan foto instrumennya.
     const image = isPaket ? u.image_url : u.instrument?.image_url ?? u.image_url
     const key = isPaket
@@ -157,10 +165,16 @@ function groupUnits(units: ProdPackagingUnit[]): UnitGroup[] {
 
 // Unit cocok dengan kata kunci pencarian: kode unit (hasil scan barcode — kodenya
 // tidak lagi ditampilkan, tapi tetap bisa dicari) atau nama instrumennya.
-function unitHit(u: ProdPackagingUnit, query: string): boolean {
+function unitHit(
+  u: ProdPackagingUnit,
+  query: string,
+  tn: (t: string | null | undefined) => string,
+): boolean {
+  const name = u.name ?? u.instrument?.name ?? ""
   return (
     (u.code ?? "").toLowerCase().includes(query) ||
-    (u.name ?? u.instrument?.name ?? "").toLowerCase().includes(query)
+    name.toLowerCase().includes(query) ||
+    tn(name).toLowerCase().includes(query)
   )
 }
 
@@ -178,10 +192,10 @@ function imagesByName(batch: ProdPackagingBatch): Record<string, string> {
 }
 
 /** Tgl kedaluwarsa steril bila dikemas hari ini dengan masa simpan `days`. */
-function expiryPreview(days: number) {
+function expiryPreview(days: number, lang: Lang) {
   const d = new Date()
   d.setDate(d.getDate() + days)
-  return d.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" })
+  return d.toLocaleDateString(localeOf(lang), { day: "2-digit", month: "short", year: "numeric" })
 }
 
 /**
@@ -199,6 +213,12 @@ export function ProductionPackagingTab({
   onChanged: () => void
 }) {
   const toast = useToast()
+  const { t, tn, lang } = useLanguage()
+  // Teks cadangan pengelompokan unit — ikut bahasa aktif.
+  const groupLabels = useMemo(
+    () => ({ pkg: t("common.package"), instrument: t("common.instrument") }),
+    [t],
+  )
   const [active, setActive] = useState<ProdPackagingBatch | null>(null)
   // instrument_stock_id unit yang sudah diperiksa (checklist digital, lokal).
   const [inspected, setInspected] = useState<Set<number>>(new Set())
@@ -303,12 +323,15 @@ export function ProductionPackagingTab({
     }
   }, [label, printerOptions, selectedPrinterId])
 
-  const groups = useMemo(() => groupUnits(active?.units ?? []), [active])
+  const groups = useMemo(
+    () => groupUnits(active?.units ?? [], tn, groupLabels),
+    [active, tn, groupLabels],
+  )
   const total = active?.units.length ?? 0
   const checked = inspected.size
   const allInspected = total > 0 && checked >= total
   const canFinish = allInspected && chemIndicator.trim().length > 0 && packagingType !== "" && !finishing
-  const selectedType = types.find((t) => String(t.value) === packagingType) ?? null
+  const selectedType = types.find((opt) => String(opt.value) === packagingType) ?? null
   // Kata kunci pencarian per unit (filter checklist): cocokkan kode unit / nama instrumen.
   const query = scanCode.trim().toLowerCase()
   // Query cocok dengan kode batch (PRD / PKG) → tampilkan seluruh unit.
@@ -319,7 +342,9 @@ export function ProductionPackagingTab({
   const noMatch =
     query.length > 0 &&
     !batchHit &&
-    !groups.some((g) => g.name.toLowerCase().includes(query) || g.units.some((u) => unitHit(u, query)))
+    !groups.some(
+      (g) => g.name.toLowerCase().includes(query) || g.units.some((u) => unitHit(u, query, tn)),
+    )
 
   /**
    * Buka modal inspeksi. Tidak ada penulisan ke server di sini — batch antrean
@@ -344,7 +369,7 @@ export function ProductionPackagingTab({
       const res = await api.get("/master/packaging-types/options")
       setTypes((res.data?.data ?? []) as PackagingType[])
     } catch (e) {
-      setError(errMsg(e))
+      setError(errMsg(e, t("common.somethingWrong")))
     }
   }
 
@@ -380,16 +405,16 @@ export function ProductionPackagingTab({
     const code = extractCode(scanCode)
     const unit = active.units.find((u) => (u.code ?? "").toLowerCase() === code.toLowerCase())
     if (!unit || unit.instrument_stock_id == null) {
-      setScanMsg({ type: "err", text: `Unit "${code}" is not in this batch.` })
+      setScanMsg({ type: "err", text: t("prodPkg.scanNotInBatch", { code }) })
       return
     }
     if (inspected.has(unit.instrument_stock_id)) {
-      setScanMsg({ type: "err", text: `Unit "${unit.code}" is already checked.` })
+      setScanMsg({ type: "err", text: t("prodPkg.scanAlreadyChecked", { code: unit.code ?? code }) })
       setScanCode("")
       return
     }
     setInspected((prev) => new Set(prev).add(unit.instrument_stock_id as number))
-    setScanMsg({ type: "ok", text: `Unit "${unit.code}" checked.` })
+    setScanMsg({ type: "ok", text: t("prodPkg.scanChecked", { code: unit.code ?? code }) })
     setScanCode("")
   }
 
@@ -416,9 +441,9 @@ export function ProductionPackagingTab({
       setLabel(res.data?.data?.label as ProdSterilLabel)
       setActive(null)
       // Refetch DITUNDA sampai modal label ditutup agar komponen tidak unmount.
-      toast.success(res.data?.message ?? "Packaging completed.")
+      toast.success(res.data?.message ?? t("prodPkg.packagingCompleted"))
     } catch (e) {
-      const msg = errMsg(e)
+      const msg = errMsg(e, t("common.somethingWrong"))
       setError(msg)
       toast.error(msg)
     } finally {
@@ -449,7 +474,7 @@ export function ProductionPackagingTab({
       setHistoryBatch(null)
       setLabel(res.data?.data?.label as ProdSterilLabel)
     } catch (e) {
-      setListError(errMsg(e))
+      setListError(errMsg(e, t("common.somethingWrong")))
     } finally {
       setLabelLoadingId(null)
     }
@@ -492,7 +517,7 @@ export function ProductionPackagingTab({
       const message = await printCssdLabels(selectedPrinter, labelPayload)
       toast.success(message)
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Failed to print the label.")
+      toast.error(e instanceof Error ? e.message : t("prodPkg.failPrint"))
     } finally {
       setPrinting(false)
     }
@@ -529,9 +554,9 @@ export function ProductionPackagingTab({
                   {/* Baris 1: status | kode produksi. */}
                   <div className="flex flex-wrap items-center gap-2">
                     {done ? (
-                      <Badge variant="success">Packaged</Badge>
+                      <Badge variant="success">{t("prodPkg.badgePackaged")}</Badge>
                     ) : (
-                      <Badge variant="warning">Needs Inspection</Badge>
+                      <Badge variant="warning">{t("prodPkg.badgeNeedsInspection")}</Badge>
                     )}
                     <span className="font-mono text-xs font-semibold text-[#075489] bg-[#075489]/8 px-2 py-0.5 rounded">
                       {batch.code_transaction ?? batch.code ?? batch.washing_code}
@@ -542,25 +567,25 @@ export function ProductionPackagingTab({
                       {batch.items.slice(0, 4).map((it, i) => (
                         <span
                           key={`${it.name}-${i}`}
-                          title={`${it.name} ×${it.quantity}`}
+                          title={`${tn(it.name)} ×${it.quantity}`}
                           className="inline-flex max-w-[200px] items-center gap-1 rounded-md bg-gray-50 px-1.5 py-0.5 text-xs text-gray-700 ring-1 ring-gray-200"
                         >
                           {imageByName[it.name] && (
                             // eslint-disable-next-line @next/next/no-img-element
                             <img
                               src={imageByName[it.name]}
-                              alt={it.name}
+                              alt={tn(it.name)}
                               className="h-5 w-5 shrink-0 rounded object-cover"
                             />
                           )}
-                          <span className="truncate font-medium">{it.name}</span>
+                          <span className="truncate font-medium">{tn(it.name)}</span>
                           {/* Paket: jumlah SET, bukan jumlah instrumen di dalamnya. */}
                           <span className="shrink-0 text-gray-400">×{it.quantity}</span>
                         </span>
                       ))}
                       {batch.items.length > 4 && (
                         <span className="rounded-md bg-[#075489]/8 px-1.5 py-0.5 text-xs font-medium text-[#075489]">
-                          +{batch.items.length - 4} more
+                          {t("common.andMore", { n: batch.items.length - 4 })}
                         </span>
                       )}
                     </div>
@@ -568,9 +593,13 @@ export function ProductionPackagingTab({
 
                   <div className="mt-2.5 flex flex-wrap gap-x-4 gap-y-0.5 text-xs text-gray-500">
                     {done ? (
-                      <span>Packaged: {formatDateTime(batch.packaged_at)}</span>
+                      <span>
+                        {t("prodPkg.packagedAt")} {formatDateTime(batch.packaged_at, lang)}
+                      </span>
                     ) : (
-                      <span>Cleaning completed: {formatDateTime(batch.processed_at)}</span>
+                      <span>
+                        {t("prodPkg.cleaningCompletedAt")} {formatDateTime(batch.processed_at, lang)}
+                      </span>
                     )}
                   </div>
                 </div>
@@ -587,7 +616,7 @@ export function ProductionPackagingTab({
                     className="inline-flex items-center gap-1.5 rounded-md border border-[#075489] px-3 py-1.5 text-xs font-medium text-[#075489] hover:bg-[#075489]/8 disabled:opacity-60"
                   >
                     <Printer className="h-3.5 w-3.5" />
-                    {labelLoadingId === batch.id ? "Loading..." : "Print Label"}
+                    {labelLoadingId === batch.id ? t("prodPkg.loading") : t("prodPkg.printLabel")}
                   </button>
                   <ChevronRight className="h-4 w-4 text-gray-300" />
                 </div>
@@ -597,7 +626,7 @@ export function ProductionPackagingTab({
                   onClick={() => open(batch)}
                   className="shrink-0 self-center rounded-md border border-[#075489] bg-[#075489] px-3 py-1.5 text-xs font-medium text-white hover:bg-[#075489]/90"
                 >
-                  Inspect &amp; Pack
+                  {t("prodPkg.inspectAndPack")}
                 </button>
               )}
             </div>
@@ -610,21 +639,25 @@ export function ProductionPackagingTab({
       <Modal
         open={active !== null}
         onClose={finishing ? () => {} : () => setActive(null)}
-        title={active ? `Inspection & Packaging — ${active.code_transaction ?? active.code}` : "Inspection & Packaging"}
+        title={
+          active
+            ? `${t("prodPkg.modalTitle")} — ${active.code_transaction ?? active.code}`
+            : t("prodPkg.modalTitle")
+        }
         size="lg"
         footer={
           <div className="flex w-full items-center justify-between gap-3">
             {error ? <p className="text-sm text-red-600">{error}</p> : null}
             <div className="flex shrink-0 gap-2 ml-auto">
               <Button variant="outline" onClick={() => setActive(null)} disabled={finishing}>
-                Cancel
+                {t("common.cancel")}
               </Button>
               <Button
                 onClick={finish}
                 disabled={!canFinish}
                 className="bg-[#075489] hover:bg-[#075489]/90 text-white"
               >
-                {finishing ? "Processing..." : "Finish & Print Label"}
+                {finishing ? t("production.processing") : t("prodPkg.finishAndPrint")}
               </Button>
             </div>
           </div>
@@ -636,7 +669,7 @@ export function ProductionPackagingTab({
                 agar tidak membingungkan (cari & centang menyatu). */}
             <div className="space-y-3 rounded-lg border border-gray-200 p-3">
               <p className="text-xs font-semibold uppercase tracking-wide text-gray-400">
-                Component Checklist ({checked}/{total})
+                {t("prodPkg.checklistTitle", { checked, total })}
               </p>
 
               {/* Cari / scan per unit — memfilter checklist saat mengetik. */}
@@ -653,7 +686,7 @@ export function ProductionPackagingTab({
                         handleScan()
                       }
                     }}
-                    placeholder="Search unit code or instrument..."
+                    placeholder={t("prodPkg.searchUnit")}
                     className="pl-9"
                   />
                 </div>
@@ -671,7 +704,7 @@ export function ProductionPackagingTab({
                   const shown =
                     !query || batchHit || nameHit
                       ? g.units
-                      : g.units.filter((u) => unitHit(u, query))
+                      : g.units.filter((u) => unitHit(u, query, tn))
                   if (shown.length === 0) return null
                   const checkedInGroup = g.units.filter(
                     (u) => u.instrument_stock_id != null && inspected.has(u.instrument_stock_id),
@@ -683,7 +716,7 @@ export function ProductionPackagingTab({
                           <button
                             type="button"
                             onClick={() => setZoom({ url: g.image as string, name: g.name })}
-                            title="Click to enlarge"
+                            title={t("prodSter.clickToEnlarge")}
                             className="group relative h-8 w-8 shrink-0 cursor-zoom-in overflow-hidden rounded-md border border-gray-200"
                           >
                             {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -733,7 +766,7 @@ export function ProductionPackagingTab({
                                 <Check className="h-4 w-4" />
                               </span>
                               <span className="min-w-0 flex-1 truncate text-sm font-medium sm:text-base">
-                                {u.name ?? u.instrument?.name ?? "Instrument"}
+                                {tn(u.name) || tn(u.instrument?.name) || groupLabels.instrument}
                               </span>
                               {/* Kode unit — pembeda dua instrumen sejenis dalam satu set. */}
                               <span
@@ -753,7 +786,7 @@ export function ProductionPackagingTab({
                 })}
                 {noMatch && (
                   <p className="px-3 py-4 text-center text-xs text-gray-400">
-                    No unit matches &quot;{scanCode.trim()}&quot;.
+                    {t("prodPkg.noUnitMatch", { q: scanCode.trim() })}
                   </p>
                 )}
               </div>
@@ -761,33 +794,35 @@ export function ProductionPackagingTab({
 
             {/* Indikator kimia internal */}
             <div className="space-y-1.5">
-              <Label htmlFor="pkg-chem">Internal Chemical Indicator Lot / Batch No. *</Label>
+              <Label htmlFor="pkg-chem">{t("prodPkg.chemLabel")}</Label>
               <Input
                 id="pkg-chem"
                 value={chemIndicator}
                 onChange={(e) => setChemIndicator(e.target.value)}
-                placeholder="e.g. CI-LOT-20260702"
+                placeholder={t("prodPkg.chemPlaceholder")}
               />
             </div>
 
             {/* Jenis kemasan — masa simpannya menentukan tgl kedaluwarsa steril */}
             <div className="space-y-1.5">
-              <Label htmlFor="pkg-type">Packaging Type *</Label>
+              <Label htmlFor="pkg-type">{t("prodPkg.packagingType")}</Label>
               <Select
                 id="pkg-type"
                 value={packagingType}
                 onChange={(e) => setPackagingType(e.target.value)}
               >
-                <option value="">Select packaging type...</option>
-                {types.map((t) => (
-                  <option key={t.value} value={t.value}>
-                    {t.label} — {t.shelf_life_days} days
+                <option value="">{t("prodPkg.selectPackagingType")}</option>
+                {types.map((opt) => (
+                  <option key={opt.value} value={opt.value}>
+                    {tn(opt.label)} — {opt.shelf_life_days} {t("prodPkg.daysSuffix")}
                   </option>
                 ))}
               </Select>
               {selectedType && (
                 <p className="text-xs text-gray-400">
-                  Sterile expiry: {expiryPreview(selectedType.shelf_life_days)}
+                  {t("prodPkg.sterileExpiry", {
+                    date: expiryPreview(selectedType.shelf_life_days, lang),
+                  })}
                 </p>
               )}
             </div>
@@ -799,13 +834,13 @@ export function ProductionPackagingTab({
       <Modal
         open={label !== null}
         onClose={closeLabel}
-        title="Print Label"
+        title={t("prodPkg.printModalTitle")}
         size="lg"
         footer={
           <div className="flex w-full items-center justify-between gap-3">
             <div className="flex shrink-0 gap-2 ml-auto">
               <Button variant="outline" onClick={closeLabel} disabled={printing}>
-                Close
+                {t("common.close")}
               </Button>
               <Button
                 onClick={printLabel}
@@ -814,8 +849,8 @@ export function ProductionPackagingTab({
               >
                 <Printer className="mr-1.5 h-4 w-4" />
                 {printing
-                  ? "Printing..."
-                  : `Print Label${selectedLabels.size > 0 ? ` (${selectedLabels.size})` : ""}`}
+                  ? t("prodPkg.printing")
+                  : `${t("prodPkg.printLabel")}${selectedLabels.size > 0 ? ` (${selectedLabels.size})` : ""}`}
               </Button>
             </div>
           </div>
@@ -826,25 +861,29 @@ export function ProductionPackagingTab({
             {/* Pilih printer (dari Master Printer) — wajib sebelum cetak */}
             <div className="space-y-1.5">
               <Label>
-                Printer <span className="text-red-500">*</span>
+                {t("prodPkg.printer")} <span className="text-red-500">*</span>
               </Label>
               <SelectSearch
                 options={printerOptions}
                 value={selectedPrinterId}
                 onChange={setSelectedPrinterId}
                 loading={printersLoading}
-                placeholder="Select printer..."
-                searchPlaceholder="Search printer..."
-                loadingText="Loading options..."
-                emptyText="Not found."
+                placeholder={t("prodPkg.printerPlaceholder")}
+                searchPlaceholder={t("prodPkg.printerSearch")}
+                loadingText={t("common.loadingOptions")}
+                emptyText={t("common.notFound")}
               />
             </div>
 
             <div>
               <div className="mb-2 flex items-center justify-between gap-2">
-                <p className="text-xs font-semibold uppercase tracking-wide text-gray-400">View Label</p>
+                <p className="text-xs font-semibold uppercase tracking-wide text-gray-400">
+                  {t("prodPkg.viewLabelTitle")}
+                </p>
                 {selectedLabels.size > 0 && (
-                  <p className="text-xs text-gray-400">{selectedLabels.size} selected</p>
+                  <p className="text-xs text-gray-400">
+                    {t("prodPkg.selectedCount", { n: selectedLabels.size })}
+                  </p>
                 )}
               </div>
               <div className="flex flex-wrap gap-3">
@@ -889,24 +928,24 @@ export function ProductionPackagingTab({
                         captionClassName="font-mono text-[11px] font-semibold leading-tight text-gray-700"
                       />
                     </div>
-                    <div className="mt-1 text-sm font-semibold text-gray-900">{e.title}</div>
+                    <div className="mt-1 text-sm font-semibold text-gray-900">{tn(e.title)}</div>
                     <table className="mt-2 w-full text-left text-[10px]">
                       <tbody>
                         <tr>
-                          <td className="py-0.5 pr-2 text-gray-500">Lot / Batch No.</td>
+                          <td className="py-0.5 pr-2 text-gray-500">{t("prodPkg.lblLot")}</td>
                           <td className="py-0.5 font-medium text-gray-800">{label.chemical_indicator ?? "—"}</td>
                         </tr>
                         <tr>
-                          <td className="py-0.5 pr-2 text-gray-500">Packed By</td>
+                          <td className="py-0.5 pr-2 text-gray-500">{t("prodPkg.lblPackedBy")}</td>
                           <td className="py-0.5 font-medium text-gray-800">{label.packer ?? "—"}</td>
                         </tr>
                         <tr>
-                          <td className="py-0.5 pr-2 text-gray-500">Sterilization Date</td>
-                          <td className="py-0.5 font-medium text-gray-800">{formatDate(label.packaged_at)}</td>
+                          <td className="py-0.5 pr-2 text-gray-500">{t("prodPkg.lblSterilizationDate")}</td>
+                          <td className="py-0.5 font-medium text-gray-800">{formatDate(label.packaged_at, lang)}</td>
                         </tr>
                         <tr>
-                          <td className="py-0.5 pr-2 text-gray-500">Expiry Date</td>
-                          <td className="py-0.5 font-medium text-gray-800">{formatDate(label.expiry_date)}</td>
+                          <td className="py-0.5 pr-2 text-gray-500">{t("prodPkg.lblExpiryDate")}</td>
+                          <td className="py-0.5 font-medium text-gray-800">{formatDate(label.expiry_date, lang)}</td>
                         </tr>
                       </tbody>
                     </table>
@@ -923,7 +962,11 @@ export function ProductionPackagingTab({
       <Modal
         open={historyBatch !== null}
         onClose={() => setHistoryBatch(null)}
-        title={historyBatch ? `Packaging History — ${historyBatch.code}` : "Packaging History"}
+        title={
+          historyBatch
+            ? `${t("prodPkg.historyTitle")} — ${historyBatch.code}`
+            : t("prodPkg.historyTitle")
+        }
         size="lg"
         footer={
           <div className="flex w-full justify-end gap-2">
@@ -935,11 +978,11 @@ export function ProductionPackagingTab({
                 className="inline-flex items-center gap-1.5 rounded-md border border-[#075489] px-3 py-1.5 text-xs font-medium text-[#075489] hover:bg-[#075489]/8 disabled:opacity-60"
               >
                 <Printer className="h-3.5 w-3.5" />
-                {labelLoadingId === historyBatch.id ? "Loading..." : "Print Label"}
+                {labelLoadingId === historyBatch.id ? t("prodPkg.loading") : t("prodPkg.printLabel")}
               </button>
             )}
             <Button variant="outline" onClick={() => setHistoryBatch(null)}>
-              Close
+              {t("common.close")}
             </Button>
           </div>
         }
@@ -947,29 +990,35 @@ export function ProductionPackagingTab({
         {historyBatch && (
           <div className="space-y-5">
             <div className="flex flex-wrap items-center gap-2">
-              <Badge variant="success">Packaged</Badge>
+              <Badge variant="success">{t("prodPkg.badgePackaged")}</Badge>
             </div>
 
             <div className="grid grid-cols-2 gap-x-4 gap-y-3 rounded-lg border border-gray-200 bg-gray-50 px-4 py-3 sm:grid-cols-3">
-              <Info label="Production Code" value={historyBatch.code_transaction} />
-              <Info label="Cleaning Code" value={historyBatch.washing_code} />
-              <Info label="Batch No. (PKG)" value={historyBatch.code} />
-              <Info label="Lot No. (Chemical Indicator)" value={historyBatch.chemical_indicator} />
-              <Info label="Unit Count" value={`${historyBatch.units_count} units`} />
-              <Info label="Processed by" value={historyBatch.processed_by} />
-              <Info label="Packed by" value={historyBatch.completed_by ?? historyBatch.operator} />
-              <Info label="Packed At" value={formatDateTime(historyBatch.packaged_at)} />
-              <Info label="Packaging Type" value={historyBatch.packaging_type_label} />
-              <Info label="Sterile Expiry Date" value={formatDate(historyBatch.expiry_date)} />
+              <Info label={t("prodPkg.infoProductionCode")} value={historyBatch.code_transaction} />
+              <Info label={t("prodPkg.infoCleaningCode")} value={historyBatch.washing_code} />
+              <Info label={t("prodPkg.infoBatchNo")} value={historyBatch.code} />
+              <Info label={t("prodPkg.infoLotNo")} value={historyBatch.chemical_indicator} />
+              <Info
+                label={t("prodPkg.infoUnitCount")}
+                value={`${historyBatch.units_count} ${t("common.units")}`}
+              />
+              <Info label={t("prodPkg.infoProcessedBy")} value={historyBatch.processed_by} />
+              <Info
+                label={t("prodPkg.infoPackedBy")}
+                value={historyBatch.completed_by ?? historyBatch.operator}
+              />
+              <Info label={t("prodPkg.infoPackedAt")} value={formatDateTime(historyBatch.packaged_at, lang)} />
+              <Info label={t("prodPkg.infoPackagingType")} value={tn(historyBatch.packaging_type_label)} />
+              <Info label={t("prodPkg.infoExpiry")} value={formatDate(historyBatch.expiry_date, lang)} />
             </div>
 
             <div className="space-y-2.5">
-              <Label>Packed Units ({historyBatch.units_count})</Label>
+              <Label>{t("prodPkg.packedUnits", { n: historyBatch.units_count })}</Label>
               {/* Dipisah dulu per jenis: Paket & Satuan. Di tiap seksi, unit tetap
                   dikelompokkan seperti sebelumnya (paket per set fisik, satuan per instrumen). */}
               {[
-                { kind: "paket" as const, label: "Package", units: historyBatch.units.filter((u) => u.source === "paket") },
-                { kind: "satuan" as const, label: "Single", units: historyBatch.units.filter((u) => u.source !== "paket") },
+                { kind: "paket" as const, label: t("prodSter.sectionPackage"), units: historyBatch.units.filter((u) => u.source === "paket") },
+                { kind: "satuan" as const, label: t("prodSter.sectionSingle"), units: historyBatch.units.filter((u) => u.source !== "paket") },
               ]
                 .filter((sec) => sec.units.length > 0)
                 .map((sec) => (
@@ -979,19 +1028,19 @@ export function ProductionPackagingTab({
                       <div className="flex items-center gap-2">
                         <span className="text-xs font-semibold uppercase tracking-wide text-gray-500">{sec.label}</span>
                         <span className="inline-flex shrink-0 items-center rounded-full bg-gray-100 px-2 py-0.5 text-[11px] font-semibold text-gray-500">
-                          {groupUnits(sec.units).length}
+                          {groupUnits(sec.units, tn, groupLabels).length}
                         </span>
                       </div>
                     )}
                     <div className="divide-y divide-gray-100 rounded-lg border border-gray-200">
-                      {groupUnits(sec.units).map((g) => (
+                      {groupUnits(sec.units, tn, groupLabels).map((g) => (
                         <div key={g.key} className="px-3 py-2">
                           <div className="flex items-center gap-2">
                             {g.image ? (
                               <button
                                 type="button"
                                 onClick={() => setZoom({ url: g.image as string, name: g.name })}
-                                title="Click to enlarge"
+                                title={t("prodSter.clickToEnlarge")}
                                 className="group relative h-8 w-8 shrink-0 cursor-zoom-in overflow-hidden rounded-md border border-gray-200"
                               >
                                 {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -1009,7 +1058,7 @@ export function ProductionPackagingTab({
                             )}
                             <span className="min-w-0 truncate text-sm font-medium text-gray-800">{g.name}</span>
                             <span className="ml-auto inline-flex shrink-0 items-center rounded-full bg-[#075489]/10 px-2 py-0.5 text-xs font-semibold text-[#075489]">
-                              {g.units.length} unit
+                              {g.units.length} {t("common.unit")}
                             </span>
                           </div>
                           {/* Rincian unit: nama instrumen (snapshot produksi) + kode unitnya,
@@ -1021,7 +1070,7 @@ export function ProductionPackagingTab({
                                 className="flex items-center gap-2 rounded-md bg-gray-50 px-2 py-1.5"
                               >
                                 <span className="min-w-0 flex-1 truncate text-sm text-gray-700">
-                                  {u.name ?? u.instrument?.name ?? "Instrument"}
+                                  {tn(u.name) || tn(u.instrument?.name) || groupLabels.instrument}
                                 </span>
                                 <span className="shrink-0 rounded bg-[#075489]/10 px-1.5 py-0.5 font-mono text-[11px] font-semibold text-[#075489]">
                                   {u.code ?? `#${u.id}`}
@@ -1051,7 +1100,7 @@ export function ProductionPackagingTab({
             type="button"
             onClick={() => setZoom(null)}
             className="absolute right-4 top-4 rounded-full bg-white/10 p-2 text-white hover:bg-white/20"
-            title="Close"
+            title={t("common.close")}
           >
             <X className="h-5 w-5" />
           </button>

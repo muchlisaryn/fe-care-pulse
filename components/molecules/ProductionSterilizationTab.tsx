@@ -12,22 +12,26 @@ import { Textarea } from "@/components/atoms/Textarea"
 import { Modal } from "@/components/molecules/Modal"
 import { ConfirmDialog } from "@/components/molecules/ConfirmDialog"
 import { useToast } from "@/components/molecules/ToastProvider"
+import { useLanguage, type Lang } from "@/lib/i18n"
 import api from "@/lib/axios"
 import type { ProdSterilizeOrder, ProdSterilizeUnit } from "@/lib/store/slices/productionSterilizeSlice"
 
-function formatDateTime(value: string | null) {
+// Nama bulan ikut bahasa aktif: locale "en-GB" untuk Inggris, "id-ID" untuk Indonesia.
+const localeOf = (lang: Lang) => (lang === "id" ? "id-ID" : "en-GB")
+
+function formatDateTime(value: string | null, lang: Lang) {
   if (!value) return "—"
   const d = new Date(value)
   if (Number.isNaN(d.getTime())) return value
-  return d.toLocaleString("en-GB", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })
+  return d.toLocaleString(localeOf(lang), { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })
 }
 
 // Tanggal saja (tanpa jam) — dipakai di samping kode batch pada kartu.
-function formatDate(value: string | null) {
+function formatDate(value: string | null, lang: Lang) {
   if (!value) return "—"
   const d = new Date(value)
   if (Number.isNaN(d.getTime())) return value
-  return d.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" })
+  return d.toLocaleDateString(localeOf(lang), { day: "2-digit", month: "short", year: "numeric" })
 }
 
 function nowLocalInput(): string {
@@ -36,12 +40,13 @@ function nowLocalInput(): string {
   return d.toISOString().slice(0, 16)
 }
 
-function errMsg(e: unknown): string {
+function errMsg(e: unknown, fallback: string): string {
   const x = e as { response?: { data?: { message?: string } } }
-  return x.response?.data?.message ?? "Something went wrong."
+  return x.response?.data?.message ?? fallback
 }
 
-const NO_INSTRUMENT = "(No instrument name)"
+/** Teks cadangan untuk unit tanpa nama — ikut bahasa aktif. */
+type GroupLabels = { pkg: string; noInstrument: string; instrument: string }
 
 type UnitGroup = {
   key: string
@@ -55,13 +60,23 @@ type UnitGroup = {
 // Kelompokkan unit per LABEL FISIK, yaitu `barcode_no` dari packaging_item — satu
 // barcode = satu kemasan, jadi dua set bernama sama tetap jadi dua baris. Unit lama
 // yang belum punya barcode_no jatuh ke pengelompokan lama (nama paket / instrumen).
-function groupUnits(units: ProdSterilizeUnit[]): UnitGroup[] {
+function groupUnits(
+  units: ProdSterilizeUnit[],
+  tn: (t: string | null | undefined) => string,
+  labels: GroupLabels,
+): UnitGroup[] {
   const groups: UnitGroup[] = []
   const index = new Map<string, UnitGroup>()
   for (const u of units) {
     const isPaket = u.source === "paket"
-    const title = isPaket ? u.package_name ?? "Package" : u.instrument ?? NO_INSTRUMENT
-    const key = u.barcode_no ? `barcode::${u.barcode_no}` : `${u.source}::${title}`
+    const title = isPaket
+      ? tn(u.package_name) || labels.pkg
+      : tn(u.instrument) || labels.noInstrument
+    // Tanpa barcode_no, paket masih dipisah per NOMOR SET (package_no) supaya dua set
+    // bernama sama tidak melebur jadi satu baris.
+    const key = u.barcode_no
+      ? `barcode::${u.barcode_no}`
+      : `${u.source}::${title}::${u.package_no ?? ""}`
     let g = index.get(key)
     if (!g) {
       g = {
@@ -82,20 +97,25 @@ function groupUnits(units: ProdSterilizeUnit[]): UnitGroup[] {
 }
 
 // Ringkas unit dalam satu grup jadi daftar "nama instrumen + jumlah unit".
-function instrumentCounts(units: ProdSterilizeUnit[]): { name: string; qty: number }[] {
+function instrumentCounts(
+  units: ProdSterilizeUnit[],
+  tn: (t: string | null | undefined) => string,
+  fallback: string,
+): { name: string; qty: number }[] {
   const map = new Map<string, number>()
   for (const u of units) {
-    const name = u.instrument ?? "Instrument"
+    const name = tn(u.instrument) || fallback
     map.set(name, (map.get(name) ?? 0) + 1)
   }
   return [...map.entries()].map(([name, qty]) => ({ name, qty }))
 }
 
+// Nilai `value` dikirim apa adanya ke backend; hanya labelnya yang diterjemahkan.
 const METHOD_OPTIONS = [
-  { value: "uap", label: "Steam (Autoclave)" },
-  { value: "eo", label: "Ethylene Oxide (EO)" },
-  { value: "plasma", label: "Plasma H2O2" },
-  { value: "panas_kering", label: "Dry Heat" },
+  { value: "uap", labelKey: "prodSter.methodSteam" },
+  { value: "eo", labelKey: "prodSter.methodEo" },
+  { value: "plasma", labelKey: "prodSter.methodPlasma" },
+  { value: "panas_kering", labelKey: "prodSter.methodDryHeat" },
 ]
 const METHOD_DEFAULTS: Record<string, { temperature: string; duration_minutes: string }> = {
   uap: { temperature: "134", duration_minutes: "30" },
@@ -126,6 +146,16 @@ export function ProductionSterilizationTab({
   onScanClear?: () => void
 }) {
   const toast = useToast()
+  const { t, tn, lang } = useLanguage()
+  // Teks cadangan untuk pengelompokan unit — dipakai groupUnits/instrumentCounts.
+  const groupLabels = useMemo<GroupLabels>(
+    () => ({
+      pkg: t("common.package"),
+      noInstrument: t("prodSter.noInstrumentName"),
+      instrument: t("common.instrument"),
+    }),
+    [t],
+  )
   const ready = useMemo(() => items.filter((o) => o.kind === "ready"), [items])
 
   // PKG id yang dicentang untuk digabung ke batch.
@@ -225,8 +255,8 @@ export function ProductionSterilizationTab({
 
   async function createBatch() {
     if (saving || selectedReady.length === 0) return
-    if (!form.machine.trim()) return setError("Sterilizer machine name / number is required.")
-    if (!form.sterilized_at) return setError("Sterilization time is required.")
+    if (!form.machine.trim()) return setError(t("prodSter.errMachine"))
+    if (!form.sterilized_at) return setError(t("prodSter.errTime"))
     setSaving(true)
     setError(null)
     try {
@@ -248,9 +278,9 @@ export function ProductionSterilizationTab({
       setSelected(new Set())
       onScanClear?.()
       onChanged()
-      toast.success(res.data?.message ?? "Sterilization batch created.")
+      toast.success(res.data?.message ?? t("prodSter.batchCreated"))
     } catch (e) {
-      const msg = errMsg(e)
+      const msg = errMsg(e, t("common.somethingWrong"))
       setError(msg)
       toast.error(msg)
     } finally {
@@ -306,7 +336,7 @@ export function ProductionSterilizationTab({
   function requestValidate() {
     if (!validating || vSaving) return
     if (!vForm.chemical_indicator.trim()) {
-      setVError("Chemical Indicator is required.")
+      setVError(t("prodSter.errChemical"))
       return
     }
     setVError(null)
@@ -329,9 +359,9 @@ export function ProductionSterilizationTab({
       setConfirmValidate(false)
       setValidating(null)
       onChanged()
-      toast.success(res.data?.message ?? "Sterilization validation saved.")
+      toast.success(res.data?.message ?? t("prodSter.validationSaved"))
     } catch (e) {
-      const msg = errMsg(e)
+      const msg = errMsg(e, t("common.somethingWrong"))
       setConfirmValidate(false)
       setVError(msg)
       toast.error(msg)
@@ -358,7 +388,9 @@ export function ProductionSterilizationTab({
       {ready.length > 0 && (
         <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
           <span className="text-xs text-gray-600">
-            {selectedKeys.size > 0 ? `${selectedKeys.size} items selected · ${selectedUnitCount} units` : "Select items to combine into a batch."}
+            {selectedKeys.size > 0
+              ? t("prodSter.selectedSummary", { n: selectedKeys.size, units: selectedUnitCount })
+              : t("prodSter.selectHint")}
           </span>
           <Button
             type="button"
@@ -366,7 +398,7 @@ export function ProductionSterilizationTab({
             disabled={selectedKeys.size === 0}
             className="w-full bg-[#075489] hover:bg-[#075489]/90 text-white sm:w-auto"
           >
-            Create Batch
+            {t("prodSter.createBatch")}
           </Button>
         </div>
       )}
@@ -415,7 +447,7 @@ export function ProductionSterilizationTab({
                       readOnly
                       // Seluruh kartu yang menangani klik pilih; checkbox hanya indikator.
                       className="pointer-events-none mt-0.5 h-4 w-4 shrink-0 accent-[#075489]"
-                      title="Select to combine into a batch"
+                      title={t("prodSter.selectToCombine")}
                     />
                   )}
                   <div className="min-w-0 flex-1">
@@ -427,15 +459,16 @@ export function ProductionSterilizationTab({
                       {/* Item siap-steril: waktu pengemasan selesai. Kartu batch STR
                           memakai `processed_at` yang berisi waktu sterilisasinya. */}
                       <span className="text-xs text-gray-500">
-                        {inBatch ? "Sterilized" : "Packaging completed"}: {formatDate(order.processed_at)}
+                        {inBatch ? t("prodSter.sterilizedOn") : t("prodSter.packagedOn")}:{" "}
+                        {formatDate(order.processed_at, lang)}
                       </span>
                       {inBatch &&
                         (order.sterilization?.status === "selesai" ? (
-                          <Badge variant="success">Sterile</Badge>
+                          <Badge variant="success">{t("prodSter.badgeSterile")}</Badge>
                         ) : order.sterilization?.status === "gagal" ? (
-                          <Badge variant="danger">Sterilization Failed</Badge>
+                          <Badge variant="danger">{t("prodSter.badgeFailed")}</Badge>
                         ) : (
-                          <Badge variant="warning">Awaiting Validation</Badge>
+                          <Badge variant="warning">{t("prodSter.badgeAwaiting")}</Badge>
                         ))}
                     </div>
 
@@ -443,7 +476,7 @@ export function ProductionSterilizationTab({
                         satuan (keduanya dari relasi production_item). Kartu batch STR
                         yang belum punya `name` jatuh ke nama produksinya. */}
                     <p className="mt-1 truncate text-sm font-medium text-gray-800">
-                      {order.name ?? order.borrowed_by ?? NO_INSTRUMENT}
+                      {tn(order.name) || tn(order.borrowed_by) || t("prodSter.noInstrumentName")}
                     </p>
                   </div>
                 </div>
@@ -453,12 +486,12 @@ export function ProductionSterilizationTab({
                     onClick={() => openValidate(order)}
                     className="shrink-0 self-center rounded-md border border-[#075489] bg-[#075489] px-3 py-1.5 text-xs font-medium text-white hover:bg-[#075489]/90"
                   >
-                    Validate Result
+                    {t("prodSter.validateResult")}
                   </button>
                 )}
                 {isHistory && (
                   <span className="flex shrink-0 items-center gap-1 self-center text-xs font-medium text-[#075489]">
-                    Details
+                    {t("common.detail")}
                     <ChevronRight className="h-4 w-4" />
                   </span>
                 )}
@@ -472,7 +505,7 @@ export function ProductionSterilizationTab({
       <Modal
         open={batchOpen}
         onClose={saving ? () => {} : () => setBatchOpen(false)}
-        title="Create Sterilization Batch"
+        title={t("prodSter.batchModalTitle")}
         size="lg"
         footer={
           <div className="flex w-full flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
@@ -480,15 +513,15 @@ export function ProductionSterilizationTab({
               <p className="text-sm text-red-600">{error}</p>
             ) : (
               <span className="text-xs text-gray-400">
-                {selectedReady.length} items · {selectedUnitCount} units combined into one batch.
+                {t("prodSter.batchSummary", { n: selectedReady.length, units: selectedUnitCount })}
               </span>
             )}
             <div className="flex shrink-0 justify-end gap-2">
               <Button variant="outline" onClick={() => setBatchOpen(false)} disabled={saving}>
-                Cancel
+                {t("common.cancel")}
               </Button>
               <Button onClick={createBatch} disabled={saving} className="bg-[#075489] hover:bg-[#075489]/90 text-white">
-                {saving ? "Creating..." : "Create Batch"}
+                {saving ? t("prodSter.creating") : t("prodSter.createBatch")}
               </Button>
             </div>
           </div>
@@ -497,13 +530,15 @@ export function ProductionSterilizationTab({
         <div className="space-y-5">
           <div className="rounded-lg border border-gray-200 bg-gray-50 px-4 py-3">
             <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-gray-400">
-              Items in batch ({selectedReady.length} items · {selectedUnitCount} units)
+              {t("prodSter.itemsInBatch", { n: selectedReady.length, units: selectedUnitCount })}
             </p>
             <div className="flex flex-wrap gap-1.5">
               {selectedReady.map((o) => {
                 // Beberapa label bisa berasal dari PKG yang sama, jadi `id` TIDAK
                 // unik — identitas barisnya nomor label.
                 const label = o.barcode_no ?? String(o.id)
+                // Nama tampilan label: nama paket / instrumen (dari DB) lewat glosarium.
+                const displayName = tn(o.name) || tn(o.borrowed_by) || o.code
                 return (
                   <span
                     key={label}
@@ -512,14 +547,14 @@ export function ProductionSterilizationTab({
                     {o.image_url ? (
                       <button
                         type="button"
-                        onClick={() => setZoom({ url: o.image_url as string, name: o.name ?? o.borrowed_by ?? o.code })}
-                        title="Click to enlarge"
+                        onClick={() => setZoom({ url: o.image_url as string, name: displayName })}
+                        title={t("prodSter.clickToEnlarge")}
                         className="group relative h-6 w-6 shrink-0 cursor-zoom-in overflow-hidden rounded border border-gray-200"
                       >
                         {/* eslint-disable-next-line @next/next/no-img-element */}
                         <img
                           src={o.image_url}
-                          alt={o.name ?? o.borrowed_by ?? o.code}
+                          alt={displayName}
                           className="h-full w-full object-cover transition-transform group-hover:scale-105"
                         />
                         <span className="absolute inset-0 flex items-center justify-center bg-black/0 text-white opacity-0 transition group-hover:bg-black/30 group-hover:opacity-100">
@@ -531,9 +566,11 @@ export function ProductionSterilizationTab({
                         <FlaskConical className="h-3.5 w-3.5" />
                       </span>
                     )}
-                    <span className="font-medium">{o.name ?? o.borrowed_by ?? o.code}</span>
+                    <span className="font-medium">{displayName}</span>
                     {o.barcode_no && <span className="font-mono text-gray-400">{o.barcode_no}</span>}
-                    <span className="text-gray-400">· {o.unit_count} unit</span>
+                    <span className="text-gray-400">
+                      · {o.unit_count} {t("common.unit")}
+                    </span>
                   </span>
                 )
               })}
@@ -542,51 +579,51 @@ export function ProductionSterilizationTab({
 
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div className="space-y-1.5 sm:col-span-2">
-              <Label>Sterilizer Machine *</Label>
+              <Label>{t("prodSter.machine")} *</Label>
               <SelectSearch
                 options={machines.map((m) => ({ value: m.name, label: `${m.code} — ${m.name}` }))}
                 value={form.machine}
                 onChange={(v) => setForm((f) => ({ ...f, machine: v }))}
                 loading={machinesLoading}
-                placeholder="Select sterilizer machine..."
-                searchPlaceholder="Search machine code / name..."
-                loadingText="Loading options..."
-                emptyText="Not found."
+                placeholder={t("prodSter.machinePlaceholder")}
+                searchPlaceholder={t("prodSter.machineSearch")}
+                loadingText={t("common.loadingOptions")}
+                emptyText={t("common.notFound")}
               />
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="pstr-method">Method</Label>
+              <Label htmlFor="pstr-method">{t("prodSter.method")}</Label>
               <Select id="pstr-method" value={form.method} onChange={(e) => changeMethod(e.target.value)}>
                 {METHOD_OPTIONS.map((m) => (
                   <option key={m.value} value={m.value}>
-                    {m.label}
+                    {t(m.labelKey)}
                   </option>
                 ))}
               </Select>
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="pstr-cycle">Cycle Number</Label>
-              <Input id="pstr-cycle" value={form.cycle_number} onChange={(e) => setForm((f) => ({ ...f, cycle_number: e.target.value }))} placeholder="e.g. C-12" />
+              <Label htmlFor="pstr-cycle">{t("prodSter.cycleNumber")}</Label>
+              <Input id="pstr-cycle" value={form.cycle_number} onChange={(e) => setForm((f) => ({ ...f, cycle_number: e.target.value }))} placeholder={t("prodSter.cyclePlaceholder")} />
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1.5">
-                <Label htmlFor="pstr-temp">Temperature (°C)</Label>
-                <Input id="pstr-temp" type="number" step="0.01" value={form.temperature} onChange={(e) => setForm((f) => ({ ...f, temperature: e.target.value }))} placeholder="e.g. 134" />
+                <Label htmlFor="pstr-temp">{t("prodSter.temperature")}</Label>
+                <Input id="pstr-temp" type="number" step="0.01" value={form.temperature} onChange={(e) => setForm((f) => ({ ...f, temperature: e.target.value }))} placeholder={t("prodSter.tempPlaceholder")} />
               </div>
               <div className="space-y-1.5">
-                <Label htmlFor="pstr-dur">Duration (min)</Label>
-                <Input id="pstr-dur" type="number" min={0} value={form.duration_minutes} onChange={(e) => setForm((f) => ({ ...f, duration_minutes: e.target.value }))} placeholder="e.g. 30" />
+                <Label htmlFor="pstr-dur">{t("prodSter.duration")}</Label>
+                <Input id="pstr-dur" type="number" min={0} value={form.duration_minutes} onChange={(e) => setForm((f) => ({ ...f, duration_minutes: e.target.value }))} placeholder={t("prodSter.durationPlaceholder")} />
               </div>
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="pstr-at">Sterilization Time *</Label>
+              <Label htmlFor="pstr-at">{t("prodSter.sterilizedAt")} *</Label>
               <Input id="pstr-at" type="datetime-local" value={form.sterilized_at} onChange={(e) => setForm((f) => ({ ...f, sterilized_at: e.target.value }))} />
             </div>
           </div>
 
           <div className="space-y-1.5">
-            <Label htmlFor="pstr-note">Note</Label>
-            <Textarea id="pstr-note" value={form.note} onChange={(e) => setForm((f) => ({ ...f, note: e.target.value }))} placeholder="Optional" />
+            <Label htmlFor="pstr-note">{t("common.note")}</Label>
+            <Textarea id="pstr-note" value={form.note} onChange={(e) => setForm((f) => ({ ...f, note: e.target.value }))} placeholder={t("prodSter.notePlaceholder")} />
           </div>
         </div>
       </Modal>
@@ -595,7 +632,11 @@ export function ProductionSterilizationTab({
       <Modal
         open={validating !== null}
         onClose={vSaving ? () => {} : () => setValidating(null)}
-        title={validating ? `Sterilization Validation — ${validating.sterilization?.code ?? validating.code}` : "Sterilization Validation"}
+        title={
+          validating
+            ? `${t("prodSter.validationTitle")} — ${validating.sterilization?.code ?? validating.code}`
+            : t("prodSter.validationTitle")
+        }
         size="lg"
         footer={
           <div className="flex w-full flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
@@ -603,16 +644,16 @@ export function ProductionSterilizationTab({
               <p className="text-sm text-red-600">{vError}</p>
             ) : (
               <span className="text-xs text-gray-400">
-                {vPassedCount} passed · {vFailedCount} failed
-                {vFailedCount > 0 ? " → queued for reprocessing" : ""}
+                {t("prodSter.passedFailed", { passed: vPassedCount, failed: vFailedCount })}
+                {vFailedCount > 0 ? t("prodSter.queuedReprocess") : ""}
               </span>
             )}
             <div className="flex shrink-0 justify-end gap-2">
               <Button variant="outline" onClick={() => setValidating(null)} disabled={vSaving}>
-                Cancel
+                {t("common.cancel")}
               </Button>
               <Button onClick={() => requestValidate()} disabled={vSaving || !vForm.chemical_indicator.trim()} className="bg-[#075489] hover:bg-[#075489]/90 text-white">
-                {vSaving ? "Processing..." : "Save"}
+                {vSaving ? t("production.processing") : t("common.save")}
               </Button>
             </div>
           </div>
@@ -621,27 +662,27 @@ export function ProductionSterilizationTab({
         {validating && (
           <div className="space-y-5">
             <div className="grid grid-cols-2 gap-x-4 gap-y-2 rounded-lg border border-gray-200 bg-gray-50 px-4 py-3 text-sm sm:grid-cols-3">
-              <Info label="Machine" value={validating.sterilization?.machine} />
-              <Info label="Method" value={validating.sterilization?.method} />
-              <Info label="Cycle No." value={validating.sterilization?.cycle_number} />
-              <Info label="Temperature" value={validating.sterilization?.temperature ? `${Number(validating.sterilization.temperature)}°C` : null} />
-              <Info label="Duration" value={validating.sterilization?.duration_minutes != null ? `${validating.sterilization.duration_minutes} min` : null} />
-              <Info label="Time" value={formatDateTime(validating.sterilization?.sterilized_at ?? null)} />
-              <Info label="Processed by" value={validating.sterilization?.processed_by} />
+              <Info label={t("prodSter.infoMachine")} value={validating.sterilization?.machine} />
+              <Info label={t("prodSter.infoMethod")} value={tn(validating.sterilization?.method)} />
+              <Info label={t("prodSter.infoCycle")} value={validating.sterilization?.cycle_number} />
+              <Info label={t("prodSter.infoTemperature")} value={validating.sterilization?.temperature ? `${Number(validating.sterilization.temperature)}°C` : null} />
+              <Info label={t("prodSter.infoDuration")} value={validating.sterilization?.duration_minutes != null ? `${validating.sterilization.duration_minutes} ${t("prodSter.minSuffix")}` : null} />
+              <Info label={t("prodSter.infoTime")} value={formatDateTime(validating.sterilization?.sterilized_at ?? null, lang)} />
+              <Info label={t("prodSter.infoProcessedBy")} value={validating.sterilization?.processed_by} />
             </div>
 
 
             {/* Checklist hasil per unit */}
             <div className="space-y-1.5">
               <div className="flex items-center justify-between">
-                <Label>Result per Unit ({vUnitIds.length})</Label>
+                <Label>{t("prodSter.resultPerUnit", { n: vUnitIds.length })}</Label>
                 <div className="flex gap-2 text-xs">
                   <button
                     type="button"
                     onClick={() => setPassed(new Set(unitStockIds(validating)))}
                     className="font-medium text-green-600 hover:underline"
                   >
-                    All passed
+                    {t("prodSter.allPassed")}
                   </button>
                   <span className="text-gray-300">|</span>
                   <button
@@ -649,7 +690,7 @@ export function ProductionSterilizationTab({
                     onClick={() => setPassed(new Set())}
                     className="font-medium text-red-600 hover:underline"
                   >
-                    All failed
+                    {t("prodSter.allFailed")}
                   </button>
                 </div>
               </div>
@@ -659,26 +700,30 @@ export function ProductionSterilizationTab({
                 <Input
                   value={vSearch}
                   onChange={(e) => setVSearch(e.target.value)}
-                  placeholder="Search instrument name or unit code..."
+                  placeholder={t("prodSter.searchUnit")}
                   className="pl-9"
                 />
               </div>
               <div className="max-h-64 divide-y divide-gray-100 overflow-y-auto rounded-lg border border-gray-200">
                 {(() => {
                   const q = vSearch.trim().toLowerCase()
+                  // Nama dicocokkan dalam bahasa aslinya MAUPUN terjemahannya, supaya
+                  // pencarian tetap jalan di kedua bahasa.
                   const matchU = (u: ProdSterilizeUnit) =>
                     !q ||
                     (u.instrument ?? "").toLowerCase().includes(q) ||
+                    tn(u.instrument).toLowerCase().includes(q) ||
                     (u.code ?? "").toLowerCase().includes(q) ||
-                    (u.package_name ?? "").toLowerCase().includes(q)
+                    (u.package_name ?? "").toLowerCase().includes(q) ||
+                    tn(u.package_name).toLowerCase().includes(q)
                   // Kelompokkan (satuan per instrumen, paket per nama paket), lalu saring per grup.
-                  const visibleGroups = groupUnits(validating.units)
+                  const visibleGroups = groupUnits(validating.units, tn, groupLabels)
                     .map((g) => ({ g, shownUnits: g.units.filter(matchU) }))
                     .filter((x) => x.shownUnits.length > 0)
                   if (visibleGroups.length === 0) {
                     return (
                       <p className="px-3 py-4 text-center text-xs text-gray-400">
-                        No unit matches &quot;{vSearch.trim()}&quot;.
+                        {t("prodSter.noUnitMatch", { q: vSearch.trim() })}
                       </p>
                     )
                   }
@@ -708,14 +753,18 @@ export function ProductionSterilizationTab({
                             <span className="min-w-0 flex-1">
                               <span className="flex items-center gap-1.5">
                                 <span className="truncate text-sm font-medium text-gray-800">{g.title}</span>
-                                <Badge variant="info">Package</Badge>
-                                <span className="shrink-0 text-[11px] text-gray-400">{g.units.length} unit</span>
+                                <Badge variant="info">{t("common.package")}</Badge>
+                                <span className="shrink-0 text-[11px] text-gray-400">
+                                  {g.units.length} {t("common.unit")}
+                                </span>
                               </span>
                               <span className="mt-0.5 block text-[11px] text-gray-500">
-                                {instrumentCounts(g.units).map((c) => `${c.name} (${c.qty})`).join(", ")}
+                                {instrumentCounts(g.units, tn, groupLabels.instrument)
+                                  .map((c) => `${c.name} (${c.qty})`)
+                                  .join(", ")}
                               </span>
                             </span>
-                            {allPassed && <span className="shrink-0 text-xs font-semibold text-green-600">Passed</span>}
+                            {allPassed && <span className="shrink-0 text-xs font-semibold text-green-600">{t("prodSter.passed")}</span>}
                           </button>
                         </div>
                       )
@@ -741,10 +790,12 @@ export function ProductionSterilizationTab({
                             {ok && <Check className="h-3.5 w-3.5" />}
                           </span>
                           <span className="min-w-0 flex-1">
-                            <span className="block truncate text-sm font-medium text-gray-800">{u.instrument ?? "Instrument"}</span>
+                            <span className="block truncate text-sm font-medium text-gray-800">
+                              {tn(u.instrument) || groupLabels.instrument}
+                            </span>
                             <span className="block font-mono text-[11px] text-gray-500">{u.code ?? `#${u.id}`}</span>
                           </span>
-                          {ok && <span className="shrink-0 text-xs font-semibold text-green-600">Passed</span>}
+                          {ok && <span className="shrink-0 text-xs font-semibold text-green-600">{t("prodSter.passed")}</span>}
                         </button>
                       )
                     })
@@ -756,33 +807,33 @@ export function ProductionSterilizationTab({
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <div className="space-y-1.5">
                 <Label htmlFor="pv-chem">
-                  Chemical Indicator <span className="text-red-500">*</span>
+                  {t("prodSter.infoChemical")} <span className="text-red-500">*</span>
                 </Label>
                 <Select id="pv-chem" value={vForm.chemical_indicator} onChange={(e) => setVForm((f) => ({ ...f, chemical_indicator: e.target.value }))}>
-                  <option value="">— Select —</option>
-                  <option value="Berhasil">Passed</option>
-                  <option value="Tidak Berhasil">Failed</option>
+                  <option value="">{t("prodSter.selectPlaceholder")}</option>
+                  <option value="Berhasil">{t("prodSter.optPassed")}</option>
+                  <option value="Tidak Berhasil">{t("prodSter.optFailed")}</option>
                 </Select>
               </div>
               <div className="space-y-1.5">
-                <Label htmlFor="pv-bio-control">Biological Indicator (Control)</Label>
+                <Label htmlFor="pv-bio-control">{t("prodSter.infoBioControl")}</Label>
                 <Select id="pv-bio-control" value={vForm.bio_indicator_control} onChange={(e) => setVForm((f) => ({ ...f, bio_indicator_control: e.target.value }))}>
-                  <option value="">— Select —</option>
-                  <option value="Negatif">Negative</option>
-                  <option value="Positif">Positive</option>
+                  <option value="">{t("prodSter.selectPlaceholder")}</option>
+                  <option value="Negatif">{t("prodSter.optNegative")}</option>
+                  <option value="Positif">{t("prodSter.optPositive")}</option>
                 </Select>
               </div>
               <div className="space-y-1.5">
-                <Label htmlFor="pv-bio-test">Biological Indicator (Test)</Label>
+                <Label htmlFor="pv-bio-test">{t("prodSter.infoBioTest")}</Label>
                 <Select id="pv-bio-test" value={vForm.bio_indicator_test} onChange={(e) => setVForm((f) => ({ ...f, bio_indicator_test: e.target.value }))}>
-                  <option value="">— Select —</option>
-                  <option value="Negatif">Negative</option>
-                  <option value="Positif">Positive</option>
+                  <option value="">{t("prodSter.selectPlaceholder")}</option>
+                  <option value="Negatif">{t("prodSter.optNegative")}</option>
+                  <option value="Positif">{t("prodSter.optPositive")}</option>
                 </Select>
               </div>
               <div className="space-y-1.5">
-                <Label htmlFor="pv-note">Note</Label>
-                <Input id="pv-note" value={vForm.note} onChange={(e) => setVForm((f) => ({ ...f, note: e.target.value }))} placeholder="Optional" />
+                <Label htmlFor="pv-note">{t("common.note")}</Label>
+                <Input id="pv-note" value={vForm.note} onChange={(e) => setVForm((f) => ({ ...f, note: e.target.value }))} placeholder={t("prodSter.notePlaceholder")} />
               </div>
             </div>
           </div>
@@ -795,39 +846,41 @@ export function ProductionSterilizationTab({
         onClose={() => setConfirmValidate(false)}
         onConfirm={submitValidate}
         loading={vSaving}
-        title="Complete Validation"
-        confirmLabel="Complete"
-        loadingLabel="Processing..."
-        cancelLabel="Cancel"
+        title={t("prodSter.confirmTitle")}
+        confirmLabel={t("prodSter.confirmComplete")}
+        loadingLabel={t("production.processing")}
+        cancelLabel={t("common.cancel")}
         size="fit"
         description={
           validating ? (
             <span className="block space-y-3">
               <span className="block">
-                Complete the validation for batch{" "}
+                {t("prodSter.confirmDescPre")}
                 <span className="font-semibold text-gray-900">
                   {validating.sterilization?.code ?? validating.code}
                 </span>
-                ?
+                {t("prodSter.confirmDescPost")}
               </span>
               {vPassedUnits.length > 0 && (
                 <span className="block space-y-1 rounded-lg border border-green-100 bg-green-50 px-3 py-2">
                   <span className="block text-xs font-semibold uppercase tracking-wide text-green-600">
-                    Passed instruments
+                    {t("prodSter.passedInstruments")}
                   </span>
-                  {groupUnits(vPassedUnits).map((g) => (
+                  {groupUnits(vPassedUnits, tn, groupLabels).map((g) => (
                     <span key={g.key} className="flex items-start justify-between gap-3">
                       <span>
                         <span className="flex items-center gap-1.5">
                           <span className="text-sm text-gray-700">{g.title}</span>
-                          {g.source === "paket" && <Badge variant="info">Package</Badge>}
+                          {g.source === "paket" && <Badge variant="info">{t("common.package")}</Badge>}
                           {g.units.length > 1 && (
                             <span className="shrink-0 text-[11px] text-gray-400">×{g.units.length}</span>
                           )}
                         </span>
                         {g.source === "paket" && (
                           <span className="mt-0.5 block text-[11px] text-gray-500">
-                            {instrumentCounts(g.units).map((c) => `${c.name} (${c.qty})`).join(", ")}
+                            {instrumentCounts(g.units, tn, groupLabels.instrument)
+                              .map((c) => `${c.name} (${c.qty})`)
+                              .join(", ")}
                           </span>
                         )}
                       </span>
@@ -841,21 +894,23 @@ export function ProductionSterilizationTab({
               {vFailedUnits.length > 0 && (
                 <span className="block space-y-1 rounded-lg border border-red-100 bg-red-50 px-3 py-2">
                   <span className="block text-xs font-semibold uppercase tracking-wide text-red-500">
-                    Failed queue
+                    {t("prodSter.failedQueue")}
                   </span>
-                  {groupUnits(vFailedUnits).map((g) => (
+                  {groupUnits(vFailedUnits, tn, groupLabels).map((g) => (
                     <span key={g.key} className="flex items-start justify-between gap-3">
                       <span>
                         <span className="flex items-center gap-1.5">
                           <span className="text-sm text-gray-700">{g.title}</span>
-                          {g.source === "paket" && <Badge variant="info">Package</Badge>}
+                          {g.source === "paket" && <Badge variant="info">{t("common.package")}</Badge>}
                           {g.units.length > 1 && (
                             <span className="shrink-0 text-[11px] text-gray-400">×{g.units.length}</span>
                           )}
                         </span>
                         {g.source === "paket" && (
                           <span className="mt-0.5 block text-[11px] text-gray-500">
-                            {instrumentCounts(g.units).map((c) => `${c.name} (${c.qty})`).join(", ")}
+                            {instrumentCounts(g.units, tn, groupLabels.instrument)
+                              .map((c) => `${c.name} (${c.qty})`)
+                              .join(", ")}
                           </span>
                         )}
                       </span>
@@ -866,7 +921,7 @@ export function ProductionSterilizationTab({
                   ))}
                 </span>
               )}
-              <span className="block text-xs text-gray-400">This action cannot be undone.</span>
+              <span className="block text-xs text-gray-400">{t("prodSter.cannotUndo")}</span>
             </span>
           ) : undefined
         }
@@ -876,12 +931,12 @@ export function ProductionSterilizationTab({
       <Modal
         open={done !== null}
         onClose={() => setDone(null)}
-        title="Sterilization Batch Created"
+        title={t("prodSter.doneTitle")}
         size="sm"
         footer={
           <div className="flex w-full justify-end gap-2">
             <Button onClick={() => setDone(null)} className="bg-[#075489] hover:bg-[#075489]/90 text-white">
-              Close
+              {t("common.close")}
             </Button>
           </div>
         }
@@ -892,7 +947,9 @@ export function ProductionSterilizationTab({
               <CheckCircle2 className="h-7 w-7 text-green-600" />
             </div>
             <p className="text-sm text-gray-600">
-              {done.count} items combined into the batch. Once the cycle is finished, click <b>Validate Result</b> on its card.
+              {t("prodSter.doneMsgPre", { n: done.count })}
+              <b>{t("prodSter.validateResult")}</b>
+              {t("prodSter.doneMsgPost")}
             </p>
             <div className="mt-1 inline-flex items-center gap-2 rounded-lg bg-[#075489]/10 px-3 py-1.5">
               <FlaskConical className="h-4 w-4 text-[#075489]" />
@@ -906,12 +963,16 @@ export function ProductionSterilizationTab({
       <Modal
         open={detailOrder !== null}
         onClose={() => setDetailOrder(null)}
-        title={detailOrder ? `Sterilization History — ${detailOrder.sterilization?.code ?? detailOrder.code}` : "Sterilization History"}
+        title={
+          detailOrder
+            ? `${t("prodSter.historyTitle")} — ${detailOrder.sterilization?.code ?? detailOrder.code}`
+            : t("prodSter.historyTitle")
+        }
         size="lg"
         footer={
           <div className="flex w-full justify-end">
             <Button variant="outline" onClick={() => setDetailOrder(null)}>
-              Close
+              {t("common.close")}
             </Button>
           </div>
         }
@@ -920,9 +981,9 @@ export function ProductionSterilizationTab({
           <div className="space-y-5">
             <div className="flex flex-wrap items-center gap-2">
               {detailOrder.sterilization.status === "selesai" ? (
-                <Badge variant="success">Sterile</Badge>
+                <Badge variant="success">{t("prodSter.badgeSterile")}</Badge>
               ) : (
-                <Badge variant="danger">Sterilization Failed</Badge>
+                <Badge variant="danger">{t("prodSter.badgeFailed")}</Badge>
               )}
               {detailOrder.code_transaction && (
                 <span className="text-xs text-gray-500">{detailOrder.code_transaction}</span>
@@ -930,30 +991,30 @@ export function ProductionSterilizationTab({
             </div>
 
             <div className="grid grid-cols-2 gap-x-4 gap-y-3 rounded-lg border border-gray-200 bg-gray-50 px-4 py-3 sm:grid-cols-3">
-              <Info label="Machine" value={detailOrder.sterilization.machine} />
-              <Info label="Method" value={detailOrder.sterilization.method} />
-              <Info label="Cycle No." value={detailOrder.sterilization.cycle_number} />
-              <Info label="Temperature" value={detailOrder.sterilization.temperature ? `${Number(detailOrder.sterilization.temperature)}°C` : null} />
-              <Info label="Duration" value={detailOrder.sterilization.duration_minutes != null ? `${detailOrder.sterilization.duration_minutes} min` : null} />
-              <Info label="Sterilized At" value={formatDateTime(detailOrder.sterilization.sterilized_at)} />
-              <Info label="Chemical Indicator" value={detailOrder.sterilization.chemical_indicator} />
-              <Info label="Biological Indicator (Control)" value={detailOrder.sterilization.bio_indicator_control} />
-              <Info label="Biological Indicator (Test)" value={detailOrder.sterilization.bio_indicator_test} />
-              <Info label="Processed by" value={detailOrder.sterilization.processed_by} />
-              <Info label="Validated by" value={detailOrder.sterilization.validated_by} />
-              <Info label="Validated At" value={detailOrder.sterilization.validated_at ? formatDateTime(detailOrder.sterilization.validated_at) : null} />
+              <Info label={t("prodSter.infoMachine")} value={detailOrder.sterilization.machine} />
+              <Info label={t("prodSter.infoMethod")} value={tn(detailOrder.sterilization.method)} />
+              <Info label={t("prodSter.infoCycle")} value={detailOrder.sterilization.cycle_number} />
+              <Info label={t("prodSter.infoTemperature")} value={detailOrder.sterilization.temperature ? `${Number(detailOrder.sterilization.temperature)}°C` : null} />
+              <Info label={t("prodSter.infoDuration")} value={detailOrder.sterilization.duration_minutes != null ? `${detailOrder.sterilization.duration_minutes} ${t("prodSter.minSuffix")}` : null} />
+              <Info label={t("prodSter.infoSterilizedAt")} value={formatDateTime(detailOrder.sterilization.sterilized_at, lang)} />
+              <Info label={t("prodSter.infoChemical")} value={tn(detailOrder.sterilization.chemical_indicator)} />
+              <Info label={t("prodSter.infoBioControl")} value={tn(detailOrder.sterilization.bio_indicator_control)} />
+              <Info label={t("prodSter.infoBioTest")} value={tn(detailOrder.sterilization.bio_indicator_test)} />
+              <Info label={t("prodSter.infoProcessedBy")} value={detailOrder.sterilization.processed_by} />
+              <Info label={t("prodSter.infoValidatedBy")} value={detailOrder.sterilization.validated_by} />
+              <Info label={t("prodSter.infoValidatedAt")} value={detailOrder.sterilization.validated_at ? formatDateTime(detailOrder.sterilization.validated_at, lang) : null} />
               <div className="col-span-2 sm:col-span-3">
-                <Info label="Note" value={detailOrder.sterilization.note} />
+                <Info label={t("common.note")} value={detailOrder.sterilization.note} />
               </div>
             </div>
 
             <div className="space-y-2.5">
-              <Label>Sterilized Units ({detailOrder.unit_count})</Label>
+              <Label>{t("prodSter.sterilizedUnits", { n: detailOrder.unit_count })}</Label>
               {/* Dipisah dulu per jenis: Paket & Satuan. Untuk paket, detail isinya
                   muncul di bawah dan tetap dikelompokkan per barcode_no (label fisik). */}
               {[
-                { kind: "paket" as const, label: "Package", units: detailOrder.units.filter((u) => u.source === "paket") },
-                { kind: "satuan" as const, label: "Single", units: detailOrder.units.filter((u) => u.source !== "paket") },
+                { kind: "paket" as const, label: t("prodSter.sectionPackage"), units: detailOrder.units.filter((u) => u.source === "paket") },
+                { kind: "satuan" as const, label: t("prodSter.sectionSingle"), units: detailOrder.units.filter((u) => u.source !== "paket") },
               ]
                 .filter((sec) => sec.units.length > 0)
                 .map((sec) => (
@@ -961,11 +1022,11 @@ export function ProductionSterilizationTab({
                     <div className="flex items-center gap-2">
                       <span className="text-xs font-semibold uppercase tracking-wide text-gray-500">{sec.label}</span>
                       <span className="inline-flex shrink-0 items-center rounded-full bg-gray-100 px-2 py-0.5 text-[11px] font-semibold text-gray-500">
-                        {groupUnits(sec.units).length}
+                        {groupUnits(sec.units, tn, groupLabels).length}
                       </span>
                     </div>
                     <div className="divide-y divide-gray-100 rounded-lg border border-gray-200">
-                      {groupUnits(sec.units).map((g) => (
+                      {groupUnits(sec.units, tn, groupLabels).map((g) => (
                         <div key={g.key} className="px-3 py-2">
                           <div className="flex items-center gap-2">
                             {g.source === "paket" ? (
@@ -987,13 +1048,13 @@ export function ProductionSterilizationTab({
                               <span className="shrink-0 font-mono text-[11px] text-gray-500">{g.barcodeNo}</span>
                             )}
                             <span className="ml-auto inline-flex shrink-0 items-center rounded-full bg-[#075489]/10 px-2 py-0.5 text-xs font-semibold text-[#075489]">
-                              {g.units.length} unit
+                              {g.units.length} {t("common.unit")}
                             </span>
                           </div>
                           {/* Detail isi paket (rincian instrumen per barcode). */}
                           {g.source === "paket" && (
                             <div className="mt-1 flex flex-wrap gap-1.5 pl-6">
-                              {instrumentCounts(g.units).map((c) => (
+                              {instrumentCounts(g.units, tn, groupLabels.instrument).map((c) => (
                                 <span key={c.name} className="rounded bg-[#075489]/10 px-1.5 py-0.5 text-[11px] font-semibold text-[#075489]">
                                   {c.name} ({c.qty})
                                 </span>
@@ -1013,7 +1074,7 @@ export function ProductionSterilizationTab({
       {/* Zoom foto */}
       {zoom && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 p-4" onClick={() => setZoom(null)} role="dialog" aria-modal="true">
-          <button type="button" onClick={() => setZoom(null)} className="absolute right-4 top-4 rounded-full bg-white/10 p-2 text-white hover:bg-white/20" title="Close">
+          <button type="button" onClick={() => setZoom(null)} className="absolute right-4 top-4 rounded-full bg-white/10 p-2 text-white hover:bg-white/20" title={t("common.close")}>
             <X className="h-5 w-5" />
           </button>
           <div className="flex max-h-full max-w-3xl flex-col items-center gap-2" onClick={(e) => e.stopPropagation()}>
