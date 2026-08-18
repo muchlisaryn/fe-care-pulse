@@ -905,13 +905,13 @@ function MonitoringCssd() {
       } else {
         scanBufferRef.current = ""
         setSearchInput("")
-        setScanNotice(`Order ${order.code} has status "${order.status}", not an active order.`)
+        setScanNotice(t("tracking.scanNotActive", { code: order.code, status: order.status }))
       }
     } catch (err) {
       const x = err as { response?: { data?: { message?: string } } }
       scanBufferRef.current = ""
       setSearchInput("")
-      setScanNotice(x.response?.data?.message ?? `Code "${code}" is not recognized.`)
+      setScanNotice(x.response?.data?.message ?? t("tracking.scanUnknownCode", { code }))
     } finally {
       setScanLoading(false)
     }

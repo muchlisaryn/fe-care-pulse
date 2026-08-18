@@ -281,7 +281,7 @@ export function CleaningTab({
         setAlertMsg(w.alert_message ?? t("prodClean.alertOutside"))
         toast.error(w.alert_message ?? t("prodClean.alertOutside"))
       } else {
-        toast.success(res.data?.message ?? t("prodClean.savedRecord"))
+        toast.success(t("prodClean.savedRecord"))
         setActive(null)
       }
     } catch (err) {
@@ -306,7 +306,7 @@ export function CleaningTab({
     try {
       // Tandai Gagal hanya sebagai penanda — tidak mengirim/memproses parameter
       // pencucian, cukup status + alasan.
-      const res = await api.put(`/master/cleaning/${active.id}/washing`, {
+      await api.put(`/master/cleaning/${active.id}/washing`, {
         fail: true,
         failure_reason: failReason.trim(),
       })
@@ -314,7 +314,7 @@ export function CleaningTab({
       setFailMode(false)
       setFailReason("")
       onChanged()
-      toast.success(res.data?.message ?? t("prodClean.markedFailed"))
+      toast.success(t("prodClean.markedFailed"))
     } catch (err) {
       const e = err as { response?: { data?: { message?: string } } }
       const msg = e.response?.data?.message ?? t("prodClean.failMarkFailed")
@@ -343,13 +343,13 @@ export function CleaningTab({
     setCompletingId(confirmTarget.id)
     setConfirmError(null)
     try {
-      const res = await api.put(`/master/cleaning/${confirmTarget.id}/washing`, {
+      await api.put(`/master/cleaning/${confirmTarget.id}/washing`, {
         complete: true,
         completed_at: new Date(completedAt).toISOString(),
       })
       setConfirmTarget(null)
       onChanged()
-      toast.success(res.data?.message ?? t("prodClean.cleaningCompleted"))
+      toast.success(t("prodClean.cleaningCompleted"))
     } catch (err) {
       const e = err as { response?: { data?: { message?: string } } }
       const msg = e.response?.data?.message ?? t("prodClean.failCompleteCleaning")
@@ -365,10 +365,10 @@ export function CleaningTab({
     if (!cancelTarget || cancelling) return
     setCancelling(true)
     try {
-      const res = await api.delete(`/master/cleaning/${cancelTarget.id}/cancel`)
+      await api.delete(`/master/cleaning/${cancelTarget.id}/cancel`)
       setCancelTarget(null)
       onChanged()
-      toast.success(res.data?.message ?? t("prodClean.washCanceled"))
+      toast.success(t("prodClean.washCanceled"))
     } catch (err) {
       const e = err as { response?: { data?: { message?: string } } }
       toast.error(e.response?.data?.message ?? t("prodClean.failCancelWashing"))

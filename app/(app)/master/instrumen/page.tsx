@@ -26,7 +26,7 @@ import {
 } from "@/lib/store/slices/instrumentSlice"
 
 import { fetchConditions } from "@/lib/store/slices/conditionSlice"
-import { useLanguage } from "@/lib/i18n"
+import { useLanguage, localeOf, type Lang } from "@/lib/i18n"
 import api from "@/lib/axios"
 
 type Stock = {
@@ -113,11 +113,11 @@ const pipelineStatusVariant: Record<string, "success" | "info" | "warning" | "da
   batal: "default",
 }
 
-function formatDateTime(value: string | null, lang: string): string {
+function formatDateTime(value: string | null, lang: Lang): string {
   if (!value) return "—"
   const d = new Date(value)
   if (Number.isNaN(d.getTime())) return value
-  return d.toLocaleString(lang === "id" ? "id-ID" : "en-GB", {
+  return d.toLocaleString(localeOf(lang), {
     day: "2-digit",
     month: "short",
     year: "numeric",
