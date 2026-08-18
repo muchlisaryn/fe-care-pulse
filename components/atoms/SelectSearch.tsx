@@ -39,6 +39,16 @@ type SelectSearchProps = {
   loadingText?: string
   /** Teks saat pencarian tidak menemukan opsi — dipakai halaman berbahasa Inggris. */
   emptyText?: string
+  /** Dipanggil saat dropdown dibuka — dipakai memuat opsi baru saat dibutuhkan. */
+  onOpen?: () => void
+  /**
+   * Dipanggil tiap kata kunci berubah. Bila diisi, penyaringan lokal dimatikan:
+   * `options` dianggap sudah hasil pencarian dari server, sehingga hasil yang
+   * cocok lewat kolom lain (mis. kode) tidak ikut tersaring di sisi klien.
+   */
+  onQueryChange?: (query: string) => void
+  /** Label nilai terpilih saat opsinya belum dimuat (mis. form edit). */
+  labelTerpilih?: string
 }
 
 export function SelectSearch({
@@ -54,6 +64,9 @@ export function SelectSearch({
   triggerClassName,
   loadingText = "Memuat opsi...",
   emptyText = "Tidak ditemukan.",
+  onOpen,
+  onQueryChange,
+  labelTerpilih,
 }: SelectSearchProps) {
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState("")
@@ -68,10 +81,13 @@ export function SelectSearch({
     setMounted(true)
   }, [])
 
-  const selected = options.find((o) => o.value === value)
-  const filtered = query
-    ? options.filter((o) => o.label.toLowerCase().includes(query.toLowerCase()))
-    : options
+  const selected =
+    options.find((o) => o.value === value) ??
+    (value && labelTerpilih ? { value, label: labelTerpilih } : undefined)
+  const filtered =
+    query && !onQueryChange
+      ? options.filter((o) => o.label.toLowerCase().includes(query.toLowerCase()))
+      : options
 
   // Hitung posisi + arah buka (atas/bawah) berdasarkan ruang yang tersedia di
   // viewport, plus tinggi maksimum agar daftar opsi selalu muat & bisa di-scroll.
@@ -102,7 +118,9 @@ export function SelectSearch({
     if (!next) return
     setPos(next)
     setQuery("")
+    onQueryChange?.("")
     setOpen(true)
+    onOpen?.()
   }
 
   useEffect(() => {
@@ -155,7 +173,10 @@ export function SelectSearch({
             ref={searchRef}
             type="text"
             value={query}
-            onChange={(e) => setQuery(e.target.value)}
+            onChange={(e) => {
+              setQuery(e.target.value)
+              onQueryChange?.(e.target.value)
+            }}
             placeholder={searchPlaceholder}
             className="w-full rounded-md border border-gray-200 px-3 py-1.5 text-sm outline-none focus:border-[#075489] focus:ring-1 focus:ring-[#075489]/20 placeholder:text-gray-400"
           />

@@ -30,7 +30,9 @@ type DataTableProps<T extends object> = {
   onDelete?: (row: T) => void
   canDelete?: (row: T) => boolean
   extraActions?: ExtraAction<T>[]
-  emptyMessage?: string
+  // Boleh berupa JSX bila kalimat kosongnya perlu penekanan (mis. menyebut
+  // nama tombol) — dirender langsung sebagai isi, bukan atribut.
+  emptyMessage?: ReactNode
   isRowLoading?: (row: T) => boolean
   rowNumber?: (row: T, index: number) => ReactNode
   // Sembunyikan kolom "No" (mis. saat tabel sudah punya kolom urutan sendiri).
