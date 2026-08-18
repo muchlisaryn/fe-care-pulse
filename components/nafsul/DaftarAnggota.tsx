@@ -12,6 +12,7 @@ import { ResultDialog } from "@/components/molecules/ResultDialog";
 import TabelAnggota from "@/components/nafsul/TabelAnggota";
 import { Select } from "@/components/atoms/Select";
 import { apiErrorMessage } from "@/lib/apiError";
+import { useT } from "@/lib/i18n";
 
 const PER_PAGE = 15;
 
@@ -23,7 +24,7 @@ interface Filter {
 }
 
 const pesanGagal = (err: unknown) =>
-  err instanceof ApiError ? err.message : "Gagal memuat data anggota.";
+  err instanceof ApiError ? err.message : "nafsulAnggota.loadFailed";
 
 /**
  * Tabel anggota beserta pencarian & paginasinya.
@@ -36,6 +37,7 @@ const pesanGagal = (err: unknown) =>
  * satu kali cari = satu kali permintaan, bukan satu permintaan per huruf.
  */
 export default function DaftarAnggota({ tipeTetap }: { tipeTetap?: TipeAnggota }) {
+  const t = useT();
   const filterAwal: Filter = { search: "", tipe: tipeTetap ?? "" };
 
   // `draft` = isian filter di layar; `terapkan` = filter yang sedang ditampilkan.
@@ -111,14 +113,14 @@ export default function DaftarAnggota({ tipeTetap }: { tipeTetap?: TipeAnggota }
     try {
       await api(`/anggota/${deleteTarget.id}`, { method: "DELETE" });
       setDeleteTarget(null);
-      setResult({ variant: "success", description: "Anggota berhasil dihapus." });
+      setResult({ variant: "success", description: t("nafsulAnggota.deletedOk") });
       // Tetap di halaman yang sama dengan filter yang sedang tampil.
       muat(terapkan, data?.current_page ?? 1);
     } catch (err) {
       setDeleteTarget(null);
       setResult({
         variant: "error",
-        description: apiErrorMessage(err, "Gagal menghapus anggota."),
+        description: apiErrorMessage(err, t("nafsulAnggota.deleteFailed")),
       });
     } finally {
       setDeleting(false);
@@ -141,7 +143,7 @@ export default function DaftarAnggota({ tipeTetap }: { tipeTetap?: TipeAnggota }
         <div className="relative flex-1">
           <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
           <Input
-            placeholder="Cari nama, no. anggota, KTP, KK..."
+            placeholder={t("nafsulAnggota.searchPlaceholder")}
             value={draft.search}
             onChange={(e) => set("search", e.target.value)}
             className="pl-9"
@@ -154,15 +156,19 @@ export default function DaftarAnggota({ tipeTetap }: { tipeTetap?: TipeAnggota }
             onChange={(e) => set("tipe", e.target.value)}
             className="sm:w-52"
           >
-            <option value="">Semua Tipe Anggota</option>
-            <option value="pribadi">Pribadi</option>
-            <option value="kelompok">Kelompok</option>
+            <option value="">{t("nafsulAnggota.allTypes")}</option>
+            <option value="pribadi">{t("nafsulCommon.personal")}</option>
+            <option value="kelompok">{t("nafsulCommon.group")}</option>
           </Select>
         )}
 
         <div className="flex gap-2">
-          <Button type="submit" disabled={loading} className="flex-1 sm:flex-none">
-            {loading ? "Memuat..." : "Cari"}
+          <Button
+            type="submit"
+            disabled={loading}
+            className="flex-1 sm:flex-none bg-[#075489] hover:bg-[#075489]/90 text-white"
+          >
+            {loading ? t("nafsulAnggota.loading") : t("common.search")}
           </Button>
           <Button
             type="button"
@@ -171,14 +177,14 @@ export default function DaftarAnggota({ tipeTetap }: { tipeTetap?: TipeAnggota }
             disabled={loading}
             className="flex-1 sm:flex-none"
           >
-            Reset
+            {t("common.reset")}
           </Button>
         </div>
       </form>
 
       {error && (
         <div className="mb-4 rounded-xl border border-rose-300 bg-rose-50 px-4 py-3 text-sm text-rose-700">
-          {error}
+          {t(error)}
         </div>
       )}
 
@@ -188,14 +194,9 @@ export default function DaftarAnggota({ tipeTetap }: { tipeTetap?: TipeAnggota }
           loading={loading}
           onDelete={(a) => setDeleteTarget(a)}
           pesanKosong={
-            data === null ? (
-              <>
-                Data gagal dimuat. Tekan <span className="font-medium">Cari</span> untuk
-                mencoba lagi.
-              </>
-            ) : (
-              "Tidak ada data yang cocok dengan filter."
-            )
+            data === null
+              ? t("nafsulAnggota.retryHint", { search: t("common.search") })
+              : t("nafsulAnggota.emptyFilter")
           }
         />
 
@@ -217,7 +218,7 @@ export default function DaftarAnggota({ tipeTetap }: { tipeTetap?: TipeAnggota }
         loading={deleting}
         description={
           deleteTarget
-            ? `Hapus anggota "${deleteTarget.nama}"? Tindakan ini tidak bisa dibatalkan.`
+            ? t("nafsulAnggota.confirmDelete", { name: deleteTarget.nama })
             : undefined
         }
       />

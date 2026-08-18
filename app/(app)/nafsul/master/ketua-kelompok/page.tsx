@@ -1,44 +1,47 @@
 "use client";
 
 import MasterCrud from "@/components/nafsul/MasterCrud";
+import { useT } from "@/lib/i18n";
 import ImportKetuaKelompokModal from "@/components/nafsul/ImportKetuaKelompokModal";
 
 export default function KetuaKelompokPage() {
+  const t = useT();
+
   return (
     <MasterCrud
       endpoint="ketua-kelompok"
       renderImport={(p) => <ImportKetuaKelompokModal {...p} />}
-      title="Ketua Kelompok"
-      subtitle="Master data ketua kelompok"
+      title={t("nafsulMaster.leaderTitle")}
+      subtitle={t("nafsulMaster.leaderSubtitle")}
       pkField="noketua"
       fields={[
-        { name: "nama", label: "Nama", required: true },
+        { name: "nama", label: t("nafsulMaster.name"), required: true },
         {
           name: "jenis_kelamin",
-          label: "Jenis Kelamin",
+          label: t("nafsulMaster.gender"),
           type: "select",
           options: [
-            { value: "L", label: "Laki-laki" },
-            { value: "P", label: "Perempuan" },
+            { value: "L", label: t("nafsulCommon.male") },
+            { value: "P", label: t("nafsulCommon.female") },
           ],
         },
-        { name: "telepon", label: "Telepon" },
-        { name: "alamat", label: "Alamat" },
+        { name: "telepon", label: t("nafsulMaster.phone") },
+        { name: "alamat", label: t("nafsulMaster.address") },
       ]}
       columns={[
-        { name: "noketua", label: "No. Ketua" },
-        { name: "nama", label: "Nama" },
+        { name: "noketua", label: t("nafsulMaster.leaderNo") },
+        { name: "nama", label: t("nafsulMaster.name") },
         {
           name: "jenis_kelamin",
-          label: "Jenis Kelamin",
+          label: t("nafsulMaster.gender"),
           render: (row) =>
             row.jenis_kelamin === "L"
-              ? "Laki-laki"
+              ? t("nafsulCommon.male")
               : row.jenis_kelamin === "P"
-                ? "Perempuan"
+                ? t("nafsulCommon.female")
                 : "-",
         },
-        { name: "telepon", label: "Telepon" },
+        { name: "telepon", label: t("nafsulMaster.phone") },
       ]}
     />
   );

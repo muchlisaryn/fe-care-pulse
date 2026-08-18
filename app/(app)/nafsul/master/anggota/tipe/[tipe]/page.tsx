@@ -7,15 +7,17 @@ import { ChevronLeft } from "lucide-react";
 import { PageHeader } from "@/components/molecules/PageHeader";
 import DaftarAnggota, { type TipeAnggota } from "@/components/nafsul/DaftarAnggota";
 import DaftarKetuaKelompok from "@/components/nafsul/DaftarKetuaKelompok";
+import { useT } from "@/lib/i18n";
 
+/** Berisi KUNCI kamus, bukan kalimat jadi — ikut berganti saat bahasa diubah. */
 const JUDUL: Record<TipeAnggota, { title: string; subtitle: string }> = {
   pribadi: {
-    title: "Anggota Pribadi",
-    subtitle: "Anggota perorangan — tanpa ketua kelompok, atau ditampung ketua “Pribadi”",
+    title: "nafsulAnggota.personalTitle",
+    subtitle: "nafsulAnggota.personalSubtitle",
   },
   kelompok: {
-    title: "Anggota Kelompok",
-    subtitle: "Daftar kelompok beserta jumlah anggotanya — pilih kelompok untuk melihat anggotanya",
+    title: "nafsulAnggota.groupTitle",
+    subtitle: "nafsulAnggota.groupSubtitle",
   },
 };
 
@@ -31,6 +33,7 @@ export default function AnggotaTipePage({
 }: {
   params: Promise<{ tipe: string }>;
 }) {
+  const t = useT();
   const { tipe } = use(params);
 
   if (tipe !== "pribadi" && tipe !== "kelompok") {
@@ -46,10 +49,10 @@ export default function AnggotaTipePage({
         className="mb-2 inline-flex items-center gap-1 text-sm text-slate-500 transition hover:text-emerald-700"
       >
         <ChevronLeft className="h-4 w-4" />
-        Semua Anggota
+        {t("nafsulCommon.allMembers")}
       </Link>
 
-      <PageHeader className="mb-5" title={title} subtitle={subtitle} />
+      <PageHeader className="mb-5" title={t(title)} subtitle={t(subtitle)} />
 
       {tipe === "kelompok" ? <DaftarKetuaKelompok /> : <DaftarAnggota tipeTetap={tipe} />}
     </div>

@@ -1,27 +1,30 @@
 "use client";
 
 import MasterCrud from "@/components/nafsul/MasterCrud";
+import { localeOf, useLanguage } from "@/lib/i18n";
 import { formatCurrency } from "@/lib/nafsul/format";
 
 export default function TarifPage() {
+  const { t, lang } = useLanguage();
+
   return (
     <MasterCrud
       endpoint="tarif"
-      title="Tarif"
-      subtitle="Master data biaya & iuran"
+      title={t("nafsulMaster.rateTitle")}
+      subtitle={t("nafsulMaster.rateSubtitle")}
       pkField="kode"
       fields={[
-        { name: "kode", label: "Kode", required: true, pk: true },
-        { name: "nama", label: "Nama Tarif", required: true },
-        { name: "harga", label: "Harga", type: "number", required: true },
+        { name: "kode", label: t("nafsulMaster.code"), required: true, pk: true },
+        { name: "nama", label: t("nafsulMaster.rateName"), required: true },
+        { name: "harga", label: t("nafsulMaster.price"), type: "number", required: true },
       ]}
       columns={[
-        { name: "kode", label: "Kode" },
-        { name: "nama", label: "Nama Tarif" },
+        { name: "kode", label: t("nafsulMaster.code") },
+        { name: "nama", label: t("nafsulMaster.rateName") },
         {
           name: "harga",
-          label: "Harga",
-          render: (row) => formatCurrency(row.harga as string),
+          label: t("nafsulMaster.price"),
+          render: (row) => formatCurrency(row.harga as string, localeOf(lang)),
         },
       ]}
     />

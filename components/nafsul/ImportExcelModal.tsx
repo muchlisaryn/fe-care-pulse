@@ -9,6 +9,7 @@ import { api, ApiError } from "@/lib/nafsul/api";
 import { Button } from "@/components/atoms/Button";
 import { Input } from "@/components/atoms/Input";
 import { Modal } from "@/components/molecules/Modal";
+import { useT } from "@/lib/i18n";
 
 
 /**
@@ -123,6 +124,7 @@ export default function ImportExcelModal({
   barisWajib,
   muatMaster,
 }: ImportExcelModalProps) {
+  const t = useT();
   const fileRef = useRef<HTMLInputElement>(null);
   const [namaFile, setNamaFile] = useState("");
   const [rows, setRows] = useState<ParsedRow[]>([]);
@@ -201,7 +203,7 @@ export default function ImportExcelModal({
       const wb = XLSX.read(await file.arrayBuffer(), { cellDates: true });
       const sheet = wb.Sheets[wb.SheetNames[0]];
       if (!sheet) {
-        setParseError("File tidak punya sheet yang bisa dibaca.");
+        setParseError(t("nafsulImport.sheetError"));
         return;
       }
 
@@ -231,11 +233,11 @@ export default function ImportExcelModal({
       setRows(terbaca);
       if (terbaca.length === 0) {
         setParseError(
-          "Tidak ada baris data yang terbaca. Pastikan judul kolom ada di baris pertama."
+          t("nafsulImport.noRows")
         );
       }
     } catch {
-      setParseError("File gagal dibaca. Pastikan formatnya .xlsx, .xls, atau .csv.");
+      setParseError(t("nafsulImport.readError"));
     }
   }
 
@@ -287,7 +289,7 @@ export default function ImportExcelModal({
             return {
               baris: h.baris,
               nama: h.nama ?? "",
-              pesan: h.pesan ?? "Gagal disimpan.",
+              pesan: h.pesan ?? t("nafsulImport.saveFailed"),
               row: asal ?? ({ baris: h.baris } as ParsedRow),
             };
           });
@@ -410,21 +412,24 @@ export default function ImportExcelModal({
             onClick={unduhTemplate}
             disabled={importing || masterLoading}
           >
-            {masterLoading ? "Memuat master..." : "Unduh Template"}
+            {masterLoading ? t("nafsulImport.loadingMaster") : t("nafsulImport.downloadTemplate")}
           </Button>
           <Button
             type="button"
             onClick={() => prosesImport(rows)}
             disabled={importing || rows.length === 0 || selesai}
+            className="bg-[#075489] hover:bg-[#075489]/90 text-white"
           >
-            {importing ? `Mengimpor... (${diproses}/${totalAntrian})` : "Mulai Import"}
+            {importing
+              ? t("nafsulImport.importing", { done: diproses, total: totalAntrian })
+              : t("nafsulImport.startImport")}
           </Button>
         </>
       }
     >
       <div className="space-y-5">
         <p className="text-sm text-slate-500">
-          Dikirim {BATCH_SIZE} baris per batch, bukan seluruhnya sekaligus.
+          {t("nafsulImport.batchNote", { size: BATCH_SIZE })}
         </p>
 
         {!namaFile ? (
@@ -445,13 +450,17 @@ export default function ImportExcelModal({
               }`}
             >
               <Upload className="mx-auto mb-3 h-8 w-8 text-slate-400" />
-              <p className="text-sm text-slate-600">Tarik file Excel ke sini, atau</p>
+              <p className="text-sm text-slate-600">{t("nafsulImport.dropHere")}</p>
               <div className="mt-3">
-                <Button type="button" onClick={() => fileRef.current?.click()}>
-                  Pilih File
+                <Button
+                  type="button"
+                  onClick={() => fileRef.current?.click()}
+                  className="bg-[#075489] hover:bg-[#075489]/90 text-white"
+                >
+                  {t("nafsulImport.pickFile")}
                 </Button>
               </div>
-              <p className="mt-3 text-xs text-slate-500">Format .xlsx, .xls, atau .csv</p>
+              <p className="mt-3 text-xs text-slate-500">{t("nafsulImport.formatHint")}</p>
             </div>
           ) : (
             <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 px-4 py-3">
@@ -460,8 +469,11 @@ export default function ImportExcelModal({
                 <div className="min-w-0">
                   <div className="truncate font-medium">{namaFile}</div>
                   <div className="text-sm text-slate-500">
-                    {rows.length} baris · {Math.ceil(rows.length / BATCH_SIZE)} batch @{" "}
-                    {BATCH_SIZE} baris
+                    {t("nafsulImport.rowsBatch", {
+                      rows: rows.length,
+                      batches: Math.ceil(rows.length / BATCH_SIZE),
+                      size: BATCH_SIZE,
+                    })}
                   </div>
                 </div>
               </div>
@@ -471,7 +483,7 @@ export default function ImportExcelModal({
                 onClick={() => fileRef.current?.click()}
                 disabled={importing}
               >
-                Ganti File
+                {t("nafsulImport.changeFile")}
               </Button>
             </div>
           )}
@@ -504,11 +516,15 @@ export default function ImportExcelModal({
               <div className="mb-2 flex flex-wrap items-baseline justify-between gap-2 text-sm">
                 <span className="font-medium">
                   {importing
-                    ? `Mengunggah batch ${batchKe} dari ${totalBatch}`
-                    : "Impor selesai"}
+                    ? t("nafsulImport.uploadingBatch", { current: batchKe, total: totalBatch })
+                    : t("nafsulImport.importDone")}
                 </span>
                 <span className="text-slate-500">
-                  {diproses} dari {totalAntrian} baris ({persen}%)
+                  {t("nafsulImport.progress", {
+                    done: diproses,
+                    total: totalAntrian,
+                    percent: persen,
+                  })}
                 </span>
               </div>
               <div className="h-2 w-full overflow-hidden rounded-full bg-slate-200">
@@ -519,10 +535,12 @@ export default function ImportExcelModal({
               </div>
               <div className="mt-3 flex gap-4 text-sm">
                 <span>
-                  Berhasil <span className="font-semibold text-emerald-700">{berhasil}</span>
+                  {t("nafsulImport.success")}{" "}
+                  <span className="font-semibold text-emerald-700">{berhasil}</span>
                 </span>
                 <span>
-                  Gagal <span className="font-semibold text-rose-700">{gagal.length}</span>
+                  {t("nafsulImport.failed")}{" "}
+                  <span className="font-semibold text-rose-700">{gagal.length}</span>
                 </span>
               </div>
             </div>
@@ -531,7 +549,9 @@ export default function ImportExcelModal({
           {gagal.length > 0 && (
             <div className="overflow-hidden rounded-xl border border-slate-200">
               <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 bg-slate-50 px-4 py-2.5">
-                <span className="text-sm font-medium">Baris gagal ({gagal.length})</span>
+                <span className="text-sm font-medium">
+                  {t("nafsulImport.failedRows", { count: gagal.length })}
+                </span>
                 <div className="flex gap-2">
                   <Button
                     type="button"
@@ -541,16 +561,17 @@ export default function ImportExcelModal({
                     disabled={importing}
                   >
                     <Download className="h-4 w-4" />
-                    Export Excel
+                    {t("nafsulImport.exportExcel")}
                   </Button>
                   <Button
                     type="button"
                     size="sm"
                     onClick={kirimUlangGagal}
                     disabled={!bisaKirimUlang}
+                    className="bg-[#075489] hover:bg-[#075489]/90 text-white"
                   >
                     <RotateCcw className="h-4 w-4" />
-                    Kirim Ulang ({gagal.length})
+                    {t("nafsulImport.resend", { count: gagal.length })}
                   </Button>
                 </div>
               </div>
@@ -559,9 +580,9 @@ export default function ImportExcelModal({
                   {/* Border pada <th> sticky tidak selalu ikut menempel — pakai inset shadow. */}
                   <thead className="sticky top-0 bg-white text-left text-slate-500 shadow-[inset_0_-1px_0_#e2e8f0]">
                     <tr>
-                      <th className="px-4 py-2 font-medium">Baris</th>
-                      <th className="px-4 py-2 font-medium">Nama</th>
-                      <th className="px-4 py-2 font-medium">Alasan</th>
+                      <th className="px-4 py-2 font-medium">{t("nafsulImport.colRow")}</th>
+                      <th className="px-4 py-2 font-medium">{t("nafsulImport.colName")}</th>
+                      <th className="px-4 py-2 font-medium">{t("nafsulImport.colReason")}</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">

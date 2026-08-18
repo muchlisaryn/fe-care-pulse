@@ -1,5 +1,6 @@
 "use client";
 
+import { useT } from "@/lib/i18n";
 import ImportExcelModal, { type ImportColumn } from "@/components/nafsul/ImportExcelModal";
 
 /**
@@ -31,12 +32,14 @@ export default function ImportKetuaKelompokModal({
   /** Dipanggil setelah impor selesai dengan minimal satu baris berhasil. */
   onSelesai?: () => void;
 }) {
+  const t = useT();
+
   return (
     <ImportExcelModal
       open={open}
       onClose={onClose}
       onSelesai={onSelesai}
-      judul="Import Ketua Kelompok dari Excel"
+      judul={t("nafsulImport.titleLeader")}
       slug="ketua-kelompok"
       sheetUtama="Ketua Kelompok"
       columns={COLUMNS}

@@ -2,7 +2,8 @@
 
 import { useEffect, useState } from "react";
 import { api, ApiError } from "@/lib/nafsul/api";
-import { jenisKelamin } from "@/lib/nafsul/format";
+import { kunciJenisKelamin } from "@/lib/nafsul/format";
+import { localeOf, useLanguage } from "@/lib/i18n";
 import type { KetuaKelompok, Paginated } from "@/lib/nafsul/types";
 import { DataTable, type Column } from "@/components/molecules/DataTable";
 import { Pagination } from "@/components/molecules/Pagination";
@@ -16,8 +17,9 @@ const ambil = (halaman: number) =>
     params: { tanpa_pribadi: 1, page: halaman, per_page: PER_PAGE },
   });
 
+/** Pesan galat: pakai pesan asli dari server, atau KUNCI kamus sebagai cadangan. */
 const pesanGagal = (err: unknown) =>
-  err instanceof ApiError ? err.message : "Gagal memuat data ketua kelompok.";
+  err instanceof ApiError ? err.message : "nafsulAnggota.leaderLoadFailed";
 
 /**
  * Daftar master ketua kelompok (di luar ketua penampung anggota perorangan),
@@ -60,18 +62,26 @@ export default function DaftarKetuaKelompok() {
     }
   }
 
+  const { t, lang } = useLanguage();
+
   const columns: Column<KetuaKelompok>[] = [
-    { header: "No. Ketua Kelompok", className: "font-mono text-xs", cell: (k) => k.noketua },
-    { header: "Nama", className: "font-medium", cell: (k) => k.nama },
-    { header: "Jenis Kelamin", cell: (k) => jenisKelamin(k.jenis_kelamin) },
+    { header: t("nafsulAnggota.leaderColNo"), className: "font-mono text-xs", cell: (k) => k.noketua },
+    { header: t("nafsulAnggota.colName"), className: "font-medium", cell: (k) => k.nama },
     {
-      header: "Telepon",
+      header: t("nafsulAnggota.colGender"),
+      cell: (k) => {
+        const kunci = kunciJenisKelamin(k.jenis_kelamin);
+        return kunci ? t(kunci) : <span className="text-gray-400 text-xs">—</span>;
+      },
+    },
+    {
+      header: t("nafsulMaster.phone"),
       cell: (k) => k.telepon ?? <span className="text-gray-400 text-xs">—</span>,
     },
     {
-      header: "Total Anggota",
+      header: t("nafsulAnggota.leaderColTotal"),
       className: "text-right tabular-nums",
-      cell: (k) => (k.anggota_count ?? 0).toLocaleString("id-ID"),
+      cell: (k) => (k.anggota_count ?? 0).toLocaleString(localeOf(lang)),
     },
   ];
 
@@ -79,20 +89,20 @@ export default function DaftarKetuaKelompok() {
     <div>
       {error && (
         <div className="mb-4 rounded-xl border border-rose-300 bg-rose-50 px-4 py-3 text-sm text-rose-700">
-          {error}
+          {t(error)}
         </div>
       )}
 
       <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden">
         {loading ? (
-          <div className="py-16 text-center text-sm text-gray-400">Memuat data...</div>
+          <div className="py-16 text-center text-sm text-gray-400">{t("nafsulMaster.loading")}</div>
         ) : (
           <DataTable
             columns={columns}
             data={data?.data ?? []}
             hideRowNumber
-            emptyMessage={data === null ? "Data gagal dimuat." : "Belum ada kelompok."}
-            extraActions={[{ label: "Lihat Anggota", onClick: (k) => setDilihat(k) }]}
+            emptyMessage={t(data === null ? "nafsulAnggota.leaderLoadFailedShort" : "nafsulAnggota.leaderEmpty")}
+            extraActions={[{ label: t("nafsulAnggota.viewMembers"), onClick: (k) => setDilihat(k) }]}
           />
         )}
 

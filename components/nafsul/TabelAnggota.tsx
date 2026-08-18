@@ -3,7 +3,8 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type { ReactNode } from "react";
-import { formatDate, jenisKelamin } from "@/lib/nafsul/format";
+import { formatDate, kunciJenisKelamin } from "@/lib/nafsul/format";
+import { localeOf, useLanguage } from "@/lib/i18n";
 import type { Anggota } from "@/lib/nafsul/types";
 import { Badge } from "@/components/atoms/Badge";
 import { DataTable, type Column } from "@/components/molecules/DataTable";
@@ -37,7 +38,7 @@ export function tipeAnggota(a: Anggota): "Pribadi" | "Kelompok" {
 export default function TabelAnggota({
   rows,
   loading,
-  pesanKosong = "Tidak ada data.",
+  pesanKosong,
   onDelete,
   tampilkanTipe = true,
   tampilkanAksi = true,
@@ -52,15 +53,16 @@ export default function TabelAnggota({
   tampilkanAksi?: boolean;
 }) {
   const router = useRouter();
+  const { t, lang } = useLanguage();
 
   const columns: Column<Anggota>[] = [
     {
-      header: "No. Anggota",
+      header: t("nafsulAnggota.colMemberNo"),
       className: "font-mono text-xs",
       cell: (a) => a.no_anggota ?? <Kosong />,
     },
     {
-      header: "Nama",
+      header: t("nafsulAnggota.colName"),
       cell: (a) => (
         <Link
           href={`/nafsul/master/anggota/${a.id}/edit`}
@@ -70,30 +72,38 @@ export default function TabelAnggota({
         </Link>
       ),
     },
-    { header: "Jenis Kelamin", cell: (a) => jenisKelamin(a.jenis_kelamin) },
-    { header: "Wilayah", cell: (a) => a.wilayah?.nama ?? <Kosong /> },
+    {
+      header: t("nafsulAnggota.colGender"),
+      cell: (a) => {
+        const kunci = kunciJenisKelamin(a.jenis_kelamin);
+        return kunci ? t(kunci) : <Kosong />;
+      },
+    },
+    { header: t("nafsulAnggota.colRegion"), cell: (a) => a.wilayah?.nama ?? <Kosong /> },
     ...(tampilkanTipe
       ? [
           {
-            header: "Tipe",
+            header: t("nafsulAnggota.colType"),
             cell: (a: Anggota) => (
               <Badge variant={tipeAnggota(a) === "Kelompok" ? "info" : "default"}>
-                {tipeAnggota(a)}
+                {t(tipeAnggota(a) === "Kelompok" ? "nafsulCommon.group" : "nafsulCommon.personal")}
               </Badge>
             ),
           },
         ]
       : []),
-    { header: "Dibuat Oleh", cell: (a) => a.created_by ?? <Kosong /> },
+    { header: t("nafsulAnggota.colCreatedBy"), cell: (a) => a.created_by ?? <Kosong /> },
     {
-      header: "Dibuat",
+      header: t("nafsulAnggota.colCreatedAt"),
       className: "whitespace-nowrap",
-      cell: (a) => formatDate(a.created_at),
+      cell: (a) => formatDate(a.created_at, localeOf(lang)),
     },
   ];
 
   if (loading) {
-    return <div className="py-16 text-center text-sm text-gray-400">Memuat data...</div>;
+    return (
+      <div className="py-16 text-center text-sm text-gray-400">{t("nafsulMaster.loading")}</div>
+    );
   }
 
   return (
@@ -101,7 +111,7 @@ export default function TabelAnggota({
       columns={columns}
       data={rows}
       hideRowNumber
-      emptyMessage={pesanKosong}
+      emptyMessage={pesanKosong ?? t("nafsulAnggota.empty")}
       onEdit={
         tampilkanAksi ? (a) => router.push(`/nafsul/master/anggota/${a.id}/edit`) : undefined
       }

@@ -1,34 +1,37 @@
 "use client";
 
 import MasterCrud from "@/components/nafsul/MasterCrud";
+import { localeOf, useLanguage } from "@/lib/i18n";
 import { formatCurrency } from "@/lib/nafsul/format";
 
 export default function TarifKasKeluarPage() {
+  const { t, lang } = useLanguage();
+
   return (
     <MasterCrud
       endpoint="tarif"
-      title="Tarif Kas Keluar"
-      subtitle="Master data tarif kas keluar"
+      title={t("nafsulMaster.cashOutTitle")}
+      subtitle={t("nafsulMaster.cashOutSubtitle")}
       pkField="kode"
       filter={{ kategori: "kas_keluar" }}
       defaults={{ kategori: "kas_keluar" }}
       fields={[
-        { name: "kode", label: "Kode Kas", required: true, pk: true },
-        { name: "keterangan", label: "Keterangan" },
-        { name: "kode_tarif", label: "Kode Tarif" },
-        { name: "nama", label: "Nama Tarif", required: true },
-        { name: "harga", label: "Harga", type: "number", required: true },
+        { name: "kode", label: t("nafsulMaster.cashCode"), required: true, pk: true },
+        { name: "keterangan", label: t("nafsulMaster.note") },
+        { name: "kode_tarif", label: t("nafsulMaster.rateCode") },
+        { name: "nama", label: t("nafsulMaster.rateName"), required: true },
+        { name: "harga", label: t("nafsulMaster.price"), type: "number", required: true },
       ]}
       columns={[
-        { name: "kode", label: "Kode Kas" },
-        { name: "kode_tarif", label: "Kode Tarif" },
-        { name: "nama", label: "Nama Tarif" },
+        { name: "kode", label: t("nafsulMaster.cashCode") },
+        { name: "kode_tarif", label: t("nafsulMaster.rateCode") },
+        { name: "nama", label: t("nafsulMaster.rateName") },
         {
           name: "harga",
-          label: "Harga",
-          render: (row) => formatCurrency(row.harga as string),
+          label: t("nafsulMaster.price"),
+          render: (row) => formatCurrency(row.harga as string, localeOf(lang)),
         },
-        { name: "keterangan", label: "Keterangan" },
+        { name: "keterangan", label: t("nafsulMaster.note") },
       ]}
     />
   );

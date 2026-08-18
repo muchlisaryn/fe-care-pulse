@@ -10,6 +10,7 @@ import type {
   StatusAnggota,
   Wilayah,
 } from "@/lib/nafsul/types";
+import { useT } from "@/lib/i18n";
 import ImportExcelModal, {
   type ImportColumn,
   type MasterSheet,
@@ -69,6 +70,8 @@ export default function ImportAnggotaModal({
   /** Dipanggil setelah impor selesai dengan minimal satu baris berhasil. */
   onSelesai?: () => void;
 }) {
+  const t = useT();
+
   // Seluruh master yang dirujuk kolom anggota, ditulis sebagai sheet referensi
   // di file template & file baris gagal.
   const muatMaster = useCallback(async (): Promise<MasterSheet[]> => {
@@ -100,7 +103,7 @@ export default function ImportAnggotaModal({
       open={open}
       onClose={onClose}
       onSelesai={onSelesai}
-      judul="Import Anggota dari Excel"
+      judul={t("nafsulImport.titleMember")}
       slug="anggota"
       sheetUtama="Anggota"
       columns={COLUMNS}

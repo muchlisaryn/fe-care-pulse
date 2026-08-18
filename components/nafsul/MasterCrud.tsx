@@ -14,6 +14,7 @@ import { Pagination } from "@/components/molecules/Pagination";
 import { ResultDialog } from "@/components/molecules/ResultDialog";
 import { Select } from "@/components/atoms/Select";
 import { apiErrorMessage } from "@/lib/apiError";
+import { useT } from "@/lib/i18n";
 
 
 export interface MasterField {
@@ -87,13 +88,14 @@ export default function MasterCrud({
     variant: "success" | "error";
     description: string;
   } | null>(null);
+  const t = useT();
 
   useEffect(() => {
-    const t = setTimeout(() => {
+    const timer = setTimeout(() => {
       setDebounced(search);
       setPage(1);
     }, 350);
-    return () => clearTimeout(t);
+    return () => clearTimeout(timer);
   }, [search]);
 
   const filterKey = JSON.stringify(filter ?? {});
@@ -139,13 +141,13 @@ export default function MasterCrud({
     try {
       await api(`/${endpoint}/${deleteTarget[pkField]}`, { method: "DELETE" });
       setDeleteTarget(null);
-      setResult({ variant: "success", description: "Data berhasil dihapus." });
+      setResult({ variant: "success", description: t("nafsulMaster.deletedOk") });
       load();
     } catch (err) {
       setDeleteTarget(null);
       setResult({
         variant: "error",
-        description: apiErrorMessage(err, "Gagal menghapus data."),
+        description: apiErrorMessage(err, t("nafsulMaster.deleteFailed")),
       });
     } finally {
       setDeleting(false);
@@ -162,10 +164,15 @@ export default function MasterCrud({
           <div className="flex flex-wrap gap-2">
             {renderImport && (
               <Button variant="outline" onClick={() => setImportOpen(true)}>
-                Import Excel
+                {t("nafsulMaster.importExcel")}
               </Button>
             )}
-            <Button onClick={() => setModal({ mode: "create" })}>+ Tambah</Button>
+            <Button
+              onClick={() => setModal({ mode: "create" })}
+              className="bg-[#075489] hover:bg-[#075489]/90 text-white"
+            >
+              {t("nafsulMaster.add")}
+            </Button>
           </div>
         }
       />
@@ -177,7 +184,7 @@ export default function MasterCrud({
       })}
 
       <div className="bg-white rounded-2xl border border-slate-200 p-4 mb-4">
-        <Input placeholder="Cari..."
+        <Input placeholder={t("nafsulMaster.searchPlaceholder")}
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           className="max-w-sm"
@@ -186,7 +193,7 @@ export default function MasterCrud({
 
       <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden">
         {loading ? (
-          <div className="py-16 text-center text-sm text-gray-400">Memuat data...</div>
+          <div className="py-16 text-center text-sm text-gray-400">{t("nafsulMaster.loading")}</div>
         ) : (
           <DataTable
             columns={kolomTabel}
@@ -196,7 +203,7 @@ export default function MasterCrud({
             onEdit={(row) => setModal({ mode: "edit", row })}
             onDelete={(row) => setDeleteTarget(row)}
             isRowLoading={(row) => deleting && row === deleteTarget}
-            emptyMessage="Tidak ada data."
+            emptyMessage={t("nafsulMaster.empty")}
           />
         )}
 
@@ -235,7 +242,7 @@ export default function MasterCrud({
         loading={deleting}
         description={
           deleteTarget
-            ? `Hapus "${labelBaris(deleteTarget)}"? Tindakan ini tidak bisa dibatalkan.`
+            ? t("nafsulMaster.confirmDelete", { label: labelBaris(deleteTarget) })
             : undefined
         }
       />
@@ -282,6 +289,7 @@ function MasterModal({
   const [submitting, setSubmitting] = useState(false);
   /** Galat non-validasi (mis. server error) — validasi per field tampil di bawah inputnya. */
   const [flash, setFlash] = useState<string | null>(null);
+  const t = useT();
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -301,13 +309,13 @@ function MasterModal({
       } else {
         await api(`/${endpoint}/${row![pkField]}`, { method: "PUT", body: payload });
       }
-      onSaved(mode === "create" ? "Data berhasil ditambahkan." : "Perubahan berhasil disimpan.");
+      onSaved(t(mode === "create" ? "nafsulMaster.createdOk" : "nafsulMaster.updatedOk"));
     } catch (err) {
       if (err instanceof ApiError && err.errors) {
         setErrors(err.errors);
-        setFlash("Periksa kembali isian yang ditandai.");
+        setFlash(t("nafsulMaster.checkFields"));
       } else {
-        setFlash(apiErrorMessage(err, "Gagal menyimpan data."));
+        setFlash(apiErrorMessage(err, t("nafsulMaster.saveFailed")));
       }
     } finally {
       setSubmitting(false);
@@ -318,15 +326,20 @@ function MasterModal({
     <Modal
       open
       onClose={onClose}
-      title={`${mode === "create" ? "Tambah" : "Edit"} Data`}
+      title={t(mode === "create" ? "nafsulMaster.modalAdd" : "nafsulMaster.modalEdit")}
       size="md"
       footer={
         <>
           <Button type="button" variant="outline" onClick={onClose} disabled={submitting}>
-            Batal
+            {t("common.cancel")}
           </Button>
-          <Button type="submit" form={FORM_ID} disabled={submitting}>
-            {submitting ? "Menyimpan..." : "Simpan"}
+          <Button
+            type="submit"
+            form={FORM_ID}
+            disabled={submitting}
+            className="bg-[#075489] hover:bg-[#075489]/90 text-white"
+          >
+            {submitting ? t("common.saving") : t("common.save")}
           </Button>
         </>
       }

@@ -9,11 +9,12 @@ import { Input } from "@/components/atoms/Input";
 import { Modal } from "@/components/molecules/Modal";
 import { Pagination } from "@/components/molecules/Pagination";
 import TabelAnggota from "@/components/nafsul/TabelAnggota";
+import { localeOf, useLanguage, useT } from "@/lib/i18n";
 
 const PER_PAGE = 10;
 
 const pesanGagal = (err: unknown) =>
-  err instanceof ApiError ? err.message : "Gagal memuat anggota.";
+  err instanceof ApiError ? err.message : "nafsulAnggota.modalLoadFailed";
 
 /**
  * Daftar anggota satu kelompok di dalam modal.
@@ -32,15 +33,17 @@ export default function AnggotaKelompokModal({
   ketua: KetuaKelompok | null;
   onClose: () => void;
 }) {
+  const t = useT();
+
   return (
     <Modal
       open={ketua !== null}
       onClose={onClose}
-      title={ketua ? `Anggota — ${ketua.nama}` : "Anggota"}
+      title={ketua ? `${t("nafsulAnggota.modalTitle")} — ${ketua.nama}` : t("nafsulAnggota.modalTitle")}
       size="xl"
       footer={
         <Button variant="outline" onClick={onClose}>
-          Tutup
+          {t("nafsulAnggota.close")}
         </Button>
       }
     >
@@ -52,6 +55,7 @@ export default function AnggotaKelompokModal({
 }
 
 function IsiModal({ ketua }: { ketua: KetuaKelompok }) {
+  const { t, lang } = useLanguage();
   const [data, setData] = useState<Paginated<Anggota> | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -103,29 +107,36 @@ function IsiModal({ ketua }: { ketua: KetuaKelompok }) {
     <>
       <div className="mb-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <p className="text-sm text-gray-500">
-          No. Ketua <span className="font-mono text-xs">{ketua.noketua}</span> ·{" "}
-          {(ketua.anggota_count ?? 0).toLocaleString("id-ID")} anggota
+          {t("nafsulMaster.leaderNo")}{" "}
+          <span className="font-mono text-xs">{ketua.noketua}</span> ·{" "}
+          {t("nafsulAnggota.membersCount", {
+            count: (ketua.anggota_count ?? 0).toLocaleString(localeOf(lang)),
+          })}
         </p>
 
         <form onSubmit={handleCari} className="flex gap-2 sm:w-80">
           <div className="relative flex-1">
             <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
             <Input
-              placeholder="Cari anggota..."
+              placeholder={t("nafsulAnggota.modalSearch")}
               value={draft}
               onChange={(e) => setDraft(e.target.value)}
               className="pl-9"
             />
           </div>
-          <Button type="submit" disabled={loading}>
-            {loading ? "..." : "Cari"}
+          <Button
+            type="submit"
+            disabled={loading}
+            className="bg-[#075489] hover:bg-[#075489]/90 text-white"
+          >
+            {loading ? "..." : t("common.search")}
           </Button>
         </form>
       </div>
 
       {error && (
         <div className="mb-3 rounded-xl border border-rose-300 bg-rose-50 px-4 py-3 text-sm text-rose-700">
-          {error}
+          {t(error)}
         </div>
       )}
 
@@ -136,8 +147,8 @@ function IsiModal({ ketua }: { ketua: KetuaKelompok }) {
           tampilkanTipe={false}
           pesanKosong={
             dicari
-              ? "Tidak ada anggota yang cocok dengan pencarian."
-              : "Kelompok ini belum punya anggota."
+              ? t("nafsulAnggota.modalNoMatch")
+              : t("nafsulAnggota.modalEmpty")
           }
         />
 
