@@ -1,3 +1,5 @@
+"use client"
+
 import {
   Check,
   Clock,
@@ -13,11 +15,13 @@ import {
 } from "lucide-react"
 import type { LucideIcon } from "lucide-react"
 import type { OrderStatus } from "@/lib/store/slices/orderSlice"
+import { statusLabelKey } from "@/lib/orderStatus"
+import { useT } from "@/lib/i18n"
 
 // Gaya badge status order — tiap tahap punya warna & ikon sendiri agar mudah
 // dibedakan sekilas. `dot` menandakan tahap yang sedang berjalan (animasi pulse).
 type StatusStyle = {
-  label: string
+  labelKey: string
   icon: LucideIcon
   className: string
   iconClassName: string
@@ -26,66 +30,66 @@ type StatusStyle = {
 
 const STATUS_STYLES: Record<OrderStatus, StatusStyle> = {
   diajukan: {
-    label: "Submitted",
+    labelKey: statusLabelKey.diajukan,
     icon: Clock,
     className: "bg-amber-50 text-amber-700 ring-1 ring-amber-200",
     iconClassName: "text-amber-500",
     pulse: true,
   },
   pencucian: {
-    label: "Being Cleaned",
+    labelKey: statusLabelKey.pencucian,
     icon: Droplets,
     className: "bg-yellow-50 text-yellow-700 ring-1 ring-yellow-200",
     iconClassName: "text-yellow-500",
     pulse: true,
   },
   pengemasan: {
-    label: "Being Packaged",
+    labelKey: statusLabelKey.pengemasan,
     icon: Package,
     className: "bg-violet-50 text-violet-700 ring-1 ring-violet-200",
     iconClassName: "text-violet-500",
     pulse: true,
   },
   selesai: {
-    label: "Ready to Sterilize",
+    labelKey: statusLabelKey.selesai,
     icon: ShieldCheck,
     className: "bg-indigo-50 text-indigo-700 ring-1 ring-indigo-200",
     iconClassName: "text-indigo-500",
     pulse: true,
   },
   sterilisasi: {
-    label: "Being Sterilized",
+    labelKey: statusLabelKey.sterilisasi,
     icon: FlaskConical,
     className: "bg-sky-50 text-sky-700 ring-1 ring-sky-200",
     iconClassName: "text-sky-500",
     pulse: true,
   },
   steril: {
-    label: "Sterile / Ready to Release",
+    labelKey: statusLabelKey.steril,
     icon: ShieldCheck,
     className: "bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200",
     iconClassName: "text-emerald-500",
   },
   digudang: {
-    label: "Ready to Distribute",
+    labelKey: statusLabelKey.digudang,
     icon: Warehouse,
     className: "bg-teal-50 text-teal-700 ring-1 ring-teal-200",
     iconClassName: "text-teal-500",
   },
   dipinjam: {
-    label: "Distributed",
+    labelKey: statusLabelKey.dipinjam,
     icon: Truck,
     className: "bg-blue-50 text-blue-700 ring-1 ring-blue-200",
     iconClassName: "text-blue-500",
   },
   dikembalikan: {
-    label: "Returned",
+    labelKey: statusLabelKey.dikembalikan,
     icon: Undo2,
     className: "bg-green-50 text-green-700 ring-1 ring-green-200",
     iconClassName: "text-green-500",
   },
   dibatalkan: {
-    label: "Canceled",
+    labelKey: statusLabelKey.dibatalkan,
     icon: X,
     className: "bg-red-50 text-red-600 ring-1 ring-red-200",
     iconClassName: "text-red-500",
@@ -93,7 +97,7 @@ const STATUS_STYLES: Record<OrderStatus, StatusStyle> = {
 }
 
 const FALLBACK_STYLE: StatusStyle = {
-  label: "—",
+  labelKey: "",
   icon: Clock,
   className: "bg-gray-50 text-gray-600 ring-1 ring-gray-200",
   iconClassName: "text-gray-400",
@@ -101,7 +105,11 @@ const FALLBACK_STYLE: StatusStyle = {
 
 /** Badge status order yang menonjol: warna + ikon khas per tahap pipeline CSSD. */
 export function OrderStatusBadge({ status }: { status: OrderStatus }) {
-  const s = STATUS_STYLES[status] ?? { ...FALLBACK_STYLE, label: status }
+  const t = useT()
+  const known = STATUS_STYLES[status]
+  const s = known ?? FALLBACK_STYLE
+  // Status yang belum dikenal tampil apa adanya, bukan hilang jadi kosong.
+  const label = known ? t(s.labelKey) : status
   const Icon = s.icon
   return (
     <span
@@ -118,21 +126,21 @@ export function OrderStatusBadge({ status }: { status: OrderStatus }) {
       ) : status === "digudang" ? null : (
         <Icon className={"h-3.5 w-3.5 " + s.iconClassName} />
       )}
-      {s.label}
+      {label}
     </span>
   )
 }
 
 // Tahapan tracking alur CSSD (urut kiri→kanan) yang ditampilkan ke pengguna.
-type Stage = { key: string; label: string; icon: LucideIcon }
+type Stage = { key: string; labelKey: string; icon: LucideIcon }
 
 // Alur peminjaman: order minta barang yang SUDAH steril, jadi tidak lewat
 // Cleaning/Sterilisasi lagi — begitu diterima, unit steril dialokasikan & order
 // langsung siap distribusi.
 const STAGES: Stage[] = [
-  { key: "diterima", label: "Received", icon: Inbox },
-  { key: "distribusi", label: "Distribution", icon: Truck },
-  { key: "kembali", label: "Returned", icon: Undo2 },
+  { key: "diterima", labelKey: "tracker.stageReceived", icon: Inbox },
+  { key: "distribusi", labelKey: "tracker.stageDistribution", icon: Truck },
+  { key: "kembali", labelKey: "tracker.stageReturned", icon: Undo2 },
 ]
 
 // Pemetaan status order (DB) → indeks tahap yang sedang berjalan (0-based).
@@ -157,11 +165,13 @@ function activeStageIndex(status: OrderStatus): number {
  * "dibatalkan" = order dibatalkan.
  */
 export function OrderStatusTracker({ status }: { status: OrderStatus }) {
+  const t = useT()
+
   if (status === "dibatalkan") {
     return (
       <div className="flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-600">
         <X className="h-4 w-4 shrink-0" />
-        Order canceled — no further processing.
+        {t("tracker.canceled")}
       </div>
     )
   }
@@ -172,7 +182,7 @@ export function OrderStatusTracker({ status }: { status: OrderStatus }) {
     <div className="rounded-lg border border-gray-200 bg-white px-4 py-4">
       {status === "diajukan" && (
         <p className="mb-3 text-xs font-medium text-amber-600">
-          Waiting for CSSD to accept the order.
+          {t("tracker.waitingAccept")}
         </p>
       )}
       <ol className="flex items-center">
@@ -205,7 +215,7 @@ export function OrderStatusTracker({ status }: { status: OrderStatus }) {
                         : "text-gray-400")
                   }
                 >
-                  {stage.label}
+                  {t(stage.labelKey)}
                 </span>
               </div>
               {i < STAGES.length - 1 && (

@@ -13,6 +13,7 @@ import { Modal } from "@/components/molecules/Modal"
 import { ConfirmDialog } from "@/components/molecules/ConfirmDialog"
 import { PageHeader } from "@/components/molecules/PageHeader"
 import api from "@/lib/axios"
+import { useT } from "@/lib/i18n"
 
 type Category = { id: number; sort_order: number; label: string }
 
@@ -41,13 +42,18 @@ type TemplateListItem = {
 }
 
 const PENGISI_OPTIONS = [
-  { value: "dokter", label: "Dokter" },
-  { value: "perawat", label: "Perawat" },
-  { value: "farmasi", label: "Farmasi" },
-  { value: "ahli_gizi", label: "Ahli Gizi" },
-  { value: "penunjang", label: "Penunjang" },
+  { value: "dokter", labelKey: "cpForm.roleDoctor" },
+  { value: "perawat", labelKey: "cpForm.roleNurse" },
+  { value: "farmasi", labelKey: "cpForm.rolePharmacy" },
+  { value: "ahli_gizi", labelKey: "cpForm.roleNutritionist" },
+  { value: "penunjang", labelKey: "cpForm.roleSupport" },
 ]
-const pengisiLabel = (v: string) => PENGISI_OPTIONS.find((o) => o.value === v)?.label ?? v
+
+/** Nama peran pengisi dalam bahasa aktif; nilai tak dikenal tampil apa adanya. */
+function pengisiLabel(v: string, t: (key: string) => string): string {
+  const key = PENGISI_OPTIONS.find((o) => o.value === v)?.labelKey
+  return key ? t(key) : v
+}
 
 type ModalState = {
   mode: "add" | "edit"
@@ -63,6 +69,7 @@ export default function FormulirPage() {
   const params = useParams()
   const router = useRouter()
   const templateId = Number(params.id)
+  const t = useT()
 
   const [template, setTemplate] = useState<TemplateDetail | null>(null)
   const [categories, setCategories] = useState<Category[]>([])
@@ -170,7 +177,7 @@ export default function FormulirPage() {
   async function handleSave() {
     if (!modal) return
     if (!modal.label.trim()) {
-      setFormError("Label poin wajib diisi.")
+      setFormError(t("cpForm.errLabelRequired"))
       return
     }
     setSaving(true)
@@ -192,7 +199,7 @@ export default function FormulirPage() {
       setModal(null)
     } catch (err) {
       const x = err as { response?: { data?: { message?: string } } }
-      setFormError(x.response?.data?.message ?? "Gagal menyimpan poin.")
+      setFormError(x.response?.data?.message ?? t("cpForm.errSave"))
     } finally {
       setSaving(false)
     }
@@ -223,12 +230,15 @@ export default function FormulirPage() {
       do {
         const res = await api.get("/clinical-pathway/templates", { params: { page } })
         const p = res.data.data
-        for (const t of p.data as TemplateListItem[]) {
-          if (t.id === templateId) continue
-          if ((t.points_count ?? 0) === 0) continue
-          const code = t.icd10?.code ?? "—"
-          const display = t.icd10?.display ?? "Tanpa diagnosa"
-          opts.push({ value: String(t.id), label: `${code} — ${display} (${t.points_count} poin)` })
+        for (const tpl of p.data as TemplateListItem[]) {
+          if (tpl.id === templateId) continue
+          if ((tpl.points_count ?? 0) === 0) continue
+          const code = tpl.icd10?.code ?? "—"
+          const display = tpl.icd10?.display ?? t("cpForm.noDiagnosis")
+          opts.push({
+            value: String(tpl.id),
+            label: t("cpForm.copyOptionLabel", { code, display, n: tpl.points_count ?? 0 }),
+          })
         }
         last = p.last_page
         page++
@@ -241,7 +251,7 @@ export default function FormulirPage() {
 
   async function handleCopy() {
     if (!copySourceId) {
-      setCopyError("Pilih formulir sumber dulu.")
+      setCopyError(t("cpForm.errPickSource"))
       return
     }
     setCopying(true)
@@ -254,7 +264,7 @@ export default function FormulirPage() {
       setCopyOpen(false)
     } catch (err) {
       const x = err as { response?: { data?: { message?: string } } }
-      setCopyError(x.response?.data?.message ?? "Gagal menyalin formulir.")
+      setCopyError(x.response?.data?.message ?? t("cpForm.errCopy"))
     } finally {
       setCopying(false)
     }
@@ -286,13 +296,13 @@ export default function FormulirPage() {
                 {number}
               </span>
               <span className="font-medium text-gray-900">{point.label}</span>
-              <Badge variant="info">{pengisiLabel(point.filled_by)}</Badge>
+              <Badge variant="info">{pengisiLabel(point.filled_by, t)}</Badge>
             </div>
             {/* Hari wajib ceklis — hanya untuk poin tanpa sub-poin.
                 Poin yang punya sub-poin jadi kelompok (tidak diceklis). */}
             {subs.length === 0 ? (
               <div className="mt-1.5 flex flex-wrap items-center gap-1">
-                <span className="text-xs text-gray-400">Wajib ceklis hari:</span>
+                <span className="text-xs text-gray-400">{t("cpForm.requiredOnDays")}</span>
                 {point.required_days && point.required_days.length > 0 ? (
                   point.required_days.map((d) => (
                     <span
@@ -308,7 +318,7 @@ export default function FormulirPage() {
               </div>
             ) : (
               <div className="mt-1.5">
-                <span className="text-xs text-gray-400">Kelompok poin (punya sub-poin)</span>
+                <span className="text-xs text-gray-400">{t("cpForm.groupPoint")}</span>
               </div>
             )}
           </div>
@@ -320,7 +330,7 @@ export default function FormulirPage() {
               onClick={() => openAdd(point.category_id, point.id)}
             >
               <Plus className="h-3.5 w-3.5" />
-              Sub Poin
+              {t("cpForm.subPoint")}
             </Button>
             <Button size="xs" variant="outline" onClick={() => openEdit(point)}>
               <Pencil className="h-3.5 w-3.5" />
@@ -348,11 +358,15 @@ export default function FormulirPage() {
             <ArrowLeft className="h-4 w-4" />
           </Button>
           <PageHeader
-            title="Formulir Clinical Pathway"
+            title={t("cpForm.title")}
             subtitle={
               template?.icd10
-                ? `${template.icd10.code} — ${template.icd10.display} · maksimal ${maxHari} hari`
-                : "Susun poin formulir per kategori"
+                ? t("cpForm.subtitleWithIcd", {
+                    code: template.icd10.code,
+                    display: template.icd10.display,
+                    days: maxHari,
+                  })
+                : t("cpForm.subtitleFallback")
             }
           />
         </div>
@@ -363,18 +377,18 @@ export default function FormulirPage() {
           className="border-[#4ba69d] text-[#4ba69d] hover:bg-[#4ba69d]/10"
         >
           <Copy className="h-4 w-4" />
-          Salin dari Formulir Lain
+          {t("cpForm.copyFromOther")}
         </Button>
       </div>
 
       {loading ? (
         <Card>
-          <p className="py-16 text-center text-sm text-gray-400">Memuat data...</p>
+          <p className="py-16 text-center text-sm text-gray-400">{t("common.loading")}</p>
         </Card>
       ) : categories.length === 0 ? (
         <Card>
           <p className="py-16 text-center text-sm text-gray-400">
-            Belum ada kategori. Tambahkan kategori dulu di menu Kategori.
+            {t("cpForm.noCategories")}
           </p>
         </Card>
       ) : (
@@ -396,13 +410,13 @@ export default function FormulirPage() {
                     onClick={() => openAdd(cat.id, null)}
                   >
                     <Plus className="h-3.5 w-3.5" />
-                    Tambah Poin
+                    {t("cpForm.addPoint")}
                   </Button>
                 </div>
                 <div className="space-y-1 pt-3">
                   {tops.length === 0 ? (
                     <p className="py-4 text-center text-sm text-gray-400">
-                      Belum ada poin pada kategori ini.
+                      {t("cpForm.noPointsInCategory")}
                     </p>
                   ) : (
                     tops.map((p, i) => renderPoint(p, `${cat.sort_order}.${i + 1}`, 0))
@@ -419,27 +433,27 @@ export default function FormulirPage() {
         onClose={() => setDeleteTarget(null)}
         onConfirm={handleDelete}
         loading={deleting}
-        title="Hapus Poin"
-        description="Poin ini beserta seluruh sub-poinnya akan dihapus. Lanjutkan?"
+        title={t("cpForm.deleteTitle")}
+        description={t("cpForm.deleteDesc")}
       />
 
       {/* Salin dari formulir lain */}
       <Modal
         open={copyOpen}
         onClose={() => setCopyOpen(false)}
-        title="Salin dari Formulir Lain"
+        title={t("cpForm.copyFromOther")}
         size="md"
         footer={
           <>
             <Button variant="outline" onClick={() => setCopyOpen(false)}>
-              Batal
+              {t("common.cancel")}
             </Button>
             <Button
               onClick={handleCopy}
               disabled={copying || copyListLoading || copyOptions.length === 0}
               className="bg-[#075489] hover:bg-[#075489]/90 text-white"
             >
-              {copying ? "Menyalin..." : "Salin"}
+              {copying ? t("cpForm.copying") : t("cpForm.copy")}
             </Button>
           </>
         }
@@ -450,30 +464,29 @@ export default function FormulirPage() {
           )}
           {points.length > 0 && (
             <p className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-700">
-              Formulir ini sudah memiliki poin. Poin dari formulir sumber akan{" "}
-              <strong>ditambahkan</strong>, bukan menggantikan yang sudah ada.
+              {t("cpForm.copyWarningBefore")} <strong>{t("cpForm.copyWarningWord")}</strong>{" "}
+              {t("cpForm.copyWarningAfter")}
             </p>
           )}
           <div className="space-y-1.5">
-            <Label>Formulir sumber (diagnosa lain)</Label>
+            <Label>{t("cpForm.sourceForm")}</Label>
             {copyListLoading ? (
-              <p className="py-4 text-center text-sm text-gray-400">Memuat daftar formulir...</p>
+              <p className="py-4 text-center text-sm text-gray-400">{t("cpForm.loadingForms")}</p>
             ) : copyOptions.length === 0 ? (
               <p className="py-4 text-center text-sm text-gray-400">
-                Belum ada formulir lain yang memiliki poin untuk disalin.
+                {t("cpForm.noOtherForms")}
               </p>
             ) : (
               <SelectSearch
                 options={copyOptions}
                 value={copySourceId}
                 onChange={setCopySourceId}
-                placeholder="Pilih diagnosa sumber..."
+                placeholder={t("cpForm.pickSource")}
               />
             )}
           </div>
           <p className="text-xs text-gray-400">
-            Seluruh poin & sub-poin akan disalin. Hari wajib yang melebihi maksimal {maxHari} hari
-            pada formulir ini akan diabaikan.
+            {t("cpForm.copyNote", { days: maxHari })}
           </p>
         </div>
       </Modal>
@@ -482,19 +495,25 @@ export default function FormulirPage() {
       <Modal
         open={modal !== null}
         onClose={() => setModal(null)}
-        title={modal?.mode === "edit" ? "Edit Poin" : modal?.parentId ? "Tambah Sub Poin" : "Tambah Poin"}
+        title={
+          modal?.mode === "edit"
+            ? t("cpForm.editPoint")
+            : modal?.parentId
+              ? t("cpForm.addSubPoint")
+              : t("cpForm.addPoint")
+        }
         size="md"
         footer={
           <>
             <Button variant="outline" onClick={() => setModal(null)}>
-              Batal
+              {t("common.cancel")}
             </Button>
             <Button
               onClick={handleSave}
               disabled={saving}
               className="bg-[#075489] hover:bg-[#075489]/90 text-white"
             >
-              {saving ? "Menyimpan..." : "Simpan"}
+              {saving ? t("common.saving") : t("common.save")}
             </Button>
           </>
         }
@@ -505,26 +524,26 @@ export default function FormulirPage() {
               <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600">{formError}</p>
             )}
             <div className="space-y-1.5">
-              <Label htmlFor="point-label">Label Poin</Label>
+              <Label htmlFor="point-label">{t("cpForm.pointLabel")}</Label>
               <Input
                 id="point-label"
-                placeholder="Contoh: Pemeriksaan tanda vital"
+                placeholder={t("cpForm.pointPlaceholder")}
                 value={modal.label}
                 onChange={(e) => setModal((m) => (m ? { ...m, label: e.target.value } : m))}
               />
             </div>
             <div className="space-y-1.5">
-              <Label>Diisi oleh</Label>
+              <Label>{t("cpForm.filledBy")}</Label>
               {modal.parentId != null ? (
                 <>
-                  <Input value={pengisiLabel(modal.pengisi)} readOnly disabled />
+                  <Input value={pengisiLabel(modal.pengisi, t)} readOnly disabled />
                   <p className="text-xs text-gray-400">
-                    Mengikuti poin induk — tidak bisa diubah.
+                    {t("cpForm.followsParent")}
                   </p>
                 </>
               ) : (
                 <SelectSearch
-                  options={PENGISI_OPTIONS}
+                  options={PENGISI_OPTIONS.map((o) => ({ value: o.value, label: t(o.labelKey) }))}
                   value={modal.pengisi}
                   onChange={(v) => setModal((m) => (m ? { ...m, pengisi: v } : m))}
                 />
@@ -534,14 +553,13 @@ export default function FormulirPage() {
             modal.editId !== null &&
             childrenOf(modal.editId).length > 0 ? (
               <p className="rounded-lg bg-gray-50 px-3 py-2 text-xs text-gray-500">
-                Poin ini punya sub-poin, jadi menjadi kelompok dan tidak perlu ceklis hari. Ceklis
-                dilakukan di tiap sub-poin.
+                {t("cpForm.groupNote")}
               </p>
             ) : (
               <div className="space-y-1.5">
-                <Label>Wajib ceklis pada hari</Label>
+                <Label>{t("cpForm.requiredDaysLabel")}</Label>
                 <p className="text-xs text-gray-400">
-                  Pilih hari ke berapa saja poin ini wajib diceklis.
+                  {t("cpForm.requiredDaysHint")}
                 </p>
                 <div className="flex flex-wrap gap-2 pt-1">
                   {days.map((d) => {

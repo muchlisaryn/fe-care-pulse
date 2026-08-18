@@ -3,6 +3,7 @@
 import type { Ref } from "react"
 import { Loader2 } from "lucide-react"
 import { Button } from "@/components/atoms/Button"
+import { useT } from "@/lib/i18n"
 
 type LoadMoreSentinelProps = {
   /** Elemen penanda yang diamati IntersectionObserver di halaman pemakai. */
@@ -20,6 +21,8 @@ type LoadMoreSentinelProps = {
  * pengamat scroll tak jalan (mis. daftar belum bisa di-scroll).
  */
 export function LoadMoreSentinel({ ref, hasMore, loading, onLoadMore }: LoadMoreSentinelProps) {
+  const t = useT()
+
   if (!hasMore && !loading) return null
 
   return (
@@ -27,11 +30,11 @@ export function LoadMoreSentinel({ ref, hasMore, loading, onLoadMore }: LoadMore
       {loading ? (
         <span className="inline-flex items-center gap-2 text-sm text-gray-400">
           <Loader2 className="h-4 w-4 animate-spin" />
-          Loading data...
+          {t("common.loading")}
         </span>
       ) : (
         <Button type="button" variant="outline" onClick={onLoadMore}>
-          Load more
+          {t("common.loadMore")}
         </Button>
       )}
     </div>

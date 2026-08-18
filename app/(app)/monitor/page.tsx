@@ -8,6 +8,7 @@ import { Button } from "@/components/atoms/Button"
 import { Card } from "@/components/molecules/Card"
 import { PageHeader } from "@/components/molecules/PageHeader"
 import api from "@/lib/axios"
+import { useT } from "@/lib/i18n"
 
 type MonitoredRoom = {
   id: number
@@ -21,6 +22,7 @@ type MonitoredRoom = {
 }
 
 export default function MonitorRoomsPage() {
+  const t = useT()
   const [rooms, setRooms] = useState<MonitoredRoom[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -51,7 +53,7 @@ export default function MonitorRoomsPage() {
           setError(null)
         }
       } catch {
-        if (active) setError("Gagal memuat data monitoring ruangan.")
+        if (active) setError("monitorRooms.loadFailed")
       } finally {
         if (active) setLoading(false)
       }
@@ -74,37 +76,37 @@ export default function MonitorRoomsPage() {
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Monitor Ruangan"
-        subtitle="Pilih ruangan untuk menampilkan monitor instrumen yang sedang dipinjam"
+        title={t("monitorRooms.title")}
+        subtitle={t("monitorRooms.subtitle")}
       />
 
       <form onSubmit={handleSearch} className="flex gap-2 w-full">
         <div className="relative flex-1">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 pointer-events-none" />
           <Input
-            placeholder="Cari ruangan..."
+            placeholder={t("monitorRooms.searchPlaceholder")}
             value={searchInput}
             onChange={(e) => setSearchInput(e.target.value)}
             className="pl-9"
           />
         </div>
         <Button type="submit" className="bg-[#075489] hover:bg-[#075489]/90 text-white shrink-0">
-          Cari
+          {t("common.search")}
         </Button>
       </form>
 
       {loading ? (
         <Card>
-          <p className="py-16 text-center text-sm text-gray-400">Memuat data...</p>
+          <p className="py-16 text-center text-sm text-gray-400">{t("common.loading")}</p>
         </Card>
       ) : error ? (
         <Card>
-          <p className="py-16 text-center text-sm text-red-500">{error}</p>
+          <p className="py-16 text-center text-sm text-red-500">{t(error)}</p>
         </Card>
       ) : rooms.length === 0 ? (
         <Card>
           <p className="py-16 text-center text-sm text-gray-400">
-            Belum ada ruangan yang sedang meminjam instrumen.
+            {t("monitorRooms.emptyRooms")}
           </p>
         </Card>
       ) : (
@@ -118,17 +120,17 @@ export default function MonitorRoomsPage() {
                 </div>
                 <ChevronRight className="h-5 w-5 text-gray-300 transition-transform group-hover:translate-x-1" />
               </div>
-              <p className="mt-4 truncate text-lg font-semibold">Semua Ruangan</p>
+              <p className="mt-4 truncate text-lg font-semibold">{t("monitorRooms.allRooms")}</p>
               <div className="mt-3 grid grid-cols-2 gap-2">
                 <div className="rounded-xl bg-gray-50 px-2 py-3 text-center">
                   <div className="text-3xl font-extrabold leading-none text-[#075489]">{rooms.length}</div>
-                  <div className="mt-1.5 text-xs text-gray-500">Ruangan</div>
+                  <div className="mt-1.5 text-xs text-gray-500">{t("monitorRooms.roomsLabel")}</div>
                 </div>
                 <div className="rounded-xl bg-gray-50 px-2 py-3 text-center">
                   <div className="text-3xl font-extrabold leading-none text-[#075489]">
                     {rooms.reduce((s, r) => s + r.borrowed_count, 0)}
                   </div>
-                  <div className="mt-1.5 text-xs text-gray-500">Instrumen Dipinjam</div>
+                  <div className="mt-1.5 text-xs text-gray-500">{t("monitorRooms.borrowedInstruments")}</div>
                 </div>
               </div>
             </div>
@@ -136,7 +138,7 @@ export default function MonitorRoomsPage() {
 
           {filtered.length === 0 && (
             <div className="col-span-full py-8 text-center text-sm text-gray-400">
-              Tidak ada ruangan yang cocok dengan pencarian.
+              {t("monitorRooms.noMatch")}
             </div>
           )}
 
@@ -158,16 +160,16 @@ export default function MonitorRoomsPage() {
                 <div className="relative mt-3 grid grid-cols-2 gap-2">
                   <div className="rounded-xl bg-white/15 px-2 py-3 text-center">
                     <div className="text-3xl font-extrabold leading-none">{room.transaction_count}</div>
-                    <div className="mt-1.5 text-xs text-white/80">Transaksi</div>
+                    <div className="mt-1.5 text-xs text-white/80">{t("monitorRooms.transactions")}</div>
                   </div>
                   <div className="rounded-xl bg-white/15 px-2 py-3 text-center">
                     <div className="text-3xl font-extrabold leading-none">{room.borrowed_count}</div>
-                    <div className="mt-1.5 text-xs text-white/80">Instrumen Dipinjam</div>
+                    <div className="mt-1.5 text-xs text-white/80">{t("monitorRooms.borrowedInstruments")}</div>
                   </div>
                 </div>
                 {room.ready_count > 0 && (
                   <div className="relative mt-2 inline-flex items-center gap-1.5 rounded-full bg-teal-400/25 px-3 py-1 text-xs font-medium text-teal-50">
-                    {room.ready_count} instrumen siap diantar
+                    {t("monitorRooms.readyToDeliver", { n: room.ready_count })}
                   </div>
                 )}
               </div>

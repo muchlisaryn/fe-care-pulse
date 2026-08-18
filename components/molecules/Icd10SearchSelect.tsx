@@ -4,6 +4,7 @@ import { useState, useRef, useEffect } from "react"
 import { createPortal } from "react-dom"
 import { cn } from "@/lib/utils"
 import api from "@/lib/axios"
+import { useT } from "@/lib/i18n"
 
 // Diagnosa terpilih (subset kolom ICD 10 yang dipakai untuk tampilan + id).
 export type Icd10Option = { id: number; code: string; display: string }
@@ -23,10 +24,11 @@ type Props = {
 export function Icd10SearchSelect({
   value,
   onChange,
-  placeholder = "-- Pilih diagnosa (ICD 10) --",
+  placeholder,
   disabled = false,
   error = false,
 }: Props) {
+  const t = useT()
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState("")
   const [results, setResults] = useState<Icd10Option[]>([])
@@ -103,15 +105,15 @@ export function Icd10SearchSelect({
               type="text"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder="Cari code atau diagnosa..."
+              placeholder={t("icd10.searchPlaceholder")}
               className="w-full rounded-md border border-gray-200 px-3 py-1.5 text-sm outline-none focus:border-[#075489] focus:ring-1 focus:ring-[#075489]/20 placeholder:text-gray-400"
             />
           </div>
           <ul className="max-h-60 overflow-y-auto py-1">
             {loading ? (
-              <li className="px-3 py-2 text-sm text-gray-400 text-center">Mencari...</li>
+              <li className="px-3 py-2 text-sm text-gray-400 text-center">{t("common.searching")}</li>
             ) : results.length === 0 ? (
-              <li className="px-3 py-2 text-sm text-gray-400 text-center">Tidak ditemukan.</li>
+              <li className="px-3 py-2 text-sm text-gray-400 text-center">{t("common.notFound")}</li>
             ) : (
               results.map((icd) => (
                 <li
@@ -156,7 +158,7 @@ export function Icd10SearchSelect({
               <span className="ml-2">{value.display}</span>
             </>
           ) : (
-            placeholder
+            placeholder ?? t("icd10.placeholder")
           )}
         </span>
         <span className={cn("ml-2 shrink-0 text-gray-400 transition-transform duration-200", open && "rotate-180")}>

@@ -20,6 +20,7 @@ import {
   type Condition,
 } from "@/lib/store/slices/conditionSlice"
 import api from "@/lib/axios"
+import { useT } from "@/lib/i18n"
 
 const emptyForm = { name: "" }
 
@@ -27,6 +28,8 @@ export default function MasterKondisiPage() {
   const dispatch = useAppDispatch()
   const { items, totalItems, totalPages, page, search, loading, loaded, dirty } =
     useAppSelector((s) => s.conditions)
+
+  const t = useT()
 
   const [searchInput, setSearchInput] = useState(search)
   const [modal, setModal] = useState<"tambah" | "edit" | null>(null)
@@ -92,7 +95,7 @@ export default function MasterKondisiPage() {
 
   const columns: Column<Condition>[] = [
     {
-      header: "Nama Kondisi",
+      header: t("masterCondition.colName"),
       cell: (row) => <span className="font-medium text-gray-900">{row.name}</span>,
     },
   ]
@@ -100,9 +103,9 @@ export default function MasterKondisiPage() {
   return (
     <div className="space-y-6">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <PageHeader title="Master Kondisi" subtitle="Kelola data kondisi instrumen" />
+        <PageHeader title={t("masterCondition.title")} subtitle={t("masterCondition.subtitle")} />
         <Button onClick={openTambah} className="bg-[#075489] hover:bg-[#075489]/90 text-white">
-          + Tambah Kondisi
+          {t("masterCondition.addCondition")}
         </Button>
       </div>
 
@@ -112,20 +115,20 @@ export default function MasterKondisiPage() {
             <div className="relative flex-1">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 pointer-events-none" />
               <Input
-                placeholder="Cari nama kondisi..."
+                placeholder={t("masterCondition.searchPlaceholder")}
                 value={searchInput}
                 onChange={(e) => setSearchInput(e.target.value)}
                 className="pl-9"
               />
             </div>
             <Button type="submit" className="bg-[#075489] hover:bg-[#075489]/90 text-white shrink-0">
-              Cari
+              {t("common.search")}
             </Button>
           </form>
         </div>
 
         {loading ? (
-          <div className="py-16 text-center text-sm text-gray-400">Memuat data...</div>
+          <div className="py-16 text-center text-sm text-gray-400">{t("common.loading")}</div>
         ) : (
           <DataTable
             rowNumberOffset={(page - 1) * 20}
@@ -134,7 +137,7 @@ export default function MasterKondisiPage() {
             onEdit={openEdit}
             onDelete={(row) => setDeleteTarget(row)}
             isRowLoading={(row) => deletingId === row.id}
-            emptyMessage="Belum ada data kondisi."
+            emptyMessage={t("masterCondition.empty")}
           />
         )}
 
@@ -157,26 +160,26 @@ export default function MasterKondisiPage() {
       <Modal
         open={modal !== null}
         onClose={() => setModal(null)}
-        title={modal === "tambah" ? "Tambah Kondisi" : "Edit Kondisi"}
+        title={modal === "tambah" ? t("masterCondition.modalAdd") : t("masterCondition.modalEdit")}
         size="sm"
         footer={
           <>
-            <Button variant="outline" onClick={() => setModal(null)}>Batal</Button>
+            <Button variant="outline" onClick={() => setModal(null)}>{t("common.cancel")}</Button>
             <Button
               onClick={handleSave}
               disabled={saving}
               className="bg-[#075489] hover:bg-[#075489]/90 text-white"
             >
-              {saving ? "Menyimpan..." : "Simpan"}
+              {saving ? t("common.saving") : t("common.save")}
             </Button>
           </>
         }
       >
         <div className="space-y-1.5">
-          <Label htmlFor="k-nama">Nama Kondisi</Label>
+          <Label htmlFor="k-nama">{t("masterCondition.colName")}</Label>
           <Input
             id="k-nama"
-            placeholder="Contoh: Baik"
+            placeholder={t("masterCondition.namePlaceholder")}
             value={form.name}
             onChange={(e) => setForm({ name: e.target.value })}
           />

@@ -22,6 +22,7 @@ import {
 } from "@/lib/store/slices/menuSlice"
 import { invalidateTitleMenus, type TitleMenu } from "@/lib/store/slices/titleMenuSlice"
 import api from "@/lib/axios"
+import { useLanguage } from "@/lib/i18n"
 
 // Flattened row for the table: a parent menu or one of its sub-menus.
 type MenuRow = {
@@ -110,6 +111,8 @@ export default function MasterMenuPage() {
   const dispatch = useAppDispatch()
   const { groups, loading, loaded, dirty } = useAppSelector((s) => s.menus)
 
+  const { t, tn } = useLanguage()
+
   const [searchInput, setSearchInput] = useState("")
   const [searchQuery, setSearchQuery] = useState("")
 
@@ -189,17 +192,17 @@ export default function MasterMenuPage() {
     ])
     const titleMenus = unwrapList<{ id: number; title: string }>(tmRes)
     setTitleMenuOptions([
-      { value: "", label: "— Tidak ada —" },
-      ...titleMenus.map((t) => ({ value: String(t.id), label: t.title })),
+      { value: "", label: t("masterMenu.optionNone") },
+      ...titleMenus.map((tm) => ({ value: String(tm.id), label: tn(tm.title) })),
     ])
     const menuGroups = (Array.isArray(menuRes.data?.data) ? menuRes.data.data : []) as MenuGroup[]
     const parents = menuGroups.flatMap((g) => g.menus ?? [])
     setParentOptions([
-      { value: "", label: "— Tidak ada (root) —" },
+      { value: "", label: t("masterMenu.optionNoneRoot") },
       ...parents
         .filter((m) => m.parent_id === null && m.id !== currentEditId)
         .sort((a, b) => a.sort_order - b.sort_order)
-        .map((m) => ({ value: String(m.id), label: m.name })),
+        .map((m) => ({ value: String(m.id), label: tn(m.name) })),
     ])
   }
 
@@ -372,14 +375,14 @@ export default function MasterMenuPage() {
 
   const columns: Column<MenuRow>[] = [
     {
-      header: "Nama Menu",
+      header: t("masterMenu.colName"),
       cell: (row) =>
         !row.isChild ? (
-          <span className="font-semibold text-gray-900">{row.name}</span>
+          <span className="font-semibold text-gray-900">{tn(row.name)}</span>
         ) : (
           <span className="flex items-center gap-1.5 pl-5">
             <span className="text-gray-300 select-none">↳</span>
-            <span className="font-medium text-gray-700">{row.name}</span>
+            <span className="font-medium text-gray-700">{tn(row.name)}</span>
           </span>
         ),
     },
@@ -399,17 +402,17 @@ export default function MasterMenuPage() {
   return (
     <div className="space-y-6">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <PageHeader title="Master Menu" subtitle="Kelola data menu navigasi sistem" />
+        <PageHeader title={t("masterMenu.title")} subtitle={t("masterMenu.subtitle")} />
         <div className="flex items-center gap-2">
           <Button
             variant="outline"
             onClick={openGroupModal}
             className="text-[#075489] border-[#075489] hover:bg-[#075489]/5"
           >
-            Tambah Group Menu
+            {t("masterMenu.addGroup")}
           </Button>
           <Button onClick={openTambah} className="bg-[#075489] hover:bg-[#075489]/90 text-white">
-            + Tambah Menu
+            {t("masterMenu.addMenu")}
           </Button>
         </div>
       </div>
@@ -420,27 +423,27 @@ export default function MasterMenuPage() {
             <div className="relative flex-1">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 pointer-events-none" />
               <Input
-                placeholder="Cari nama menu..."
+                placeholder={t("masterMenu.searchPlaceholder")}
                 value={searchInput}
                 onChange={(e) => setSearchInput(e.target.value)}
                 className="pl-9"
               />
             </div>
             <Button type="submit" className="bg-[#075489] hover:bg-[#075489]/90 text-white shrink-0">
-              Cari
+              {t("common.search")}
             </Button>
           </form>
         </div>
 
         {loading ? (
-          <div className="py-16 text-center text-sm text-gray-400">Memuat data...</div>
+          <div className="py-16 text-center text-sm text-gray-400">{t("common.loading")}</div>
         ) : rowGroups.length === 0 ? (
-          <div className="py-16 text-center text-sm text-gray-400">Belum ada data menu.</div>
+          <div className="py-16 text-center text-sm text-gray-400">{t("masterMenu.empty")}</div>
         ) : (
           rowGroups.map((g, i) => (
             <div key={g.title ?? `no-group-${i}`}>
               <div className="px-5 py-2.5 bg-[#075489]/5 border-y border-gray-100 text-xs font-bold uppercase tracking-wide text-[#075489]">
-                {g.title ?? "Tanpa Grup"}
+                {g.title ? tn(g.title) : t("masterMenu.noGroup")}
               </div>
               <DataTable
                 columns={columns}
@@ -450,7 +453,7 @@ export default function MasterMenuPage() {
                 onDelete={(row) => setDeleteTarget(row)}
                 canDelete={(row) => !row.hasChildren}
                 isRowLoading={(row) => deletingId === row.id}
-                emptyMessage="Belum ada data menu."
+                emptyMessage={t("masterMenu.empty")}
               />
             </div>
           ))
@@ -469,32 +472,32 @@ export default function MasterMenuPage() {
       <Modal
         open={modal !== null}
         onClose={() => setModal(null)}
-        title={modal === "tambah" ? "Tambah Menu" : "Edit Menu"}
+        title={modal === "tambah" ? t("masterMenu.modalAdd") : t("masterMenu.modalEdit")}
         size="md"
         footer={
           <>
             <Button variant="outline" onClick={() => setModal(null)}>
-              Batal
+              {t("common.cancel")}
             </Button>
             <Button
               onClick={handleSave}
               disabled={saving || modalLoading}
               className="bg-[#075489] hover:bg-[#075489]/90 text-white"
             >
-              {saving ? "Menyimpan..." : "Simpan"}
+              {saving ? t("common.saving") : t("common.save")}
             </Button>
           </>
         }
       >
         {modalLoading ? (
-          <div className="py-10 text-center text-sm text-gray-400">Memuat data...</div>
+          <div className="py-10 text-center text-sm text-gray-400">{t("common.loading")}</div>
         ) : (
           <div className="space-y-4">
             <div className="flex items-center justify-between rounded-lg border border-gray-200 px-4 py-3">
               <div>
-                <p className="text-sm font-medium text-gray-700">Parent Menu</p>
+                <p className="text-sm font-medium text-gray-700">{t("masterMenu.parentMenu")}</p>
                 <p className="text-xs text-gray-400 mt-0.5">
-                  Aktifkan jika menu ini adalah grup induk (dropdown), bukan halaman.
+                  {t("masterMenu.parentMenuHint")}
                 </p>
               </div>
               <Switch
@@ -512,10 +515,10 @@ export default function MasterMenuPage() {
             </div>
 
             <div className="space-y-1.5">
-              <Label htmlFor="menu-name">Nama Menu</Label>
+              <Label htmlFor="menu-name">{t("masterMenu.colName")}</Label>
               <Input
                 id="menu-name"
-                placeholder="Contoh: Dashboard"
+                placeholder={t("masterMenu.namePlaceholder")}
                 value={form.name}
                 onChange={(e) => setForm((p) => ({ ...p, name: e.target.value }))}
               />
@@ -524,7 +527,7 @@ export default function MasterMenuPage() {
             {form.is_parent ? (
               <>
                 <div className="space-y-1.5">
-                  <Label>Grup Menu</Label>
+                  <Label>{t("masterMenu.menuGroup")}</Label>
                   <SelectSearch
                     options={titleMenuOptions}
                     value={form.title_menu_id === null ? "" : String(form.title_menu_id)}
@@ -532,7 +535,7 @@ export default function MasterMenuPage() {
                   />
                 </div>
                 <div className="space-y-1.5">
-                  <Label htmlFor="menu-sort">Urutan (Sort Order)</Label>
+                  <Label htmlFor="menu-sort">{t("masterMenu.sortLabel")}</Label>
                   <Input
                     id="menu-sort"
                     type="number"
@@ -544,8 +547,8 @@ export default function MasterMenuPage() {
                 </div>
                 <div className="flex items-center justify-between rounded-lg border border-gray-200 px-4 py-3">
                   <div>
-                    <p className="text-sm font-medium text-gray-700">Terbuka otomatis</p>
-                    <p className="text-xs text-gray-400 mt-0.5">Menu langsung terbuka saat halaman dimuat</p>
+                    <p className="text-sm font-medium text-gray-700">{t("masterMenu.autoOpen")}</p>
+                    <p className="text-xs text-gray-400 mt-0.5">{t("masterMenu.autoOpenHint")}</p>
                   </div>
                   <Switch
                     checked={form.is_open}
@@ -556,7 +559,7 @@ export default function MasterMenuPage() {
                   <Label htmlFor="menu-icon">Icon</Label>
                   <Input
                     id="menu-icon"
-                    placeholder="Contoh: database"
+                    placeholder={t("masterMenu.iconPlaceholder")}
                     value={form.icon}
                     onChange={(e) => setForm((p) => ({ ...p, icon: e.target.value }))}
                   />
@@ -565,7 +568,7 @@ export default function MasterMenuPage() {
             ) : (
               <>
                 <div className="space-y-1.5">
-                  <Label htmlFor="menu-sort">Urutan (Sort Order)</Label>
+                  <Label htmlFor="menu-sort">{t("masterMenu.sortLabel")}</Label>
                   <Input
                     id="menu-sort"
                     type="number"
@@ -579,7 +582,7 @@ export default function MasterMenuPage() {
                   <Label htmlFor="menu-url">URL</Label>
                   <Input
                     id="menu-url"
-                    placeholder="Contoh: /dashboard"
+                    placeholder={t("masterMenu.urlPlaceholder")}
                     value={form.url}
                     onChange={(e) => setForm((p) => ({ ...p, url: e.target.value }))}
                   />
@@ -589,10 +592,9 @@ export default function MasterMenuPage() {
                 {form.url.trim() !== "" && (
                   <div className="flex items-center justify-between rounded-lg border border-gray-200 px-4 py-3">
                     <div>
-                      <p className="text-sm font-medium text-gray-700">Open Sidebar</p>
+                      <p className="text-sm font-medium text-gray-700">{t("masterMenu.openSidebar")}</p>
                       <p className="text-xs text-gray-400 mt-0.5">
-                        Aktif: sidebar utama tetap terbuka saat halaman ini dibuka. Nonaktif: sidebar
-                        otomatis ditutup (collapse).
+                        {t("masterMenu.openSidebarHint")}
                       </p>
                     </div>
                     <Switch
@@ -603,7 +605,7 @@ export default function MasterMenuPage() {
                 )}
 
                 <div className="space-y-1.5">
-                  <Label>Parent Menu</Label>
+                  <Label>{t("masterMenu.parentMenu")}</Label>
                   <SelectSearch
                     options={parentOptions}
                     value={form.parent_id === null ? "" : String(form.parent_id)}
@@ -620,11 +622,11 @@ export default function MasterMenuPage() {
       <Modal
         open={groupModalOpen}
         onClose={() => setGroupModalOpen(false)}
-        title="Kelola Grup Menu"
+        title={t("masterMenu.groupModalTitle")}
         size="md"
         footer={
           <Button variant="outline" onClick={() => setGroupModalOpen(false)}>
-            Tutup
+            {t("common.close")}
           </Button>
         }
       >
@@ -632,20 +634,20 @@ export default function MasterMenuPage() {
           {/* Form — tambah atau edit */}
           <form onSubmit={handleGroupSave} className="space-y-3">
             <p className="text-sm font-semibold text-gray-700">
-              {groupEditId !== null ? "Edit Grup Menu" : "Tambah Grup Menu"}
+              {groupEditId !== null ? t("masterMenu.groupEdit") : t("masterMenu.groupAdd")}
             </p>
             <div className="space-y-1.5">
-              <Label htmlFor="grp-title">Judul</Label>
+              <Label htmlFor="grp-title">{t("masterMenu.groupTitleLabel")}</Label>
               <Input
                 id="grp-title"
-                placeholder="Contoh: Master Data"
+                placeholder={t("masterMenu.groupTitlePlaceholder")}
                 value={groupForm.title}
                 onChange={(e) => setGroupForm((p) => ({ ...p, title: e.target.value }))}
                 disabled={groupSaving}
               />
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="grp-sort">Urutan</Label>
+              <Label htmlFor="grp-sort">{t("masterMenu.groupSortLabel")}</Label>
               <Input
                 id="grp-sort"
                 type="number"
@@ -659,7 +661,7 @@ export default function MasterMenuPage() {
             <div className="flex justify-end gap-2 pt-1">
               {groupEditId !== null && (
                 <Button type="button" variant="outline" onClick={cancelGroupEdit} disabled={groupSaving}>
-                  Batal
+                  {t("common.cancel")}
                 </Button>
               )}
               <Button
@@ -667,19 +669,19 @@ export default function MasterMenuPage() {
                 disabled={groupSaving || !groupForm.title.trim()}
                 className="bg-[#075489] hover:bg-[#075489]/90 text-white"
               >
-                {groupSaving ? "Menyimpan..." : groupEditId !== null ? "Simpan" : "Tambah"}
+                {groupSaving ? t("common.saving") : groupEditId !== null ? t("common.save") : t("common.add")}
               </Button>
             </div>
           </form>
 
           {/* List */}
           <div className="border-t border-gray-100 pt-4">
-            <p className="text-sm font-semibold text-gray-700 mb-3">Daftar Grup Menu</p>
+            <p className="text-sm font-semibold text-gray-700 mb-3">{t("masterMenu.groupList")}</p>
             <div className="rounded-lg border border-gray-200 overflow-hidden">
               {groupLoading ? (
-                <div className="py-8 text-center text-sm text-gray-400">Memuat data...</div>
+                <div className="py-8 text-center text-sm text-gray-400">{t("common.loading")}</div>
               ) : groupItems.length === 0 ? (
-                <div className="py-8 text-center text-sm text-gray-400">Belum ada grup menu.</div>
+                <div className="py-8 text-center text-sm text-gray-400">{t("masterMenu.groupEmpty")}</div>
               ) : (
                 <div className="divide-y divide-gray-100">
                   {groupItems.map((item) => (
@@ -688,10 +690,10 @@ export default function MasterMenuPage() {
                       className={`flex items-center gap-3 px-4 py-3 ${groupEditId === item.id ? "bg-[#075489]/5" : ""}`}
                     >
                       <div className="flex-1 min-w-0">
-                        <p className="text-sm font-semibold text-gray-900 truncate">{item.title}</p>
+                        <p className="text-sm font-semibold text-gray-900 truncate">{tn(item.title)}</p>
                       </div>
                       {item.menus.length > 0 && (
-                        <span className="text-xs text-gray-400 shrink-0">{item.menus.length} menu</span>
+                        <span className="text-xs text-gray-400 shrink-0">{t("masterMenu.menuCount", { n: item.menus.length })}</span>
                       )}
                       <button
                         type="button"

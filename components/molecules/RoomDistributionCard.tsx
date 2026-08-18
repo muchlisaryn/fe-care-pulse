@@ -1,6 +1,9 @@
+"use client"
+
 import { Building2 } from "lucide-react"
 import { Card } from "@/components/molecules/Card"
 import { Badge } from "@/components/atoms/Badge"
+import { useT } from "@/lib/i18n"
 
 type RoomDistributionCardProps = {
   ruangan: string
@@ -11,6 +14,8 @@ type RoomDistributionCardProps = {
 }
 
 export function RoomDistributionCard({ ruangan, total, dipinjam, terlambat, onClick }: RoomDistributionCardProps) {
+  const t = useT()
+
   return (
     <button type="button" onClick={onClick} className="block w-full text-left">
       <Card className="hover:border-[#075489]/40 hover:shadow-md transition-all">
@@ -20,12 +25,12 @@ export function RoomDistributionCard({ ruangan, total, dipinjam, terlambat, onCl
           </div>
           <div>
             <p className="font-semibold text-gray-900">{ruangan}</p>
-            <p className="text-xs text-gray-400">{total} items borrowed</p>
+            <p className="text-xs text-gray-400">{t("roomCard.itemsBorrowed", { n: total })}</p>
           </div>
         </div>
         <div className="mt-4 flex items-center gap-2">
-          <Badge variant="info">{dipinjam} borrowed</Badge>
-          {terlambat > 0 && <Badge variant="danger">{terlambat} overdue</Badge>}
+          <Badge variant="info">{t("roomCard.borrowed", { n: dipinjam })}</Badge>
+          {terlambat > 0 && <Badge variant="danger">{t("roomCard.overdue", { n: terlambat })}</Badge>}
         </div>
       </Card>
     </button>

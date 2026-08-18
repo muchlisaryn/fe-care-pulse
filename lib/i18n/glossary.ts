@@ -21,7 +21,7 @@ export type Lang = "en" | "id"
 /** Padanan frasa utuh: kunci = teks yang dinormalkan (huruf kecil, spasi rapat). */
 const PHRASE: Record<string, { en: string; id: string }> = {
   // ── Judul seksi sidebar ───────────────────────────────────────────────────
-  "dashboard": { en: "Dashboard", id: "Dasbor" },
+  "dashboard": { en: "Dashboard", id: "Dashboard" },
   "master data": { en: "Master Data", id: "Data Master" },
   "cssd": { en: "CSSD", id: "CSSD" },
   "clinical pathway": { en: "Clinical Pathway", id: "Clinical Pathway" },
@@ -143,6 +143,8 @@ const PHRASE: Record<string, { en: string; id: string }> = {
   "profil": { en: "Profile", id: "Profil" },
   "profile": { en: "Profile", id: "Profil" },
   "kata sandi": { en: "Password", id: "Kata Sandi" },
+  "ubah kata sandi": { en: "Change Password", id: "Ubah Kata Sandi" },
+  "change password": { en: "Change Password", id: "Ubah Kata Sandi" },
   "password": { en: "Password", id: "Kata Sandi" },
   "sesi": { en: "Sessions", id: "Sesi" },
   "sesi aktif": { en: "Active Sessions", id: "Sesi Aktif" },

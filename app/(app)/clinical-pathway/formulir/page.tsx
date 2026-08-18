@@ -24,6 +24,7 @@ import {
   type TemplateClinicalPathway,
 } from "@/lib/store/slices/templateClinicalPathwaySlice"
 import api from "@/lib/axios"
+import { useT } from "@/lib/i18n"
 
 const dash = <span className="text-gray-400 text-xs">—</span>
 
@@ -33,6 +34,7 @@ export default function TemplateClinicalPathwayPage() {
   const { items, totalItems, totalPages, page, search, loading, loaded, dirty } =
     useAppSelector((s) => s.templateCP)
 
+  const t = useT()
   const [searchInput, setSearchInput] = useState(search)
   const [modal, setModal] = useState<"tambah" | "edit" | null>(null)
   const [editId, setEditId] = useState<number | null>(null)
@@ -79,11 +81,11 @@ export default function TemplateClinicalPathwayPage() {
 
   async function handleSave() {
     if (!diagnosa) {
-      setFormError("Diagnosa (ICD 10) wajib dipilih.")
+      setFormError(t("cpTemplate.errDiagnosis"))
       return
     }
     if (!maksimalHari.trim() || Number(maksimalHari) < 1) {
-      setFormError("Maksimal hari wajib diisi (minimal 1).")
+      setFormError(t("cpTemplate.errMaxDays"))
       return
     }
     setSaving(true)
@@ -104,7 +106,7 @@ export default function TemplateClinicalPathwayPage() {
       setModal(null)
     } catch (err) {
       const x = err as { response?: { data?: { message?: string } } }
-      setFormError(x.response?.data?.message ?? "Gagal menyimpan template.")
+      setFormError(x.response?.data?.message ?? t("cpTemplate.errSave"))
     } finally {
       setSaving(false)
     }
@@ -124,7 +126,7 @@ export default function TemplateClinicalPathwayPage() {
 
   const columns: Column<TemplateClinicalPathway>[] = [
     {
-      header: "Code ICD 10",
+      header: t("cpTemplate.colIcdCode"),
       cell: (row) =>
         row.icd10 ? (
           <span className="font-mono text-xs font-semibold text-[#4ba69d] bg-[#4ba69d]/10 px-2 py-0.5 rounded">
@@ -136,21 +138,21 @@ export default function TemplateClinicalPathwayPage() {
       className: "w-32",
     },
     {
-      header: "Diagnosa",
+      header: t("cpTemplate.colDiagnosis"),
       cell: (row) => (row.icd10 ? <span className="text-gray-800">{row.icd10.display}</span> : dash),
     },
     {
-      header: "Maksimal Hari",
-      cell: (row) => <span className="text-gray-700">{row.max_days} hari</span>,
+      header: t("cpTemplate.colMaxDays"),
+      cell: (row) => <span className="text-gray-700">{row.max_days} {t("common.days")}</span>,
       className: "w-32",
     },
     {
-      header: "Keterangan",
+      header: t("common.description"),
       cell: (row) =>
         row.description ? <span className="text-gray-700">{row.description}</span> : dash,
     },
     {
-      header: "Status",
+      header: t("common.status"),
       cell: (row) => (
         <div className="flex items-center gap-2">
           <Switch
@@ -159,9 +161,9 @@ export default function TemplateClinicalPathwayPage() {
             onChange={() => handleToggle(row)}
           />
           {row.is_active ? (
-            <Badge variant="success">Aktif</Badge>
+            <Badge variant="success">{t("common.active")}</Badge>
           ) : (
-            <Badge variant="default">Non-aktif</Badge>
+            <Badge variant="default">{t("cpTemplate.inactive")}</Badge>
           )}
         </div>
       ),
@@ -173,11 +175,11 @@ export default function TemplateClinicalPathwayPage() {
     <div className="space-y-6">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <PageHeader
-          title="Formulir"
-          subtitle="Formulir clinical pathway per diagnosa (ICD 10)"
+          title={t("cpTemplate.title")}
+          subtitle={t("cpTemplate.subtitle")}
         />
         <Button onClick={openTambah} className="bg-[#075489] hover:bg-[#075489]/90 text-white">
-          + Tambah Formulir
+          {t("cpTemplate.addForm")}
         </Button>
       </div>
 
@@ -187,20 +189,20 @@ export default function TemplateClinicalPathwayPage() {
             <div className="relative flex-1">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 pointer-events-none" />
               <Input
-                placeholder="Cari diagnosa atau keterangan..."
+                placeholder={t("cpTemplate.searchPlaceholder")}
                 value={searchInput}
                 onChange={(e) => setSearchInput(e.target.value)}
                 className="pl-9"
               />
             </div>
             <Button type="submit" className="bg-[#075489] hover:bg-[#075489]/90 text-white shrink-0">
-              Cari
+              {t("common.search")}
             </Button>
           </form>
         </div>
 
         {loading ? (
-          <div className="py-16 text-center text-sm text-gray-400">Memuat data...</div>
+          <div className="py-16 text-center text-sm text-gray-400">{t("common.loading")}</div>
         ) : (
           <DataTable
             rowNumberOffset={(page - 1) * 20}
@@ -210,12 +212,12 @@ export default function TemplateClinicalPathwayPage() {
             isRowLoading={(row) => togglingId === row.id}
             extraActions={[
               {
-                label: "Formulir",
+                label: t("cpTemplate.formAction"),
                 onClick: (row) => router.push(`/clinical-pathway/formulir/${row.id}/formulir`),
                 className: "border-[#4ba69d] text-[#4ba69d] hover:bg-[#4ba69d]/10",
               },
             ]}
-            emptyMessage="Belum ada formulir clinical pathway."
+            emptyMessage={t("cpTemplate.empty")}
           />
         )}
 
@@ -231,19 +233,19 @@ export default function TemplateClinicalPathwayPage() {
       <Modal
         open={modal !== null}
         onClose={() => setModal(null)}
-        title={modal === "tambah" ? "Tambah Formulir" : "Edit Formulir"}
+        title={modal === "tambah" ? t("cpTemplate.modalAdd") : t("cpTemplate.modalEdit")}
         size="md"
         footer={
           <>
             <Button variant="outline" onClick={() => setModal(null)}>
-              Batal
+              {t("common.cancel")}
             </Button>
             <Button
               onClick={handleSave}
               disabled={saving}
               className="bg-[#075489] hover:bg-[#075489]/90 text-white"
             >
-              {saving ? "Menyimpan..." : "Simpan"}
+              {saving ? t("common.saving") : t("common.save")}
             </Button>
           </>
         }
@@ -253,34 +255,34 @@ export default function TemplateClinicalPathwayPage() {
             <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600">{formError}</p>
           )}
           <div className="space-y-1.5">
-            <Label>Diagnosa (ICD 10)</Label>
+            <Label>{t("cpTemplate.diagnosisLabel")}</Label>
             <Icd10SearchSelect value={diagnosa} onChange={setDiagnosa} />
           </div>
           <div className="space-y-1.5">
-            <Label htmlFor="tpl-hari">Maksimal Hari</Label>
+            <Label htmlFor="tpl-hari">{t("cpTemplate.colMaxDays")}</Label>
             <Input
               id="tpl-hari"
               type="number"
               min={1}
-              placeholder="Contoh: 5"
+              placeholder={t("cpTemplate.maxDaysPlaceholder")}
               value={maksimalHari}
               onChange={(e) => setMaksimalHari(e.target.value)}
             />
           </div>
           <div className="space-y-1.5">
-            <Label htmlFor="tpl-ket">Keterangan</Label>
+            <Label htmlFor="tpl-ket">{t("common.description")}</Label>
             <Textarea
               id="tpl-ket"
               rows={3}
-              placeholder="Keterangan tambahan (opsional)"
+              placeholder={t("cpTemplate.notePlaceholder")}
               value={keterangan}
               onChange={(e) => setKeterangan(e.target.value)}
             />
           </div>
           <div className="flex items-center justify-between rounded-lg border border-gray-200 px-3 py-2">
             <div>
-              <p className="text-sm font-medium text-gray-800">Status Aktif</p>
-              <p className="text-xs text-gray-400">Formulir non-aktif tidak dipakai, tapi tidak terhapus.</p>
+              <p className="text-sm font-medium text-gray-800">{t("cpTemplate.activeStatus")}</p>
+              <p className="text-xs text-gray-400">{t("cpTemplate.activeStatusHint")}</p>
             </div>
             <Switch checked={isActive} onChange={setIsActive} />
           </div>

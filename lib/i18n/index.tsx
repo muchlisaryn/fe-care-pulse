@@ -13,9 +13,18 @@ export const DEFAULT_LANG: Lang = "en"
 /** Kunci localStorage — pilihan bahasa bertahan setelah halaman dimuat ulang. */
 const STORAGE_KEY = "care-pulse-lang"
 
-export const LANGUAGES: { value: Lang; label: string; short: string; flag: string }[] = [
-  { value: "en", label: "English", short: "EN", flag: "🇬🇧" },
-  { value: "id", label: "Indonesia", short: "ID", flag: "🇮🇩" },
+/**
+ * Locale Intl untuk bahasa aktif — dipakai `toLocaleDateString`/`toLocaleTimeString`
+ * agar nama hari & bulan ikut bahasa yang sedang dipilih. en-GB, bukan en-US,
+ * supaya urutannya tetap hari-bulan-tahun seperti kebiasaan di sini.
+ */
+export function localeOf(lang: Lang): string {
+  return lang === "id" ? "id-ID" : "en-GB"
+}
+
+export const LANGUAGES: { value: Lang; label: string; short: string }[] = [
+  { value: "en", label: "English", short: "EN" },
+  { value: "id", label: "Indonesia", short: "ID" },
 ]
 
 type LanguageContextValue = {

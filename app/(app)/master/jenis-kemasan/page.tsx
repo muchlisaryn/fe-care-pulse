@@ -20,6 +20,7 @@ import {
   type PackagingTypeMaster,
 } from "@/lib/store/slices/packagingTypeSlice"
 import api from "@/lib/axios"
+import { useT } from "@/lib/i18n"
 
 const emptyForm = {
   name: "",
@@ -33,6 +34,7 @@ export default function MasterPackagingTypePage() {
     (s) => s.packagingTypes
   )
 
+  const t = useT()
   const [searchInput, setSearchInput] = useState(search)
   const [modal, setModal] = useState<"tambah" | "edit" | null>(null)
   const [form, setForm] = useState(emptyForm)
@@ -104,7 +106,7 @@ export default function MasterPackagingTypePage() {
 
   const columns: Column<PackagingTypeMaster>[] = [
     {
-      header: "Kode",
+      header: t("common.code"),
       cell: (row) => (
         <span className="font-mono text-xs font-semibold text-[#075489] bg-[#075489]/8 px-2 py-1 rounded">
           {row.code}
@@ -113,7 +115,7 @@ export default function MasterPackagingTypePage() {
       className: "w-28",
     },
     {
-      header: "Jenis Kemasan",
+      header: t("masterPackaging.colType"),
       cell: (row) => (
         <div>
           <span className="font-medium text-gray-900">{row.name}</span>
@@ -122,8 +124,8 @@ export default function MasterPackagingTypePage() {
       ),
     },
     {
-      header: "Kadaluwarsa",
-      cell: (row) => <span className="text-gray-700">{row.shelf_life_days} hari</span>,
+      header: t("masterPackaging.colShelfLife"),
+      cell: (row) => <span className="text-gray-700">{row.shelf_life_days} {t("common.days")}</span>,
       className: "w-40",
     },
   ]
@@ -136,15 +138,14 @@ export default function MasterPackagingTypePage() {
             <Package className="h-6 w-6" />
           </div>
           <div>
-            <h1 className="text-2xl font-bold text-gray-900">Master Packaging</h1>
+            <h1 className="text-2xl font-bold text-gray-900">{t("masterPackaging.title")}</h1>
             <p className="text-sm text-gray-500 mt-0.5">
-              Kelola jenis kemasan & masa simpan sterilnya — menentukan tanggal kedaluwarsa saat
-              pengemasan
+              {t("masterPackaging.subtitle")}
             </p>
           </div>
         </div>
         <Button onClick={openTambah} className="bg-[#075489] hover:bg-[#075489]/90 text-white">
-          + Tambah Jenis Kemasan
+          {t("masterPackaging.addType")}
         </Button>
       </div>
 
@@ -154,20 +155,20 @@ export default function MasterPackagingTypePage() {
             <div className="relative flex-1">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 pointer-events-none" />
               <Input
-                placeholder="Cari nama / kode jenis kemasan..."
+                placeholder={t("masterPackaging.searchPlaceholder")}
                 value={searchInput}
                 onChange={(e) => setSearchInput(e.target.value)}
                 className="pl-9"
               />
             </div>
             <Button type="submit" className="bg-[#075489] hover:bg-[#075489]/90 text-white shrink-0">
-              Cari
+              {t("common.search")}
             </Button>
           </form>
         </div>
 
         {loading ? (
-          <div className="py-16 text-center text-sm text-gray-400">Memuat data...</div>
+          <div className="py-16 text-center text-sm text-gray-400">{t("common.loading")}</div>
         ) : (
           <DataTable
             rowNumberOffset={(page - 1) * 20}
@@ -176,7 +177,7 @@ export default function MasterPackagingTypePage() {
             onEdit={openEdit}
             onDelete={(row) => setDeleteTarget(row)}
             isRowLoading={(row) => deletingId === row.id}
-            emptyMessage="Belum ada jenis kemasan."
+            emptyMessage={t("masterPackaging.empty")}
           />
         )}
 
@@ -199,53 +200,52 @@ export default function MasterPackagingTypePage() {
       <Modal
         open={modal !== null}
         onClose={() => setModal(null)}
-        title={modal === "tambah" ? "Tambah Jenis Kemasan" : "Edit Jenis Kemasan"}
+        title={modal === "tambah" ? t("masterPackaging.modalAdd") : t("masterPackaging.modalEdit")}
         size="sm"
         footer={
           <>
             <Button variant="outline" onClick={() => setModal(null)}>
-              Batal
+              {t("common.cancel")}
             </Button>
             <Button
               onClick={handleSave}
               disabled={saving || !canSave}
               className="bg-[#075489] hover:bg-[#075489]/90 text-white"
             >
-              {saving ? "Menyimpan..." : "Simpan"}
+              {saving ? t("common.saving") : t("common.save")}
             </Button>
           </>
         }
       >
         <div className="space-y-4">
           <div className="space-y-1.5">
-            <Label htmlFor="pt-name">Jenis Kemasan</Label>
+            <Label htmlFor="pt-name">{t("masterPackaging.colType")}</Label>
             <Input
               id="pt-name"
-              placeholder="Contoh: Pouch Plastik"
+              placeholder={t("masterPackaging.namePlaceholder")}
               value={form.name}
               onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
             />
           </div>
           <div className="space-y-1.5">
-            <Label htmlFor="pt-shelf-life">Kadaluwarsa (hari)</Label>
+            <Label htmlFor="pt-shelf-life">{t("masterPackaging.shelfLifeLabel")}</Label>
             <Input
               id="pt-shelf-life"
               type="number"
               min={1}
-              placeholder="Contoh: 30"
+              placeholder={t("masterPackaging.shelfLifePlaceholder")}
               value={form.shelf_life_days}
               onChange={(e) => setForm((f) => ({ ...f, shelf_life_days: e.target.value }))}
             />
             <p className="text-xs text-gray-400">
-              Tanggal kedaluwarsa batch = tanggal kemas + masa simpan ini. Mengubahnya tidak
-              menggeser tanggal batch yang sudah terlanjur dikemas.
+              {t("masterPackaging.shelfLifeHint")}
             </p>
           </div>
           <div className="space-y-1.5">
-            <Label htmlFor="pt-note">Keterangan</Label>
+            <Label htmlFor="pt-note">{t("common.description")}</Label>
             <Textarea
               id="pt-note"
-              placeholder="Opsional"
+              placeholder={t("common.optionalPlaceholder")}
               value={form.note}
               onChange={(e) => setForm((f) => ({ ...f, note: e.target.value }))}
             />

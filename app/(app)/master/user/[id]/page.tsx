@@ -11,6 +11,7 @@ import { PageHeader } from "@/components/molecules/PageHeader"
 import { invalidateUsers } from "@/lib/store/slices/userSlice"
 import { useAppDispatch } from "@/lib/store/hooks"
 import api from "@/lib/axios"
+import { useT } from "@/lib/i18n"
 
 type ProfileForm = { name: string; username: string; email: string }
 
@@ -18,6 +19,7 @@ export default function UserProfilePage() {
   const { id } = useParams<{ id: string }>()
   const router = useRouter()
   const dispatch = useAppDispatch()
+  const t = useT()
 
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -48,7 +50,7 @@ export default function UserProfilePage() {
     setSaving(true)
     try {
       await api.put(`/master/users/${id}`, form)
-      setSuccessMsg("Profil berhasil diperbarui.")
+      setSuccessMsg(t("userProfile.updated"))
       dispatch(invalidateUsers())
     } catch (err: unknown) {
       const data = (err as { response?: { data?: { errors?: Record<string, string[]>; message?: string } } })
@@ -76,12 +78,12 @@ export default function UserProfilePage() {
         >
           <ArrowLeft className="h-4 w-4" />
         </button>
-        <PageHeader title="Update Profil User" subtitle="Perbarui nama, username, dan email pengguna" />
+        <PageHeader title={t("userProfile.title")} subtitle={t("userProfile.subtitle")} />
       </div>
 
       <Card className="max-w-lg">
         {loading ? (
-          <div className="py-10 text-center text-sm text-gray-400">Memuat data...</div>
+          <div className="py-10 text-center text-sm text-gray-400">{t("common.loading")}</div>
         ) : (
           <form onSubmit={handleSave} className="space-y-4">
             {errors._ && (
@@ -96,7 +98,7 @@ export default function UserProfilePage() {
             )}
 
             <div className="space-y-1.5">
-              <Label htmlFor="p-name">Nama Lengkap</Label>
+              <Label htmlFor="p-name">{t("profile.fullName")}</Label>
               <Input
                 id="p-name"
                 placeholder="John Doe"
@@ -108,7 +110,7 @@ export default function UserProfilePage() {
             </div>
 
             <div className="space-y-1.5">
-              <Label htmlFor="p-username">Username</Label>
+              <Label htmlFor="p-username">{t("profile.username")}</Label>
               <Input
                 id="p-username"
                 placeholder="johndoe"
@@ -120,7 +122,7 @@ export default function UserProfilePage() {
             </div>
 
             <div className="space-y-1.5">
-              <Label htmlFor="p-email">Email</Label>
+              <Label htmlFor="p-email">{t("profile.email")}</Label>
               <Input
                 id="p-email"
                 type="email"
@@ -139,14 +141,14 @@ export default function UserProfilePage() {
                 onClick={() => router.back()}
                 disabled={saving}
               >
-                Batal
+                {t("common.cancel")}
               </Button>
               <Button
                 type="submit"
                 disabled={saving}
                 className="bg-[#075489] hover:bg-[#075489]/90 text-white"
               >
-                {saving ? "Menyimpan..." : "Simpan Perubahan"}
+                {saving ? t("common.saving") : t("profile.saveChanges")}
               </Button>
             </div>
           </form>

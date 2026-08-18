@@ -12,6 +12,7 @@ import { useAppDispatch } from "@/lib/store/hooks"
 import { logout } from "@/lib/store/slices/authSlice"
 import { clearAuth } from "@/lib/auth"
 import api from "@/lib/axios"
+import { useLanguage, localeOf, type Lang } from "@/lib/i18n"
 
 type Session = {
   id: number
@@ -21,11 +22,11 @@ type Session = {
   is_current: boolean
 }
 
-function formatDateTime(value: string | null) {
+function formatDateTime(value: string | null, lang: Lang) {
   if (!value) return null
   const d = new Date(value.replace(" ", "T"))
   if (Number.isNaN(d.getTime())) return value
-  return d.toLocaleString("id-ID", {
+  return d.toLocaleString(localeOf(lang), {
     day: "2-digit",
     month: "short",
     year: "numeric",
@@ -37,6 +38,7 @@ function formatDateTime(value: string | null) {
 export default function SesiAktifPage() {
   const dispatch = useAppDispatch()
   const router = useRouter()
+  const { t, lang } = useLanguage()
 
   const [sessions, setSessions] = useState<Session[]>([])
   const [loading, setLoading] = useState(true)
@@ -99,19 +101,19 @@ export default function SesiAktifPage() {
   return (
     <div className="space-y-6">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <PageHeader title="Sesi Aktif" subtitle="Kelola perangkat yang sedang login ke akun Anda" />
+        <PageHeader title={t("sessions.title")} subtitle={t("sessions.subtitle")} />
         {sessions.length > 1 && (
           <Button variant="destructive" onClick={() => setRevokeAllOpen(true)}>
-            Cabut Semua Sesi
+            {t("sessions.revokeAll")}
           </Button>
         )}
       </div>
 
       <Card className="p-0">
         {loading ? (
-          <div className="py-16 text-center text-sm text-gray-400">Memuat data...</div>
+          <div className="py-16 text-center text-sm text-gray-400">{t("common.loading")}</div>
         ) : sessions.length === 0 ? (
-          <div className="py-16 text-center text-sm text-gray-400">Tidak ada sesi aktif.</div>
+          <div className="py-16 text-center text-sm text-gray-400">{t("sessions.empty")}</div>
         ) : (
           <ul className="divide-y divide-gray-100">
             {sessions.map((s) => (
@@ -122,17 +124,17 @@ export default function SesiAktifPage() {
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2">
                     <p className="truncate font-medium text-gray-900">
-                      {s.device_name || "Perangkat tidak dikenal"}
+                      {s.device_name || t("sessions.unknownDevice")}
                     </p>
-                    {s.is_current && <Badge variant="success">Sesi ini</Badge>}
+                    {s.is_current && <Badge variant="success">{t("sessions.thisSession")}</Badge>}
                   </div>
                   <p className="mt-0.5 text-xs text-gray-500">
-                    Terakhir aktif:{" "}
-                    {formatDateTime(s.last_used) ?? (
-                      <span className="text-gray-400">belum pernah</span>
+                    {t("sessions.lastActive")}{" "}
+                    {formatDateTime(s.last_used, lang) ?? (
+                      <span className="text-gray-400">{t("sessions.never")}</span>
                     )}
                     <span className="mx-1.5 text-gray-300">•</span>
-                    Login: {formatDateTime(s.created_at)}
+                    {t("sessions.signedInAt")} {formatDateTime(s.created_at, lang)}
                   </p>
                 </div>
                 {s.is_current ? (
@@ -144,7 +146,7 @@ export default function SesiAktifPage() {
                     disabled={revokingId !== null}
                     onClick={() => setRevokeTarget(s)}
                   >
-                    {revokingId === s.id ? "Mencabut..." : "Cabut"}
+                    {revokingId === s.id ? t("sessions.revoking") : t("sessions.revoke")}
                   </Button>
                 )}
               </li>
@@ -156,9 +158,7 @@ export default function SesiAktifPage() {
       <div className="flex items-start gap-2 rounded-lg border border-gray-200 bg-gray-50 px-4 py-3 text-xs text-gray-500">
         <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-[#4ba69d]" />
         <p>
-          Setiap kali login dari perangkat baru, sebuah sesi (token) dibuat. Cabut sesi yang tidak
-          Anda kenali untuk menjaga keamanan akun. <strong>Cabut Semua Sesi</strong> akan mengeluarkan
-          Anda dari semua perangkat, termasuk yang ini.
+          {t("sessions.hint")} <strong>{t("sessions.revokeAll")}</strong> {t("sessions.hintAll")}
         </p>
       </div>
 
@@ -167,8 +167,8 @@ export default function SesiAktifPage() {
         onClose={() => setRevokeTarget(null)}
         onConfirm={handleRevoke}
         loading={revokingId !== null}
-        title="Cabut Sesi"
-        description="Perangkat ini akan langsung keluar dari akun Anda. Lanjutkan?"
+        title={t("sessions.confirmRevoke")}
+        description={t("sessions.confirmRevokeDesc")}
       />
 
       <ConfirmDialog
@@ -176,8 +176,8 @@ export default function SesiAktifPage() {
         onClose={() => setRevokeAllOpen(false)}
         onConfirm={handleRevokeAll}
         loading={revokingAll}
-        title="Cabut Semua Sesi"
-        description="Anda akan keluar dari semua perangkat, termasuk perangkat ini, dan harus login kembali. Lanjutkan?"
+        title={t("sessions.revokeAll")}
+        description={t("sessions.confirmRevokeAllDesc")}
       />
     </div>
   )

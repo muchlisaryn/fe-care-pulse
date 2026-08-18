@@ -25,6 +25,7 @@ import {
   type MenuOption,
 } from "@/lib/store/slices/authoritySlice"
 import api from "@/lib/axios"
+import { useLanguage } from "@/lib/i18n"
 
 type AuthorityForm = {
   name: string
@@ -40,6 +41,7 @@ export default function MasterOtoritasPage() {
   const { items, totalItems, totalPages, page, search, loading, loaded, dirty } =
     useAppSelector((s) => s.authorities)
 
+  const { t, tn } = useLanguage()
   const [searchInput, setSearchInput] = useState(search)
   const [modal, setModal] = useState<"tambah" | "edit" | null>(null)
   const [form, setForm] = useState<AuthorityForm>(emptyForm)
@@ -203,11 +205,11 @@ export default function MasterOtoritasPage() {
 
   const columns: Column<Authority>[] = [
     {
-      header: "Nama Otoritas",
+      header: t("masterAuthority.colName"),
       cell: (row) => <span className="font-semibold text-gray-900">{row.name}</span>,
     },
     {
-      header: "Deskripsi",
+      header: t("masterAuthority.colDescription"),
       cell: (row) => (
         <span className="text-sm text-gray-500 line-clamp-1">
           {row.description ?? <span className="text-gray-400 text-xs">—</span>}
@@ -215,7 +217,7 @@ export default function MasterOtoritasPage() {
       ),
     },
     {
-      header: "Dibuat Oleh",
+      header: t("masterAuthority.colCreatedBy"),
       cell: (row) => <Badge variant="default">{row.created_by}</Badge>,
       className: "w-36",
     },
@@ -224,9 +226,9 @@ export default function MasterOtoritasPage() {
   return (
     <div className="space-y-6">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <PageHeader title="Master Otoritas" subtitle="Kelola peran dan hak akses menu sistem" />
+        <PageHeader title={t("masterAuthority.title")} subtitle={t("masterAuthority.subtitle")} />
         <Button onClick={openTambah} className="bg-[#075489] hover:bg-[#075489]/90 text-white">
-          + Tambah Otoritas
+          {t("masterAuthority.addAuthority")}
         </Button>
       </div>
 
@@ -236,20 +238,20 @@ export default function MasterOtoritasPage() {
             <div className="relative flex-1">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 pointer-events-none" />
               <Input
-                placeholder="Cari nama otoritas..."
+                placeholder={t("masterAuthority.searchPlaceholder")}
                 value={searchInput}
                 onChange={(e) => setSearchInput(e.target.value)}
                 className="pl-9"
               />
             </div>
             <Button type="submit" className="bg-[#075489] hover:bg-[#075489]/90 text-white shrink-0">
-              Cari
+              {t("common.search")}
             </Button>
           </form>
         </div>
 
         {loading ? (
-          <div className="py-16 text-center text-sm text-gray-400">Memuat data...</div>
+          <div className="py-16 text-center text-sm text-gray-400">{t("common.loading")}</div>
         ) : (
           <DataTable
             rowNumberOffset={(page - 1) * PER_PAGE}
@@ -258,7 +260,7 @@ export default function MasterOtoritasPage() {
             onEdit={openEdit}
             onDelete={(row) => setDeleteTarget(row)}
             isRowLoading={(row) => deletingId === row.id}
-            emptyMessage="Belum ada data otoritas."
+            emptyMessage={t("masterAuthority.empty")}
           />
         )}
 
@@ -281,42 +283,42 @@ export default function MasterOtoritasPage() {
       <Modal
         open={modal !== null}
         onClose={() => setModal(null)}
-        title={modal === "tambah" ? "Tambah Otoritas" : "Edit Otoritas"}
+        title={modal === "tambah" ? t("masterAuthority.modalAdd") : t("masterAuthority.modalEdit")}
         size="lg"
         footer={
           <>
             <Button variant="outline" onClick={() => setModal(null)}>
-              Batal
+              {t("common.cancel")}
             </Button>
             <Button
               onClick={handleSave}
               disabled={saving || modalLoading}
               className="bg-[#075489] hover:bg-[#075489]/90 text-white"
             >
-              {saving ? "Menyimpan..." : "Simpan"}
+              {saving ? t("common.saving") : t("common.save")}
             </Button>
           </>
         }
       >
         {modalLoading ? (
-          <div className="py-10 text-center text-sm text-gray-400">Memuat data...</div>
+          <div className="py-10 text-center text-sm text-gray-400">{t("common.loading")}</div>
         ) : (
           <div className="space-y-5">
             <div className="space-y-1.5">
-              <Label htmlFor="auth-name">Nama Otoritas</Label>
+              <Label htmlFor="auth-name">{t("masterAuthority.colName")}</Label>
               <Input
                 id="auth-name"
-                placeholder="Contoh: Admin, Perawat, Dokter"
+                placeholder={t("masterAuthority.namePlaceholder")}
                 value={form.name}
                 onChange={(e) => setForm((p) => ({ ...p, name: e.target.value }))}
               />
             </div>
 
             <div className="space-y-1.5">
-              <Label htmlFor="auth-desc">Deskripsi</Label>
+              <Label htmlFor="auth-desc">{t("masterAuthority.colDescription")}</Label>
               <Textarea
                 id="auth-desc"
-                placeholder="Deskripsi singkat tentang otoritas ini..."
+                placeholder={t("masterAuthority.descPlaceholder")}
                 value={form.description}
                 onChange={(e) => setForm((p) => ({ ...p, description: e.target.value }))}
                 rows={3}
@@ -326,15 +328,18 @@ export default function MasterOtoritasPage() {
 
             <div className="space-y-2">
               <div className="flex items-center justify-between">
-                <Label>Akses Menu</Label>
+                <Label>{t("masterAuthority.menuAccess")}</Label>
                 <span className="text-xs text-gray-400">
-                  {form.menu_ids.length} / {menuOptions.length} dipilih
+                  {t("masterAuthority.selectedCount", {
+                    selected: form.menu_ids.length,
+                    total: menuOptions.length,
+                  })}
                 </span>
               </div>
 
               {menuOptions.length === 0 ? (
                 <div className="rounded-lg border border-gray-200 py-8 text-center text-sm text-gray-400">
-                  Tidak ada menu tersedia.
+                  {t("masterAuthority.noMenus")}
                 </div>
               ) : (
                 <div className="rounded-lg border border-gray-200 overflow-hidden">
@@ -346,7 +351,7 @@ export default function MasterOtoritasPage() {
                       className="cursor-pointer"
                     />
                     <span className="text-xs font-semibold uppercase tracking-wide text-gray-500">
-                      Pilih Semua
+                      {t("masterAuthority.selectAll")}
                     </span>
                   </label>
 
@@ -355,7 +360,7 @@ export default function MasterOtoritasPage() {
                       <div key={titleMenu?.id ?? "no-group"}>
                         {titleMenu && (
                           <div className="px-4 py-1.5 text-[10px] font-bold uppercase tracking-wider text-[#075489] bg-[#075489]/5 border-y border-gray-100">
-                            {titleMenu.title}
+                            {tn(titleMenu.title)}
                           </div>
                         )}
                         {nodes.map((parent) => {
@@ -372,7 +377,7 @@ export default function MasterOtoritasPage() {
                                   className="cursor-pointer"
                                 />
                                 <span className="text-xs font-semibold uppercase tracking-wide text-gray-500">
-                                  {parent.name}
+                                  {tn(parent.name)}
                                 </span>
                                 {parent.url && (
                                   <span className="font-mono text-xs text-gray-400 ml-auto">{parent.url}</span>
@@ -388,7 +393,7 @@ export default function MasterOtoritasPage() {
                                     onChange={() => toggleMenu(child.id)}
                                     className="cursor-pointer shrink-0"
                                   />
-                                  <span className="flex-1 text-sm text-gray-800">{child.name}</span>
+                                  <span className="flex-1 text-sm text-gray-800">{tn(child.name)}</span>
                                   {child.url && (
                                     <span className="font-mono text-xs text-gray-400 shrink-0">{child.url}</span>
                                   )}

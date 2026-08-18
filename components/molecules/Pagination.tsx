@@ -10,9 +10,6 @@ type PaginationProps = {
   totalItems: number
   itemsPerPage: number
   onPageChange: (page: number) => void
-  // Teks ringkasan "Menampilkan {from}–{to} dari {total} data" — dioper oleh
-  // halaman berbahasa Inggris menjadi "Showing {from}–{to} of {total} items".
-  labels?: { showing: string; of: string; items: string }
 }
 
 export function Pagination({
@@ -21,11 +18,10 @@ export function Pagination({
   totalItems,
   itemsPerPage,
   onPageChange,
-  labels,
 }: PaginationProps) {
-  // Teks bawaan mengikuti BAHASA AKTIF; `labels` dari halaman tetap menang.
+  // Ringkasan "Menampilkan x–y dari z data" selalu ikut bahasa aktif.
   const t = useT()
-  const text = labels ?? {
+  const text = {
     showing: t("common.showing"),
     of: t("common.of"),
     items: t("common.items"),

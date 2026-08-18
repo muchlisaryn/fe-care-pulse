@@ -8,12 +8,14 @@ import { Card } from "@/components/molecules/Card"
 import { PageHeader } from "@/components/molecules/PageHeader"
 import { useAppSelector } from "@/lib/store/hooks"
 import api from "@/lib/axios"
+import { useT } from "@/lib/i18n"
 
 type Stats = { total_instruments: number; total_units: number; available_units: number }
 type OrderCounts = { diajukan: number; dipinjam: number }
 
 export default function DashboardPage() {
   const name = useAppSelector((s) => s.auth.name)
+  const t = useT()
 
   const [stats, setStats] = useState<Stats>({ total_instruments: 0, total_units: 0, available_units: 0 })
   const [orders, setOrders] = useState<OrderCounts>({ diajukan: 0, dipinjam: 0 })
@@ -47,33 +49,33 @@ export default function DashboardPage() {
   return (
     <div className="space-y-6">
       <PageHeader
-        title={`Selamat datang${name ? `, ${name}` : ""}`}
-        subtitle="Ringkasan inventaris instrumen & peminjaman CSSD"
+        title={name ? t("dashboard.welcomeNamed", { name }) : t("dashboard.welcome")}
+        subtitle={t("dashboard.subtitle")}
       />
 
       {/* Statistik inventaris */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <StatCard title="Jenis Instrumen" value={v(stats.total_instruments)} icon={Stethoscope} />
-        <StatCard title="Total Unit Stok" value={v(stats.total_units)} icon={Layers} />
-        <StatCard title="Unit Tersedia" value={v(stats.available_units)} icon={PackageCheck} />
-        <StatCard title="Sedang Dipinjam" value={v(orders.dipinjam)} icon={ArrowLeftRight} />
+        <StatCard title={t("dashboard.statInstrumentTypes")} value={v(stats.total_instruments)} icon={Stethoscope} />
+        <StatCard title={t("dashboard.statTotalUnits")} value={v(stats.total_units)} icon={Layers} />
+        <StatCard title={t("dashboard.statAvailableUnits")} value={v(stats.available_units)} icon={PackageCheck} />
+        <StatCard title={t("dashboard.statBorrowed")} value={v(orders.dipinjam)} icon={ArrowLeftRight} />
       </div>
 
       {/* Order yang perlu ditindak */}
       <div>
-        <h2 className="mb-3 text-sm font-semibold text-gray-700">Order Peminjaman</h2>
+        <h2 className="mb-3 text-sm font-semibold text-gray-700">{t("dashboard.borrowOrders")}</h2>
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <ActionCard
             href="/cssd/tracking-order"
             icon={Hourglass}
-            label="Order Masuk — Perlu Diproses"
+            label={t("dashboard.incomingOrders")}
             value={v(orders.diajukan)}
             tone="amber"
           />
           <ActionCard
             href="/cssd/tracking-order"
             icon={PackageOpen}
-            label="Sedang Dipinjam"
+            label={t("dashboard.statBorrowed")}
             value={v(orders.dipinjam)}
             tone="teal"
           />

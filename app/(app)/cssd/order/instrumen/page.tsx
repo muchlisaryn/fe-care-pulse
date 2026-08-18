@@ -39,8 +39,9 @@ import { invalidateMonitoring } from "@/lib/store/slices/monitoringSlice"
 import { fetchRoomOptions } from "@/lib/store/slices/roomSlice"
 import { apiErrorMessage } from "@/lib/apiError"
 import { takeOrderFlash } from "@/lib/orderFlash"
-import { useLanguage, type Lang } from "@/lib/i18n"
+import { useLanguage, localeOf, type Lang } from "@/lib/i18n"
 import api from "@/lib/axios"
+import { statusLabelKey } from "@/lib/orderStatus"
 
 // Satu BUNGKUS fisik pada modal Detail Order: satu nomor label kemasan (barcode_no).
 // Paket 2 set → 2 grup; instrumen satuan sejenis dalam satu bungkus → satu grup.
@@ -66,20 +67,6 @@ type PinjamTarget = {
   fromOrderCode: string
   label: string
   units: PinjamUnit[]
-}
-
-// Kunci kamus untuk tiap status order — labelnya dibaca lewat t() agar ikut bahasa aktif.
-const statusLabelKey: Record<OrderStatus, string> = {
-  diajukan: "orderInstrument.statusSubmitted",
-  pencucian: "orderInstrument.statusCleaning",
-  pengemasan: "orderInstrument.statusPackaging",
-  selesai: "orderInstrument.statusReadySterilize",
-  sterilisasi: "orderInstrument.statusSterilizing",
-  steril: "orderInstrument.statusSterile",
-  digudang: "orderInstrument.statusReadyDistribute",
-  dipinjam: "orderInstrument.statusDistributed",
-  dikembalikan: "orderInstrument.statusReturned",
-  dibatalkan: "orderInstrument.statusCanceled",
 }
 
 // Status yang relevan untuk order PEMINJAMAN (alur: diajukan → diterima/siap
@@ -154,9 +141,6 @@ function detailTitleCodes(order: Order) {
 
   return invoice ? `${order.code} (${invoice})` : order.code
 }
-
-// Nama bulan ikut bahasa aktif.
-const localeOf = (lang: Lang) => (lang === "id" ? "id-ID" : "en-GB")
 
 function formatDate(value: string | null, lang: Lang) {
   if (!value) return null
@@ -887,11 +871,6 @@ export default function OrderInstrumenPage() {
             canDelete={(row) => !isProcessed(row.status)}
             isRowLoading={(row) => deletingId === row.id}
             emptyMessage={t("orderInstrument.emptyOrders")}
-            labels={{
-              actions: t("common.actions"),
-              edit: t("common.edit"),
-              delete: t("common.delete"),
-            }}
           />
         )}
 
@@ -901,7 +880,6 @@ export default function OrderInstrumenPage() {
           totalItems={totalItems}
           itemsPerPage={20}
           onPageChange={(p) => dispatch(setOrderPage(p))}
-          labels={{ showing: t("common.showing"), of: t("common.of"), items: t("common.items") }}
         />
       </Card>
 

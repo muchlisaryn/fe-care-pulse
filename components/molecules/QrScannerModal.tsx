@@ -2,6 +2,7 @@
 
 import { useEffect, useId, useRef, useState } from "react"
 import { Modal } from "@/components/molecules/Modal"
+import { useT } from "@/lib/i18n"
 
 type QrScannerModalProps = {
   open: boolean
@@ -35,7 +36,8 @@ function pickBackCamera(cameras: { id: string; label: string }[]): string | null
  * tidak ada sama sekali — saat pengembangan pakai `npm run dev:https`, di server
  * pasang sertifikat di web server-nya.
  */
-export function QrScannerModal({ open, onClose, onScan, title = "Scan QR", hint }: QrScannerModalProps) {
+export function QrScannerModal({ open, onClose, onScan, title, hint }: QrScannerModalProps) {
+  const t = useT()
   // Id unik & stabil per instance untuk elemen target html5-qrcode.
   const regionId = "qr-region-" + useId().replace(/[:]/g, "")
   const [error, setError] = useState<string | null>(null)
@@ -44,6 +46,12 @@ export function QrScannerModal({ open, onClose, onScan, title = "Scan QR", hint 
   useEffect(() => {
     onScanRef.current = onScan
   }, [onScan])
+
+  // Pesan galat dibaca lewat ref supaya ganti bahasa tidak memicu start kamera ulang.
+  const tRef = useRef(t)
+  useEffect(() => {
+    tRef.current = t
+  }, [t])
 
   useEffect(() => {
     if (!open) return
@@ -114,16 +122,14 @@ export function QrScannerModal({ open, onClose, onScan, title = "Scan QR", hint 
           await tryStart({ facingMode: "environment" })
         })
       : Promise.reject(
-          new Error(
-            "The camera is unavailable because this page was opened over http. Open it over https (or localhost) to use the camera.",
-          ),
+          new Error(tRef.current("qr.insecure")),
         )
 
     start.catch((e: unknown) => {
       if (stopped) return
       const msg =
         (e as { message?: string })?.message ??
-        "Cannot access the camera. Make sure camera permission is granted and you are on https/localhost."
+        tRef.current("qr.denied")
       setError(msg)
     })
 
@@ -144,7 +150,7 @@ export function QrScannerModal({ open, onClose, onScan, title = "Scan QR", hint 
   }, [open, regionId])
 
   return (
-    <Modal open={open} onClose={onClose} title={title} size="md">
+    <Modal open={open} onClose={onClose} title={title ?? t("qr.title")} size="md">
       <div className="space-y-3">
         <div
           id={regionId}
@@ -154,7 +160,7 @@ export function QrScannerModal({ open, onClose, onScan, title = "Scan QR", hint 
           <p className="text-sm text-red-600">{error}</p>
         ) : (
           <p className="text-center text-xs text-gray-500">
-            {hint ?? "Point the camera at the QR code."}
+            {hint ?? t("qr.hint")}
           </p>
         )}
       </div>

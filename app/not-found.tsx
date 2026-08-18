@@ -4,9 +4,11 @@ import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { Logo } from "@/components/atoms/Logo"
 import { Button } from "@/components/atoms/Button"
+import { useT } from "@/lib/i18n"
 
 export default function NotFound() {
   const router = useRouter()
+  const t = useT()
 
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-center px-4">
@@ -23,18 +25,18 @@ export default function NotFound() {
         </div>
 
         <h1 className="text-xl sm:text-2xl font-semibold text-gray-900 mb-2">
-          Halaman tidak ditemukan
+          {t("notFound.title")}
         </h1>
         <p className="text-sm text-gray-500 mb-8 leading-relaxed">
-          Halaman yang kamu cari tidak tersedia atau telah dipindahkan.
+          {t("notFound.line1")}
           <br />
-          Pastikan URL yang kamu masukkan sudah benar.
+          {t("notFound.line2")}
         </p>
 
         <div className="flex flex-col sm:flex-row gap-3 w-full sm:w-auto">
           <Link href="/dashboard">
             <Button className="w-full sm:w-auto bg-[#075489] hover:bg-[#075489]/90 text-white px-6">
-              Ke Dashboard
+              {t("notFound.toDashboard")}
             </Button>
           </Link>
           <Button
@@ -42,7 +44,7 @@ export default function NotFound() {
             className="w-full sm:w-auto px-6"
             onClick={() => router.back()}
           >
-            Kembali
+            {t("common.back")}
           </Button>
         </div>
       </div>

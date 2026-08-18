@@ -7,6 +7,7 @@ import { Input } from "@/components/atoms/Input"
 import { Modal } from "@/components/molecules/Modal"
 import { QrScannerModal } from "@/components/molecules/QrScannerModal"
 import { cn } from "@/lib/utils"
+import { useT } from "@/lib/i18n"
 
 export type RackOption = { id: number; name: string }
 
@@ -34,18 +35,21 @@ async function readCameraPermission(): Promise<CameraPermission> {
 
 /** Panduan mengaktifkan izin kamera: nama perangkat/browser + langkahnya. */
 type CameraGuide = {
-  /** Judul panduan, mis. "Chrome (Android)". */
+  /** Judul panduan, mis. "Chrome (Android)" — nama produk, tidak diterjemahkan. */
   device: string
-  /** Langkah berurutan — ditampilkan sebagai daftar bernomor. */
-  steps: string[]
+  /** Langkah berurutan: kunci kamus + variabelnya, diterjemahkan saat dirender. */
+  steps: { key: string; vars?: Record<string, string> }[]
   /** Catatan tambahan, mis. izin tingkat sistem operasi. */
-  note?: string
+  note?: { key: string; vars?: Record<string, string> }
 }
 
 /**
  * Panduan izin kamera SESUAI browser & perangkat. Sengaja berupa langkah manual:
  * halaman setelan internal browser (chrome://, edge://, about:) tidak boleh
  * dibuka lewat skrip, jadi pengguna harus menempuhnya sendiri.
+ *
+ * Yang dikembalikan KUNCI kamus, bukan kalimatnya, supaya panduannya ikut bahasa
+ * aktif tanpa menghitung ulang deteksi browser tiap kali bahasa berganti.
  */
 function cameraGuide(): CameraGuide {
   const ua = typeof navigator === "undefined" ? "" : navigator.userAgent
@@ -55,7 +59,7 @@ function cameraGuide(): CameraGuide {
   const isEdge = /Edg[A-Z]?\//.test(ua)
   const isFirefox = /Firefox\/|FxiOS/i.test(ua)
   const isChromeIOS = /CriOS/i.test(ua)
-  const reload = "Reload this page, then try scanning again."
+  const reload = { key: "cameraGuide.reload" }
 
   // ——— iOS: izin kamera diatur per APLIKASI di Setelan iOS ———
   if (isIOS) {
@@ -64,9 +68,9 @@ function cameraGuide(): CameraGuide {
       return {
         device: `${app} (iPhone/iPad)`,
         steps: [
-          "Open the Settings app on your iPhone/iPad.",
-          `Scroll down and tap ${app}.`,
-          "Turn on the Camera switch.",
+          { key: "cameraGuide.iosOpenSettings" },
+          { key: "cameraGuide.iosScrollTap", vars: { app } },
+          { key: "cameraGuide.iosToggleCamera" },
           reload,
         ],
       }
@@ -74,39 +78,27 @@ function cameraGuide(): CameraGuide {
     return {
       device: "Safari (iPhone/iPad)",
       steps: [
-        'Tap the "aA" icon on the left of the address bar.',
-        'Tap "Website Settings".',
-        'Set Camera to "Allow".',
+        { key: "cameraGuide.safariTapAa" },
+        { key: "cameraGuide.safariWebsiteSettings" },
+        { key: "cameraGuide.safariSetAllow" },
         reload,
       ],
-      note: 'If Camera is not listed there: iOS Settings → Safari → Camera → choose "Ask" or "Allow".',
+      note: { key: "cameraGuide.safariNote" },
     }
   }
 
   // ——— Android: izin SITUS di browser + izin APLIKASI di Setelan Android ———
   if (isAndroid) {
     const app = isSamsung ? "Samsung Internet" : isEdge ? "Edge" : isFirefox ? "Firefox" : "Chrome"
-    const osNote = `If it still fails, grant the app camera permission: Android Settings → Apps → ${app} → Permissions → Camera → Allow.`
+    const osNote = { key: "cameraGuide.androidOsNote", vars: { app } }
 
-    if (isFirefox) {
+    if (isFirefox || isSamsung) {
       return {
-        device: "Firefox (Android)",
+        device: `${app} (Android)`,
         steps: [
-          "Tap the padlock icon on the left of the site address.",
-          'Tap "Permissions" → Camera.',
-          'Choose "Allow".',
-          reload,
-        ],
-        note: osNote,
-      }
-    }
-    if (isSamsung) {
-      return {
-        device: "Samsung Internet (Android)",
-        steps: [
-          "Tap the padlock icon on the left of the site address.",
-          'Tap "Permissions" → Camera.',
-          'Choose "Allow".',
+          { key: "cameraGuide.tapPadlock" },
+          { key: "cameraGuide.tapPermissionsCamera" },
+          { key: "cameraGuide.chooseAllow" },
           reload,
         ],
         note: osNote,
@@ -115,12 +107,12 @@ function cameraGuide(): CameraGuide {
     return {
       device: `${app} (Android)`,
       steps: [
-        "Tap the padlock / settings (⚙) icon on the left of the site address.",
-        'Tap "Permissions", then choose Camera.',
-        'Choose "Allow".',
+        { key: "cameraGuide.tapPadlockSettings" },
+        { key: "cameraGuide.tapPermissionsThenCamera" },
+        { key: "cameraGuide.chooseAllow" },
         reload,
       ],
-      note: `${osNote} You can also use the three-dot menu (⋮): ⋮ → Settings → Site settings → Camera → find this site → Allow.`,
+      note: { key: "cameraGuide.androidChromeNote", vars: { app } },
     }
   }
 
@@ -129,33 +121,33 @@ function cameraGuide(): CameraGuide {
     return {
       device: "Edge (Desktop)",
       steps: [
-        "Click the padlock icon on the left of the site address.",
-        'Click "Permissions for this site".',
-        'Set Camera to "Allow".',
+        { key: "cameraGuide.clickPadlock" },
+        { key: "cameraGuide.edgePermissions" },
+        { key: "cameraGuide.setCameraAllow" },
         reload,
       ],
-      note: "Or use the three-dot menu (…) at the top right: … → Settings → Cookies and site permissions → Camera → find this site → Allow.",
+      note: { key: "cameraGuide.edgeNote" },
     }
   }
   if (isFirefox) {
     return {
       device: "Firefox (Desktop)",
       steps: [
-        "Click the padlock icon on the left of the site address.",
-        'On the "Use the Camera — Blocked" row, click the cross (×) to clear the block.',
+        { key: "cameraGuide.clickPadlock" },
+        { key: "cameraGuide.firefoxClearBlock" },
         reload,
-        "When Firefox asks, choose Allow.",
+        { key: "cameraGuide.firefoxAllow" },
       ],
-      note: "Or use the hamburger menu (☰) at the top right: ☰ → Settings → Privacy & Security → Permissions → Camera → Settings → remove this site from the block list.",
+      note: { key: "cameraGuide.firefoxNote" },
     }
   }
   if (/Safari\//.test(ua) && !/Chrome\//.test(ua)) {
     return {
       device: "Safari (Mac)",
       steps: [
-        "Open the Safari menu → Settings at the top left of the screen.",
-        'Select the "Websites" tab, then choose Camera in the left list.',
-        'Set this site to "Allow".',
+        { key: "cameraGuide.safariMacOpen" },
+        { key: "cameraGuide.safariMacWebsites" },
+        { key: "cameraGuide.safariMacAllow" },
         reload,
       ],
     }
@@ -163,12 +155,12 @@ function cameraGuide(): CameraGuide {
   return {
     device: "Chrome (Desktop)",
     steps: [
-      "Click the padlock / sliders (⚙) icon on the left of the site address.",
-      'Click "Site settings".',
-      'Under Camera, choose "Allow".',
+      { key: "cameraGuide.chromeClickPadlock" },
+      { key: "cameraGuide.chromeSiteSettings" },
+      { key: "cameraGuide.chromeCameraAllow" },
       reload,
     ],
-    note: "Or use the three-dot menu (⋮) at the top right: ⋮ → Settings → Privacy and security → Site settings → Camera → find this site → Allow.",
+    note: { key: "cameraGuide.chromeNote" },
   }
 }
 
@@ -207,8 +199,9 @@ function RackPicker({
   value,
   target,
   onSelect,
-  title = "Pick Rack",
+  title,
 }: Omit<RackPickerModalProps, "open">) {
+  const t = useT()
   // "menu" = dua pilihan cara; "list" = daftar rak untuk pilih manual.
   const [mode, setMode] = useState<"menu" | "list">("menu")
   const [scannerOpen, setScannerOpen] = useState(false)
@@ -232,12 +225,14 @@ function RackPicker({
   const applyPermission = useCallback((state: CameraPermission) => {
     setBlockReason(state === "ok" ? null : state)
     setCamera(state === "ok" ? "ready" : "blocked")
+    // Yang disimpan KUNCI kamus, bukan kalimatnya, supaya catatan ini ikut
+    // berganti saat bahasa diubah tanpa memeriksa ulang izin kamera.
     setCameraNote(
       state === "ok"
         ? null
         : state === "denied"
-          ? "Camera permission is blocked for this site."
-          : "The camera is unavailable because this page was opened over http. Open it over https (or localhost) to use the camera — granting permission in your phone settings will not help.",
+          ? "rackPicker.camBlocked"
+          : "rackPicker.camInsecure",
     )
   }, [])
 
@@ -304,13 +299,13 @@ function RackPicker({
       setCamera("blocked")
       if (name === "NotAllowedError" || name === "SecurityError") {
         setBlockReason("denied")
-        setCameraNote("Camera permission was denied for this site.")
+        setCameraNote("rackPicker.camDenied")
       } else if (name === "NotFoundError") {
         setBlockReason("notfound")
-        setCameraNote("No camera found on this device. Pick a rack manually from the list.")
+        setCameraNote("rackPicker.camNotFound")
       } else {
         setBlockReason("error")
-        setCameraNote("The camera could not be opened. Pick a rack manually from the list.")
+        setCameraNote("rackPicker.camError")
       }
     }
   }
@@ -330,7 +325,7 @@ function RackPicker({
     if (!text) return
     const match = racks.find((r) => r.name.toLowerCase() === text.toLowerCase())
     if (!match) {
-      setError(`Rack "${text}" was not found in Master Rack. Pick one manually from the list.`)
+      setError(t("rackPicker.notFound", { name: text }))
       setMode("list")
       return
     }
@@ -339,11 +334,11 @@ function RackPicker({
 
   return (
     <>
-      <Modal open onClose={onClose} title={title} size="md">
+      <Modal open onClose={onClose} title={title ?? t("rackPicker.title")} size="md">
         <div className="space-y-3">
           {target && (
             <p className="text-sm text-gray-500">
-              Rack for <span className="font-medium text-gray-800">{target}</span>
+              {t("rackPicker.rackFor")} <span className="font-medium text-gray-800">{target}</span>
             </p>
           )}
           {error && (
@@ -353,18 +348,20 @@ function RackPicker({
               browser & perangkat yang sedang dipakai. */}
           {camera === "blocked" && cameraNote && (
             <div className="space-y-2 rounded-lg bg-amber-50 px-3 py-2.5">
-              <p className="text-xs font-medium text-amber-800">{cameraNote}</p>
+              <p className="text-xs font-medium text-amber-800">{t(cameraNote)}</p>
               {blockReason === "denied" && (
                 <>
                   <p className="text-xs font-medium text-amber-800">
-                    How to enable it on {guide.device}:
+                    {t("rackPicker.howToEnable", { device: guide.device })}
                   </p>
                   <ol className="list-decimal space-y-1 pl-4 text-xs text-amber-700">
-                    {guide.steps.map((s) => (
-                      <li key={s}>{s}</li>
+                    {guide.steps.map((step, i) => (
+                      <li key={`${step.key}-${i}`}>{t(step.key, step.vars)}</li>
                     ))}
                   </ol>
-                  {guide.note && <p className="text-xs text-amber-700">{guide.note}</p>}
+                  {guide.note && (
+                    <p className="text-xs text-amber-700">{t(guide.note.key, guide.note.vars)}</p>
+                  )}
                 </>
               )}
               {/* Tombol coba lagi HANYA untuk kegagalan yang memang bisa berubah.
@@ -374,7 +371,7 @@ function RackPicker({
               {blockReason === "error" && (
                 <Button type="button" size="sm" variant="outline" onClick={requestCamera}>
                   <Camera className="h-4 w-4" />
-                  Try Again
+                  {t("rackPicker.tryAgain")}
                 </Button>
               )}
             </div>
@@ -399,17 +396,17 @@ function RackPicker({
                 ) : (
                   <ScanLine className="h-7 w-7 text-[#075489]" />
                 )}
-                <span className="text-sm font-medium text-gray-800">Scan Rack QR</span>
+                <span className="text-sm font-medium text-gray-800">{t("rackPicker.scanTitle")}</span>
                 <span className="text-xs text-gray-500">
                   {camera === "checking"
-                    ? "Checking camera permission..."
+                    ? t("rackPicker.checkingCamera")
                     : camera === "blocked"
                       ? blockReason === "unavailable"
-                        ? "Requires https"
+                        ? t("rackPicker.requiresHttps")
                         : blockReason === "notfound"
-                          ? "No camera"
-                          : "Camera permission not granted"
-                      : "Point the camera at the rack label"}
+                          ? t("rackPicker.noCamera")
+                          : t("rackPicker.noPermission")
+                      : t("rackPicker.scanCardHint")}
                 </span>
               </button>
               <button
@@ -421,8 +418,8 @@ function RackPicker({
                 className="flex flex-col items-center gap-2 rounded-lg border border-gray-200 px-4 py-6 text-center transition-colors hover:border-[#075489] hover:bg-[#075489]/5"
               >
                 <List className="h-7 w-7 text-[#075489]" />
-                <span className="text-sm font-medium text-gray-800">Choose from List</span>
-                <span className="text-xs text-gray-500">Search racks in Master Rack</span>
+                <span className="text-sm font-medium text-gray-800">{t("rackPicker.chooseFromList")}</span>
+                <span className="text-xs text-gray-500">{t("rackPicker.chooseFromListHint")}</span>
               </button>
             </div>
           ) : (
@@ -431,7 +428,7 @@ function RackPicker({
                 <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
                 <Input
                   autoFocus
-                  placeholder="Search rack..."
+                  placeholder={t("rackPicker.searchRack")}
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
                   className="pl-9"
@@ -441,10 +438,10 @@ function RackPicker({
                 {loading ? (
                   <li className="flex items-center justify-center gap-2 px-3 py-6 text-sm text-gray-400">
                     <Loader2 className="h-4 w-4 animate-spin" />
-                    Loading data...
+                    {t("common.loading")}
                   </li>
                 ) : filtered.length === 0 ? (
-                  <li className="px-3 py-6 text-center text-sm text-gray-400">No rack found.</li>
+                  <li className="px-3 py-6 text-center text-sm text-gray-400">{t("rackPicker.noRack")}</li>
                 ) : (
                   filtered.map((r) => (
                     <li key={r.id}>
@@ -470,7 +467,7 @@ function RackPicker({
                 onClick={() => setMode("menu")}
                 className="text-xs font-medium text-[#075489] hover:underline"
               >
-                ← Back to the options
+                {t("rackPicker.backToOptions")}
               </button>
             </div>
           )}
@@ -482,8 +479,8 @@ function RackPicker({
         open={scannerOpen}
         onClose={() => setScannerOpen(false)}
         onScan={handleScan}
-        title="Scan Rack QR"
-        hint="Point the camera at the rack label QR."
+        title={t("rackPicker.scanTitle")}
+        hint={t("rackPicker.scanHint")}
       />
     </>
   )

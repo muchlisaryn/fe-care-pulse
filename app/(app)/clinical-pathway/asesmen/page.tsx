@@ -26,6 +26,7 @@ import {
   type AsesmenStatusFilter,
 } from "@/lib/store/slices/asesmenClinicalPathwaySlice"
 import api from "@/lib/axios"
+import { useT } from "@/lib/i18n"
 
 const dash = <span className="text-gray-400 text-xs">—</span>
 
@@ -82,7 +83,9 @@ const emptyForm: FormState = {
   is_referral: false,
 }
 
-const jkLabel = (v: string) => (v === "L" ? "Laki-laki" : v === "P" ? "Perempuan" : v)
+/** Label jenis kelamin dalam bahasa aktif; nilai tak dikenal tampil apa adanya. */
+const jkLabel = (v: string, t: (key: string) => string) =>
+  v === "L" ? t("assessment.male") : v === "P" ? t("assessment.female") : v
 const diagnosaText = (a: AsesmenClinicalPathway) =>
   a.template?.icd10 ? `${a.template.icd10.code} — ${a.template.icd10.display}` : "—"
 
@@ -91,6 +94,8 @@ export default function AsesmenPage() {
   const router = useRouter()
   const { items, totalItems, totalPages, page, search, ruangId, status, loading, loaded, dirty } =
     useAppSelector((s) => s.asesmenCP)
+
+  const t = useT()
 
   const [searchInput, setSearchInput] = useState(search)
   const [modal, setModal] = useState<"tambah" | "edit" | null>(null)
@@ -147,14 +152,14 @@ export default function AsesmenPage() {
       do {
         const res = await api.get("/clinical-pathway/templates", { params: { page: p } })
         const data = res.data.data
-        for (const t of data.data as TemplateListItem[]) {
-          if (!t.is_active) continue
-          if ((t.points_count ?? 0) === 0) continue
-          const code = t.icd10?.code ?? "—"
-          const display = t.icd10?.display ?? "Tanpa diagnosa"
-          const ket = t.description?.trim()
+        for (const tpl of data.data as TemplateListItem[]) {
+          if (!tpl.is_active) continue
+          if ((tpl.points_count ?? 0) === 0) continue
+          const code = tpl.icd10?.code ?? "—"
+          const display = tpl.icd10?.display ?? t("assessment.noDiagnosis")
+          const ket = tpl.description?.trim()
           const label = ket ? `${code} — ${display} (${ket})` : `${code} — ${display}`
-          opts.push({ value: String(t.id), label })
+          opts.push({ value: String(tpl.id), label })
         }
         last = data.last_page
         p++
@@ -225,19 +230,19 @@ export default function AsesmenPage() {
   // Validasi ringan lalu simpan (create/update) asesmen.
   async function handleSave() {
     if (modal === "tambah" && !form.template_id) {
-      fail("Pilih diagnosa (formulir) dulu.")
+      fail(t("assessment.errPickForm"))
       return
     }
     if (!form.medical_record_no.trim()) {
-      fail("No RM wajib diisi.")
+      fail(t("assessment.errMrRequired"))
       return
     }
     if (!form.patient_name.trim()) {
-      fail("Nama pasien wajib diisi.")
+      fail(t("assessment.errPatientRequired"))
       return
     }
     if (!form.room_id) {
-      fail("Ruang rawat wajib diisi.")
+      fail(t("assessment.errWardRequired"))
       return
     }
     setSaving(true)
@@ -277,7 +282,7 @@ export default function AsesmenPage() {
       if (newId) router.push(`/clinical-pathway/asesmen/${newId}`)
     } catch (err) {
       const x = err as { response?: { data?: { message?: string } } }
-      fail(x.response?.data?.message ?? "Gagal menyimpan asesmen.")
+      fail(x.response?.data?.message ?? t("assessment.errSave"))
     } finally {
       setSaving(false)
     }
@@ -285,25 +290,25 @@ export default function AsesmenPage() {
 
   const columns: Column<AsesmenClinicalPathway>[] = [
     {
-      header: "No RM",
+      header: t("assessment.colMrNo"),
       cell: (row) => <span className="font-mono text-xs text-gray-700">{row.medical_record_no}</span>,
       className: "w-28",
     },
     {
-      header: "Nama Pasien",
+      header: t("assessment.colPatient"),
       cell: (row) => <span className="font-medium text-gray-900">{row.patient_name}</span>,
     },
     {
-      header: "L/P",
-      cell: (row) => <Badge variant="default">{jkLabel(row.gender)}</Badge>,
+      header: t("assessment.colGender"),
+      cell: (row) => <Badge variant="default">{jkLabel(row.gender, t)}</Badge>,
       className: "w-28",
     },
     {
-      header: "Diagnosa Masuk",
+      header: t("assessment.colAdmissionDx"),
       cell: (row) => <span className="text-gray-700">{row.admission_diagnosis}</span>,
     },
     {
-      header: "Formulir (Diagnosa)",
+      header: t("assessment.colForm"),
       cell: (row) =>
         row.template?.icd10 ? (
           <span className="text-gray-700">
@@ -317,7 +322,7 @@ export default function AsesmenPage() {
         ),
     },
     {
-      header: "Tgl Masuk",
+      header: t("assessment.colAdmittedAt"),
       cell: (row) =>
         row.admitted_at ? (
           <span className="text-gray-700">{row.admitted_at.slice(0, 16).replace("T", " ")}</span>
@@ -327,12 +332,12 @@ export default function AsesmenPage() {
       className: "w-44",
     },
     {
-      header: "Status",
+      header: t("common.status"),
       cell: (row) =>
         row.executor_verified_at ? (
-          <Badge variant="success">Selesai</Badge>
+          <Badge variant="success">{t("assessment.statusDone")}</Badge>
         ) : (
-          <Badge variant="warning">Belum Terverifikasi</Badge>
+          <Badge variant="warning">{t("assessment.statusPending")}</Badge>
         ),
       className: "w-44",
     },
@@ -341,9 +346,9 @@ export default function AsesmenPage() {
   return (
     <div className="space-y-6">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <PageHeader title="Asesmen" subtitle="Pengisian clinical pathway per pasien" />
+        <PageHeader title={t("assessment.title")} subtitle={t("assessment.subtitle")} />
         <Button onClick={openTambah} className="bg-[#075489] hover:bg-[#075489]/90 text-white">
-          + Tambah Asesmen
+          {t("assessment.addAssessment")}
         </Button>
       </div>
 
@@ -353,14 +358,14 @@ export default function AsesmenPage() {
             <div className="relative flex-1">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 pointer-events-none" />
               <Input
-                placeholder="Cari nama pasien atau diagnosa masuk..."
+                placeholder={t("assessment.searchPlaceholder")}
                 value={searchInput}
                 onChange={(e) => setSearchInput(e.target.value)}
                 className="pl-9"
               />
             </div>
             <Button type="submit" className="bg-[#075489] hover:bg-[#075489]/90 text-white shrink-0">
-              Cari
+              {t("common.search")}
             </Button>
           </form>
           <div className="flex flex-col gap-2 sm:flex-row">
@@ -369,7 +374,7 @@ export default function AsesmenPage() {
               onChange={(e) => dispatch(setAsesmenCPRuang(e.target.value))}
               className="sm:w-56"
             >
-              <option value="">Semua Ruangan</option>
+              <option value="">{t("assessment.allRooms")}</option>
               {roomOptions.map((r) => (
                 <option key={r.value} value={r.value}>
                   {r.label}
@@ -381,15 +386,15 @@ export default function AsesmenPage() {
               onChange={(e) => dispatch(setAsesmenCPStatus(e.target.value as AsesmenStatusFilter))}
               className="sm:w-56"
             >
-              <option value="">Semua Status</option>
-              <option value="belum">Belum Terverifikasi</option>
-              <option value="selesai">Selesai</option>
+              <option value="">{t("assessment.allStatuses")}</option>
+              <option value="belum">{t("assessment.statusPending")}</option>
+              <option value="selesai">{t("assessment.statusDone")}</option>
             </Select>
           </div>
         </div>
 
         {loading ? (
-          <div className="py-16 text-center text-sm text-gray-400">Memuat data...</div>
+          <div className="py-16 text-center text-sm text-gray-400">{t("common.loading")}</div>
         ) : (
           <DataTable
             rowNumberOffset={(page - 1) * 20}
@@ -398,12 +403,12 @@ export default function AsesmenPage() {
             onEdit={openEdit}
             extraActions={[
               {
-                label: "Isi Formulir",
+                label: t("assessment.fillForm"),
                 onClick: (row) => router.push(`/clinical-pathway/asesmen/${row.id}`),
                 className: "border-[#4ba69d] text-[#4ba69d] hover:bg-[#4ba69d]/10",
               },
             ]}
-            emptyMessage="Belum ada asesmen."
+            emptyMessage={t("assessment.empty")}
           />
         )}
 
@@ -419,19 +424,19 @@ export default function AsesmenPage() {
       <Modal
         open={modal !== null}
         onClose={() => setModal(null)}
-        title={modal === "tambah" ? "Tambah Asesmen" : "Edit Asesmen"}
+        title={modal === "tambah" ? t("assessment.modalAdd") : t("assessment.modalEdit")}
         size="lg"
         footer={
           <>
             <Button variant="outline" onClick={() => setModal(null)}>
-              Batal
+              {t("common.cancel")}
             </Button>
             <Button
               onClick={handleSave}
               disabled={saving}
               className="bg-[#075489] hover:bg-[#075489]/90 text-white"
             >
-              {saving ? "Menyimpan..." : "Simpan"}
+              {saving ? t("common.saving") : t("common.save")}
             </Button>
           </>
         }
@@ -444,28 +449,28 @@ export default function AsesmenPage() {
 
           {/* Keterangan tanda wajib isi. */}
           <p className="text-xs text-gray-500">
-            <span className="text-red-500">*</span> wajib diisi
+            <span className="text-red-500">*</span> {t("assessment.requiredNote")}
           </p>
 
           {/* Diagnosa / formulir — dipilih dulu sebelum mengisi. */}
           <div className="space-y-1.5">
             <Label>
-              Diagnosa (Formulir) <span className="text-red-500">*</span>
+              {t("assessment.diagnosisForm")} <span className="text-red-500">*</span>
             </Label>
             {modal === "edit" ? (
               <Input value={editDiagnosa} disabled />
             ) : templatesLoading ? (
-              <p className="py-2 text-sm text-gray-400">Memuat daftar formulir...</p>
+              <p className="py-2 text-sm text-gray-400">{t("assessment.loadingForms")}</p>
             ) : templateOptions.length === 0 ? (
               <p className="py-2 text-sm text-gray-400">
-                Belum ada formulir berisi poin. Buat dulu di menu Formulir.
+                {t("assessment.noForms")}
               </p>
             ) : (
               <SelectSearch
                 options={templateOptions}
                 value={form.template_id}
                 onChange={(v) => set("template_id", v)}
-                placeholder="Pilih diagnosa..."
+                placeholder={t("assessment.pickDiagnosis")}
               />
             )}
           </div>
@@ -473,7 +478,7 @@ export default function AsesmenPage() {
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="space-y-1.5">
               <Label htmlFor="norm">
-                No RM <span className="text-red-500">*</span>
+                {t("assessment.colMrNo")} <span className="text-red-500">*</span>
               </Label>
               <Input
                 id="norm"
@@ -483,7 +488,7 @@ export default function AsesmenPage() {
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="nama">
-                Nama Pasien <span className="text-red-500">*</span>
+                {t("assessment.colPatient")} <span className="text-red-500">*</span>
               </Label>
               <Input
                 id="nama"
@@ -493,14 +498,14 @@ export default function AsesmenPage() {
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="ruang">
-                Ruang Rawat <span className="text-red-500">*</span>
+                {t("assessment.ward")} <span className="text-red-500">*</span>
               </Label>
               <Select
                 id="ruang"
                 value={form.room_id}
                 onChange={(e) => set("room_id", e.target.value)}
               >
-                <option value="">Pilih ruangan...</option>
+                <option value="">{t("assessment.pickRoom")}</option>
                 {roomOptions.map((r) => (
                   <option key={r.value} value={r.value}>
                     {r.label}
@@ -509,27 +514,27 @@ export default function AsesmenPage() {
               </Select>
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="kelas">Kelas</Label>
+              <Label htmlFor="kelas">{t("assessment.wardClass")}</Label>
               <Input
                 id="kelas"
                 value={form.ward_class}
                 onChange={(e) => set("ward_class", e.target.value)}
-                placeholder="mis. Kelas 1, VIP"
+                placeholder={t("assessment.wardClassPlaceholder")}
               />
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="jk">Jenis Kelamin</Label>
+              <Label htmlFor="jk">{t("assessment.gender")}</Label>
               <Select
                 id="jk"
                 value={form.gender}
                 onChange={(e) => set("gender", e.target.value as "L" | "P")}
               >
-                <option value="L">Laki-laki</option>
-                <option value="P">Perempuan</option>
+                <option value="L">{t("assessment.male")}</option>
+                <option value="P">{t("assessment.female")}</option>
               </Select>
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="tgllahir">Tanggal Lahir</Label>
+              <Label htmlFor="tgllahir">{t("assessment.birthDate")}</Label>
               <Input
                 id="tgllahir"
                 type="date"
@@ -538,7 +543,7 @@ export default function AsesmenPage() {
               />
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="dxmasuk">Diagnosa Masuk</Label>
+              <Label htmlFor="dxmasuk">{t("assessment.colAdmissionDx")}</Label>
               <Input
                 id="dxmasuk"
                 value={form.admission_diagnosis}
@@ -546,7 +551,7 @@ export default function AsesmenPage() {
               />
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="penyakitutama">Penyakit Utama</Label>
+              <Label htmlFor="penyakitutama">{t("assessment.primaryDisease")}</Label>
               <Input
                 id="penyakitutama"
                 value={form.primary_disease}
@@ -554,7 +559,7 @@ export default function AsesmenPage() {
               />
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="penyakitpenyerta">Penyakit Penyerta</Label>
+              <Label htmlFor="penyakitpenyerta">{t("assessment.comorbidity")}</Label>
               <Input
                 id="penyakitpenyerta"
                 value={form.comorbidity}
@@ -562,7 +567,7 @@ export default function AsesmenPage() {
               />
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="komplikasi">Komplikasi</Label>
+              <Label htmlFor="komplikasi">{t("assessment.complication")}</Label>
               <Input
                 id="komplikasi"
                 value={form.complication}
@@ -570,7 +575,7 @@ export default function AsesmenPage() {
               />
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="tindakan">Tindakan</Label>
+              <Label htmlFor="tindakan">{t("assessment.procedure")}</Label>
               <Input
                 id="tindakan"
                 value={form.procedure}
@@ -578,7 +583,7 @@ export default function AsesmenPage() {
               />
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="bb">Berat Badan (kg)</Label>
+              <Label htmlFor="bb">{t("assessment.weight")}</Label>
               <Input
                 id="bb"
                 type="number"
@@ -589,7 +594,7 @@ export default function AsesmenPage() {
               />
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="tb">Tinggi Badan (cm)</Label>
+              <Label htmlFor="tb">{t("assessment.height")}</Label>
               <Input
                 id="tb"
                 type="number"
@@ -600,7 +605,7 @@ export default function AsesmenPage() {
               />
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="masuk">Tanggal & Jam Masuk</Label>
+              <Label htmlFor="masuk">{t("assessment.admittedAt")}</Label>
               <Input
                 id="masuk"
                 type="datetime-local"
@@ -609,7 +614,7 @@ export default function AsesmenPage() {
               />
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="keluar">Tanggal & Jam Keluar</Label>
+              <Label htmlFor="keluar">{t("assessment.dischargedAt")}</Label>
               <Input
                 id="keluar"
                 type="datetime-local"
@@ -618,7 +623,7 @@ export default function AsesmenPage() {
               />
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="lamarawat">Lama Rawat (hari)</Label>
+              <Label htmlFor="lamarawat">{t("assessment.lengthOfStay")}</Label>
               <Input
                 id="lamarawat"
                 type="number"
@@ -628,7 +633,7 @@ export default function AsesmenPage() {
               />
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="rencanarawat">Rencana Rawat</Label>
+              <Label htmlFor="rencanarawat">{t("assessment.carePlan")}</Label>
               <Input
                 id="rencanarawat"
                 value={form.care_plan}
@@ -636,14 +641,14 @@ export default function AsesmenPage() {
               />
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="rujukan">Rujukan</Label>
+              <Label htmlFor="rujukan">{t("assessment.referral")}</Label>
               <Select
                 id="rujukan"
                 value={form.is_referral ? "ya" : "tidak"}
                 onChange={(e) => set("is_referral", e.target.value === "ya")}
               >
-                <option value="tidak">Tidak</option>
-                <option value="ya">Ya</option>
+                <option value="tidak">{t("common.no")}</option>
+                <option value="ya">{t("common.yes")}</option>
               </Select>
             </div>
           </div>

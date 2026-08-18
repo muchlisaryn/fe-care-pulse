@@ -15,6 +15,7 @@ import { ConfirmDialog } from "@/components/molecules/ConfirmDialog"
 import { DataTable, type Column } from "@/components/molecules/DataTable"
 import { useAppSelector } from "@/lib/store/hooks"
 import api from "@/lib/axios"
+import { useT } from "@/lib/i18n"
 
 type Category = { id: number; sort_order: number; label: string }
 
@@ -80,12 +81,18 @@ type Varian = {
   initials: string
 }
 
-const PENGISI_LABEL: Record<string, string> = {
-  dokter: "Dokter",
-  perawat: "Perawat",
-  farmasi: "Farmasi",
-  ahli_gizi: "Ahli Gizi",
-  penunjang: "Penunjang",
+const PENGISI_LABEL_KEY: Record<string, string> = {
+  dokter: "cpForm.roleDoctor",
+  perawat: "cpForm.roleNurse",
+  farmasi: "cpForm.rolePharmacy",
+  ahli_gizi: "cpForm.roleNutritionist",
+  penunjang: "cpForm.roleSupport",
+}
+
+/** Nama peran pengisi dalam bahasa aktif; nilai tak dikenal tampil apa adanya. */
+function pengisiLabel(v: string, t: (key: string) => string): string {
+  const key = PENGISI_LABEL_KEY[v]
+  return key ? t(key) : v
 }
 
 // Warna baris per pengisi agar mudah dikenali siapa yang mengisi.
@@ -97,7 +104,8 @@ const PENGISI_ROW_BG: Record<string, string> = {
   penunjang: "bg-rose-50",
 }
 const pengisiRowBg = (pengisi: string) => PENGISI_ROW_BG[pengisi] ?? ""
-const jkLabel = (v: string) => (v === "L" ? "Laki-laki" : v === "P" ? "Perempuan" : v)
+const jkLabel = (v: string, t: (key: string) => string) =>
+  v === "L" ? t("assessment.male") : v === "P" ? t("assessment.female") : v
 const fmtDate = (s: string | null) => (s ? s.slice(0, 10) : "—")
 const fmtDateTime = (s: string | null) => (s ? s.slice(0, 16).replace("T", " ") : "—")
 
@@ -108,6 +116,7 @@ export default function IsiAsesmenPage() {
   const params = useParams()
   const router = useRouter()
   const asesmenId = Number(params.id)
+  const t = useT()
 
   const [asesmen, setAsesmen] = useState<Asesmen | null>(null)
   const [categories, setCategories] = useState<Category[]>([])
@@ -233,7 +242,7 @@ export default function IsiAsesmenPage() {
       setAsesmen((prev) => (prev ? { ...prev, ...updated } : updated))
     } catch (err) {
       const x = err as { response?: { data?: { message?: string } } }
-      setVerifyError(x.response?.data?.message ?? "Gagal memproses verifikasi.")
+      setVerifyError(x.response?.data?.message ?? t("assessmentFill.errVerify"))
     } finally {
       setVerifying(null)
     }
@@ -255,7 +264,7 @@ export default function IsiAsesmenPage() {
       })
       setPdfUrl(URL.createObjectURL(res.data as Blob))
     } catch {
-      setPdfError("Gagal memuat PDF.")
+      setPdfError(t("assessmentFill.errPdf"))
     } finally {
       setPdfLoading(false)
     }
@@ -319,11 +328,11 @@ export default function IsiAsesmenPage() {
   // Validasi lalu simpan (create/update) catatan varian.
   async function handleSaveVarian() {
     if (!varianForm.occurred_at) {
-      setVarianError("Tanggal & waktu wajib diisi.")
+      setVarianError(t("assessmentFill.errOccurredAt"))
       return
     }
     if (!varianForm.variance.trim()) {
-      setVarianError("Varian yang terjadi wajib diisi.")
+      setVarianError(t("assessmentFill.errVariance"))
       return
     }
     setVarianSaving(true)
@@ -343,7 +352,7 @@ export default function IsiAsesmenPage() {
       setVarianModal(null)
     } catch (err) {
       const x = err as { response?: { data?: { message?: string } } }
-      setVarianError(x.response?.data?.message ?? "Gagal menyimpan catatan varian.")
+      setVarianError(x.response?.data?.message ?? t("assessmentFill.errSaveVariance"))
     } finally {
       setVarianSaving(false)
     }
@@ -364,16 +373,16 @@ export default function IsiAsesmenPage() {
 
   const varianColumns: Column<Varian>[] = [
     {
-      header: "Tanggal & Waktu",
+      header: t("assessmentFill.colOccurredAt"),
       cell: (row) => <span className="text-gray-700">{fmtDateTime(row.occurred_at)}</span>,
       className: "w-44",
     },
     {
-      header: "Varian yang Terjadi",
+      header: t("assessmentFill.colVariance"),
       cell: (row) => <span className="whitespace-pre-wrap text-gray-900">{row.variance}</span>,
     },
     {
-      header: "Alasan Varian Terjadi",
+      header: t("assessmentFill.colReason"),
       cell: (row) =>
         row.reason ? (
           <span className="whitespace-pre-wrap text-gray-700">{row.reason}</span>
@@ -382,7 +391,7 @@ export default function IsiAsesmenPage() {
         ),
     },
     {
-      header: "Paraf",
+      header: t("assessmentFill.colInitials"),
       cell: (row) => <span className="font-medium text-gray-700">{row.initials}</span>,
       className: "w-32",
     },
@@ -430,14 +439,14 @@ export default function IsiAsesmenPage() {
   // Teks status auto-save per poin.
   function statusText(pointId: number) {
     const s = status[pointId]
-    if (s === "saving") return <span className="text-xs text-gray-400">Menyimpan...</span>
+    if (s === "saving") return <span className="text-xs text-gray-400">{t("common.saving")}</span>
     if (s === "saved")
       return (
         <span className="inline-flex items-center gap-1 text-xs text-[#4ba69d]">
-          <Check className="h-3 w-3" /> Tersimpan
+          <Check className="h-3 w-3" /> {t("assessmentFill.saved")}
         </span>
       )
-    if (s === "error") return <span className="text-xs text-red-500">Gagal menyimpan</span>
+    if (s === "error") return <span className="text-xs text-red-500">{t("assessmentFill.saveFailed")}</span>
     return null
   }
 
@@ -460,7 +469,7 @@ export default function IsiAsesmenPage() {
               {number}
             </span>
             <span className="font-semibold text-gray-900">{point.label}</span>
-            <Badge variant="info">{PENGISI_LABEL[point.filled_by] ?? point.filled_by}</Badge>
+            <Badge variant="info">{pengisiLabel(point.filled_by, t)}</Badge>
           </div>
         </div>
       )
@@ -484,14 +493,14 @@ export default function IsiAsesmenPage() {
               {number}
             </span>
             <span className="font-medium text-gray-900">{point.label}</span>
-            <Badge variant="info">{PENGISI_LABEL[point.filled_by] ?? point.filled_by}</Badge>
+            <Badge variant="info">{pengisiLabel(point.filled_by, t)}</Badge>
           </div>
         </div>
 
         {/* Ceklis per hari (hari wajib disorot). */}
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-1.5">
-            <span className="text-xs text-gray-400 mr-1 lg:hidden">Hari:</span>
+            <span className="text-xs text-gray-400 mr-1 lg:hidden">{t("assessmentFill.dayLabel")}</span>
             {days.map((d) => {
               const on = val.checked.includes(d)
               const isWajib = wajib.includes(d)
@@ -507,7 +516,11 @@ export default function IsiAsesmenPage() {
                   key={d}
                   type="button"
                   disabled={locked}
-                  title={isWajib ? `Hari ${d} (wajib diisi)` : `Hari ${d}`}
+                  title={
+                    isWajib
+                      ? t("assessmentFill.dayRequiredTitle", { n: d })
+                      : t("assessmentFill.dayTitle", { n: d })
+                  }
                   onClick={() => toggleDay(point.id, d)}
                   className={
                     "flex h-8 min-w-[32px] items-center justify-center rounded-md border px-1.5 text-sm font-medium transition-colors " +
@@ -525,7 +538,7 @@ export default function IsiAsesmenPage() {
         {/* Keterangan (auto-save). */}
         <div className="lg:w-56 lg:shrink-0">
           <Input
-            placeholder="Keterangan..."
+            placeholder={t("assessmentFill.notePlaceholder")}
             value={val.note}
             disabled={locked}
             onChange={(e) => changeKeterangan(point.id, e.target.value)}
@@ -567,10 +580,10 @@ export default function IsiAsesmenPage() {
         {verified ? (
           <>
             <p className="mt-1 inline-flex items-center gap-1 text-xs font-medium text-[#4ba69d]">
-              <Check className="h-3.5 w-3.5" /> Terverifikasi
+              <Check className="h-3.5 w-3.5" /> {t("assessmentFill.verified")}
             </p>
             <p className="text-xs text-gray-500">
-              oleh {by} · {fmtDateTime(at)}
+              {t("assessmentFill.verifiedBy", { name: by ?? "—", at: fmtDateTime(at) })}
             </p>
             <Button
               variant="outline"
@@ -579,19 +592,19 @@ export default function IsiAsesmenPage() {
               onClick={() => handleVerify(role, "batal")}
               className="mt-3"
             >
-              {busy ? "Memproses..." : "Batal Verifikasi"}
+              {busy ? t("assessmentFill.processing") : t("assessmentFill.cancelVerification")}
             </Button>
           </>
         ) : (
           <>
-            <p className="mt-1 text-xs text-gray-400">Belum diverifikasi</p>
+            <p className="mt-1 text-xs text-gray-400">{t("assessmentFill.notVerified")}</p>
             <Button
               size="sm"
               disabled={busy || opts?.disabled}
               onClick={() => handleVerify(role, "verify")}
               className="mt-3 bg-[#075489] hover:bg-[#075489]/90 text-white"
             >
-              {busy ? "Memproses..." : "Verifikasi"}
+              {busy ? t("assessmentFill.processing") : t("assessmentFill.verify")}
             </Button>
             {opts?.disabled && opts.disabledHint && (
               <p className="mt-2 text-xs text-gray-400">{opts.disabledHint}</p>
@@ -615,11 +628,15 @@ export default function IsiAsesmenPage() {
             <ArrowLeft className="h-4 w-4" />
           </Button>
           <PageHeader
-            title="Isi Formulir Asesmen"
+            title={t("assessmentFill.title")}
             subtitle={
               asesmen?.template?.icd10
-                ? `${asesmen.template.icd10.code} — ${asesmen.template.icd10.display} · maksimal ${maxHari} hari`
-                : "Ceklis poin per hari sesuai formulir"
+                ? t("assessmentFill.subtitleWithIcd", {
+                    code: asesmen.template.icd10.code,
+                    display: asesmen.template.icd10.display,
+                    days: maxHari,
+                  })
+                : t("assessmentFill.subtitleFallback")
             }
           />
         </div>
@@ -628,44 +645,54 @@ export default function IsiAsesmenPage() {
             onClick={openPdf}
             className="shrink-0 bg-[#075489] hover:bg-[#075489]/90 text-white"
           >
-            <FileText className="h-4 w-4" /> Preview PDF
+            <FileText className="h-4 w-4" /> {t("assessmentFill.previewPdf")}
           </Button>
         )}
       </div>
 
       {loading ? (
         <Card>
-          <p className="py-16 text-center text-sm text-gray-400">Memuat data...</p>
+          <p className="py-16 text-center text-sm text-gray-400">{t("common.loading")}</p>
         </Card>
       ) : !asesmen ? (
         <Card>
-          <p className="py-16 text-center text-sm text-gray-400">Asesmen tidak ditemukan.</p>
+          <p className="py-16 text-center text-sm text-gray-400">{t("assessmentFill.notFound")}</p>
         </Card>
       ) : (
         <>
           {/* Ringkasan data pasien */}
           <Card>
-            <h3 className="mb-3 text-sm font-semibold text-gray-900">Data Pasien</h3>
+            <h3 className="mb-3 text-sm font-semibold text-gray-900">{t("assessmentFill.patientData")}</h3>
             <dl className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm sm:grid-cols-3 lg:grid-cols-4">
-              <Field label="No RM" value={asesmen.medical_record_no} />
-              <Field label="Nama Pasien" value={asesmen.patient_name} />
-              <Field label="Jenis Kelamin" value={jkLabel(asesmen.gender)} />
-              <Field label="Tanggal Lahir" value={fmtDate(asesmen.birth_date)} />
-              <Field label="Diagnosa Masuk" value={asesmen.admission_diagnosis} />
-              <Field label="Penyakit Utama" value={asesmen.primary_disease} />
-              <Field label="Penyakit Penyerta" value={asesmen.comorbidity} />
-              <Field label="Komplikasi" value={asesmen.complication} />
-              <Field label="Tindakan" value={asesmen.procedure} />
-              <Field label="BB / TB" value={`${asesmen.weight ?? "—"} kg / ${asesmen.height ?? "—"} cm`} />
-              <Field label="Masuk" value={fmtDateTime(asesmen.admitted_at)} />
-              <Field label="Keluar" value={fmtDateTime(asesmen.discharged_at)} />
+              <Field label={t("assessment.colMrNo")} value={asesmen.medical_record_no} />
+              <Field label={t("assessment.colPatient")} value={asesmen.patient_name} />
+              <Field label={t("assessment.gender")} value={jkLabel(asesmen.gender, t)} />
+              <Field label={t("assessment.birthDate")} value={fmtDate(asesmen.birth_date)} />
+              <Field label={t("assessment.colAdmissionDx")} value={asesmen.admission_diagnosis} />
+              <Field label={t("assessment.primaryDisease")} value={asesmen.primary_disease} />
+              <Field label={t("assessment.comorbidity")} value={asesmen.comorbidity} />
+              <Field label={t("assessment.complication")} value={asesmen.complication} />
+              <Field label={t("assessment.procedure")} value={asesmen.procedure} />
               <Field
-                label="Lama Rawat"
-                value={asesmen.length_of_stay != null ? `${asesmen.length_of_stay} hari` : null}
+                label={t("assessmentFill.weightHeight")}
+                value={`${asesmen.weight ?? "—"} kg / ${asesmen.height ?? "—"} cm`}
               />
-              <Field label="Rencana Rawat" value={asesmen.care_plan} />
-              <Field label="Ruang Rawat" value={asesmen.room?.name ?? null} />
-              <Field label="Rujukan" value={asesmen.is_referral ? "Ya" : "Tidak"} />
+              <Field label={t("assessmentFill.admitted")} value={fmtDateTime(asesmen.admitted_at)} />
+              <Field label={t("assessmentFill.discharged")} value={fmtDateTime(asesmen.discharged_at)} />
+              <Field
+                label={t("assessmentFill.lengthOfStay")}
+                value={
+                  asesmen.length_of_stay != null
+                    ? t("assessmentFill.daysSuffix", { n: asesmen.length_of_stay })
+                    : null
+                }
+              />
+              <Field label={t("assessment.carePlan")} value={asesmen.care_plan} />
+              <Field label={t("assessment.ward")} value={asesmen.room?.name ?? null} />
+              <Field
+                label={t("assessment.referral")}
+                value={asesmen.is_referral ? t("common.yes") : t("common.no")}
+              />
             </dl>
           </Card>
 
@@ -673,41 +700,41 @@ export default function IsiAsesmenPage() {
           {categories.length === 0 ? (
             <Card>
               <p className="py-16 text-center text-sm text-gray-400">
-                Formulir ini belum punya kategori/poin.
+                {t("assessmentFill.noCategories")}
               </p>
             </Card>
           ) : (
             <div className="space-y-4">
               {/* Keterangan warna/simbol ceklis. */}
               <div className="flex flex-wrap items-center gap-x-5 gap-y-2 rounded-lg border border-gray-200 bg-white px-4 py-3 text-xs text-gray-500">
-                <span className="font-medium text-gray-600">Legenda:</span>
+                <span className="font-medium text-gray-600">{t("assessmentFill.legend")}</span>
                 <span className="inline-flex items-center gap-1.5">
                   <span className="flex h-5 w-5 items-center justify-center rounded border border-[#4ba69d] bg-[#4ba69d]/15 text-[11px] font-medium text-[#4ba69d]">
                     1
                   </span>
-                  Wajib diisi
+                  {t("assessmentFill.legendRequired")}
                 </span>
                 <span className="inline-flex items-center gap-1.5">
                   <span className="flex h-5 w-5 items-center justify-center rounded border border-[#4ba69d] bg-[#4ba69d] text-white">
                     <Check className="h-3 w-3" />
                   </span>
-                  Sudah diceklis
+                  {t("assessmentFill.legendChecked")}
                 </span>
                 <span className="inline-flex items-center gap-1.5">
                   <span className="flex h-5 w-5 items-center justify-center rounded border border-gray-300 text-[11px] font-medium text-gray-600">
                     1
                   </span>
-                  Belum diceklis
+                  {t("assessmentFill.legendUnchecked")}
                 </span>
               </div>
 
               {/* Keterangan warna baris per pengisi (diisi oleh). */}
               <div className="flex flex-wrap items-center gap-x-5 gap-y-2 rounded-lg border border-gray-200 bg-white px-4 py-3 text-xs text-gray-500">
-                <span className="font-medium text-gray-600">Diisi oleh:</span>
+                <span className="font-medium text-gray-600">{t("assessmentFill.filledByLegend")}</span>
                 {Object.entries(PENGISI_ROW_BG).map(([key, row]) => (
                   <span key={key} className="inline-flex items-center gap-1.5">
                     <span className={"h-4 w-4 rounded border border-gray-200 " + row} />
-                    {PENGISI_LABEL[key] ?? key}
+                    {pengisiLabel(key, t)}
                   </span>
                 ))}
               </div>
@@ -741,24 +768,15 @@ export default function IsiAsesmenPage() {
 
           {/* Catatan / disclaimer clinical pathway. */}
           <Card>
-            <p className="mb-2 text-sm font-semibold text-gray-900">Keterangan :</p>
+            <p className="mb-2 text-sm font-semibold text-gray-900">{t("assessmentFill.notesTitle")}</p>
             <ul className="space-y-2 text-sm leading-relaxed text-gray-600">
               <li className="flex gap-2">
                 <span className="mt-1 h-1.5 w-1.5 shrink-0 rounded-sm bg-gray-400" />
-                <span>
-                  Clinical pathway ini didesain untuk membantu proses perawatan dan pengobatan
-                  dengan menyediakan kerangka kerja yang diharapkan. Bukan untuk menggantikan
-                  penilaian tim perawat/dokter. Jika pasien tidak sesuai dengan kerangka umum
-                  clinical pathway, maka dikeluarkan dari clinical pathway.
-                </span>
+                <span>{t("assessmentFill.note1")}</span>
               </li>
               <li className="flex gap-2">
                 <span className="mt-1 h-1.5 w-1.5 shrink-0 rounded-sm bg-gray-400" />
-                <span>
-                  Petugas yang mengisi formulir ini adalah Manajer Pelayanan Pasien (MPP) atau
-                  Perawat Penanggung jawab Asuhan (PPJA) yang ditunjuk, menandatangani formulir
-                  sebagai pelaksana verifikasi.
-                </span>
+                <span>{t("assessmentFill.note2")}</span>
               </li>
             </ul>
           </Card>
@@ -767,9 +785,9 @@ export default function IsiAsesmenPage() {
           <Card className="p-0">
             <div className="flex flex-col gap-3 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
               <div>
-                <h3 className="text-sm font-semibold text-gray-900">Pencatatan Varian</h3>
+                <h3 className="text-sm font-semibold text-gray-900">{t("assessmentFill.varianceTitle")}</h3>
                 <p className="text-xs text-gray-400">
-                  Catat penyimpangan (varian) yang terjadi selama perawatan.
+                  {t("assessmentFill.varianceSubtitle")}
                 </p>
               </div>
               <Button
@@ -777,7 +795,7 @@ export default function IsiAsesmenPage() {
                 size="sm"
                 className="bg-[#075489] hover:bg-[#075489]/90 text-white shrink-0"
               >
-                <Plus className="h-4 w-4" /> Tambah Varian
+                <Plus className="h-4 w-4" /> {t("assessmentFill.addVariance")}
               </Button>
             </div>
             <div className="border-t border-gray-100">
@@ -787,7 +805,7 @@ export default function IsiAsesmenPage() {
                 onEdit={openEditVarian}
                 onDelete={(row) => setVarianDeleteTarget(row)}
                 isRowLoading={(row) => varianDeletingId === row.id}
-                emptyMessage="Belum ada catatan varian."
+                emptyMessage={t("assessmentFill.varianceEmpty")}
               />
             </div>
           </Card>
@@ -795,14 +813,14 @@ export default function IsiAsesmenPage() {
           {/* Verifikasi clinical pathway (dokter PJ / perawat PJ / pelaksana). */}
           <Card>
             <div className="mb-3 flex items-center justify-between gap-2">
-              <h3 className="text-sm font-semibold text-gray-900">Verifikasi Clinical Pathway</h3>
+              <h3 className="text-sm font-semibold text-gray-900">{t("assessmentFill.verificationTitle")}</h3>
               {pelaksanaVerified && (
-                <Badge variant="success">Selesai</Badge>
+                <Badge variant="success">{t("assessment.statusDone")}</Badge>
               )}
             </div>
             {pelaksanaVerified && (
               <p className="mb-3 rounded-lg bg-[#4ba69d]/10 px-3 py-2 text-sm text-[#075489]">
-                Clinical pathway telah selesai diverifikasi pelaksana. Seluruh pengisian dikunci.
+                {t("assessmentFill.lockedNotice")}
               </p>
             )}
             {verifyError && (
@@ -811,24 +829,24 @@ export default function IsiAsesmenPage() {
             <div className="grid gap-3 sm:grid-cols-3">
               {verifItem(
                 "dokter",
-                "Dokter Penanggung Jawab",
+                t("assessmentFill.roleDoctorPj"),
                 asesmen.doctor_verified_by,
                 asesmen.doctor_verified_at,
               )}
               {verifItem(
                 "perawat",
-                "Perawat Penanggung Jawab",
+                t("assessmentFill.roleNursePj"),
                 asesmen.nurse_verified_by,
                 asesmen.nurse_verified_at,
               )}
               {verifItem(
                 "pelaksana",
-                "Pelaksana Verifikasi",
+                t("assessmentFill.roleExecutor"),
                 asesmen.executor_verified_by,
                 asesmen.executor_verified_at,
                 {
                   disabled: !(dokterVerified && perawatVerified),
-                  disabledHint: "Menunggu verifikasi dokter & perawat penanggung jawab.",
+                  disabledHint: t("assessmentFill.executorHint"),
                 },
               )}
             </div>
@@ -838,19 +856,23 @@ export default function IsiAsesmenPage() {
           <Modal
             open={varianModal !== null}
             onClose={() => setVarianModal(null)}
-            title={varianModal === "tambah" ? "Tambah Varian" : "Edit Varian"}
+            title={
+              varianModal === "tambah"
+                ? t("assessmentFill.addVariance")
+                : t("assessmentFill.editVariance")
+            }
             size="md"
             footer={
               <>
                 <Button variant="outline" onClick={() => setVarianModal(null)}>
-                  Batal
+                  {t("common.cancel")}
                 </Button>
                 <Button
                   onClick={handleSaveVarian}
                   disabled={varianSaving}
                   className="bg-[#075489] hover:bg-[#075489]/90 text-white"
                 >
-                  {varianSaving ? "Menyimpan..." : "Simpan"}
+                  {varianSaving ? t("common.saving") : t("common.save")}
                 </Button>
               </>
             }
@@ -861,7 +883,7 @@ export default function IsiAsesmenPage() {
               )}
               <div className="space-y-1.5">
                 <Label htmlFor="varian-tgl">
-                  Tanggal &amp; Waktu <span className="text-red-500">*</span>
+                  {t("assessmentFill.colOccurredAt")} <span className="text-red-500">*</span>
                 </Label>
                 <Input
                   id="varian-tgl"
@@ -874,7 +896,7 @@ export default function IsiAsesmenPage() {
               </div>
               <div className="space-y-1.5">
                 <Label htmlFor="varian-isi">
-                  Varian yang Terjadi <span className="text-red-500">*</span>
+                  {t("assessmentFill.colVariance")} <span className="text-red-500">*</span>
                 </Label>
                 <Textarea
                   id="varian-isi"
@@ -884,7 +906,7 @@ export default function IsiAsesmenPage() {
                 />
               </div>
               <div className="space-y-1.5">
-                <Label htmlFor="varian-alasan">Alasan Varian Terjadi</Label>
+                <Label htmlFor="varian-alasan">{t("assessmentFill.colReason")}</Label>
                 <Textarea
                   id="varian-alasan"
                   rows={3}
@@ -893,10 +915,10 @@ export default function IsiAsesmenPage() {
                 />
               </div>
               <div className="space-y-1.5">
-                <Label>Paraf</Label>
+                <Label>{t("assessmentFill.colInitials")}</Label>
                 <Input value={currentUsername ?? ""} disabled />
                 <p className="text-xs text-gray-400">
-                  Otomatis terisi username Anda yang sedang login.
+                  {t("assessmentFill.initialsHint")}
                 </p>
               </div>
             </div>
@@ -907,41 +929,45 @@ export default function IsiAsesmenPage() {
             onClose={() => setVarianDeleteTarget(null)}
             onConfirm={handleDeleteVarian}
             loading={varianDeletingId !== null}
-            title="Hapus Varian"
-            description="Catatan varian ini akan dihapus. Lanjutkan?"
+            title={t("assessmentFill.deleteVarianceTitle")}
+            description={t("assessmentFill.deleteVarianceDesc")}
           />
 
           {/* Preview PDF asesmen */}
           <Modal
             open={pdfOpen}
             onClose={closePdf}
-            title="Preview PDF — Clinical Pathway"
+            title={t("assessmentFill.pdfTitle")}
             size="lg"
             footer={
               <>
                 <Button variant="outline" onClick={closePdf}>
-                  Tutup
+                  {t("common.close")}
                 </Button>
                 <Button
                   onClick={downloadPdf}
                   disabled={!pdfUrl}
                   className="bg-[#075489] hover:bg-[#075489]/90 text-white"
                 >
-                  <Download className="h-4 w-4" /> Download PDF
+                  <Download className="h-4 w-4" /> {t("assessmentFill.downloadPdf")}
                 </Button>
               </>
             }
           >
             {pdfLoading ? (
               <div className="flex h-[70vh] items-center justify-center gap-2 text-sm text-gray-400">
-                <Loader2 className="h-5 w-5 animate-spin" /> Memuat PDF...
+                <Loader2 className="h-5 w-5 animate-spin" /> {t("assessmentFill.loadingPdf")}
               </div>
             ) : pdfError ? (
               <div className="flex h-[70vh] items-center justify-center text-sm text-red-600">
                 {pdfError}
               </div>
             ) : pdfUrl ? (
-              <iframe src={pdfUrl} title="Preview PDF" className="h-[70vh] w-full rounded-lg border" />
+              <iframe
+                src={pdfUrl}
+                title={t("assessmentFill.previewPdf")}
+                className="h-[70vh] w-full rounded-lg border"
+              />
             ) : null}
           </Modal>
         </>

@@ -12,6 +12,7 @@ import { DateRangeFields } from "@/components/molecules/DateRangeFields"
 import { Pagination } from "@/components/molecules/Pagination"
 import api from "@/lib/axios"
 import { downloadXlsx } from "@/lib/excel"
+import { useLanguage, localeOf, type Lang } from "@/lib/i18n"
 
 // Detail per aset (unit) di dalam satu label kemasan.
 type ReportUnit = {
@@ -53,34 +54,43 @@ type ReportGroup = {
 }
 
 const RESULT_OPTIONS = [
-  { value: "berhasil", label: "Passed" },
-  { value: "gagal", label: "Failed" },
+  { value: "berhasil", labelKey: "report.resultPassed" },
+  { value: "gagal", labelKey: "report.resultFailed" },
 ]
 
 // Hanya dipakai untuk MENERJEMAHKAN nilai metode di kolom tabel — filter metode sudah
 // tidak ada, filternya kini cuma nama + rentang tanggal.
 const METHOD_OPTIONS = [
-  { value: "uap", label: "Steam" },
-  { value: "eo", label: "Ethylene Oxide" },
-  { value: "plasma", label: "Plasma" },
-  { value: "panas_kering", label: "Dry Heat" },
+  { value: "uap", labelKey: "report.methodSteam" },
+  { value: "eo", labelKey: "report.methodEo" },
+  { value: "plasma", labelKey: "report.methodPlasma" },
+  { value: "panas_kering", labelKey: "report.methodDryHeat" },
 ]
 
-const methodLabel: Record<string, string> = Object.fromEntries(METHOD_OPTIONS.map((o) => [o.value, o.label]))
+const methodLabelKey: Record<string, string> = Object.fromEntries(
+  METHOD_OPTIONS.map((o) => [o.value, o.labelKey]),
+)
 
-function formatDate(value: string | null): string {
+/** Nama metode sterilisasi dalam bahasa aktif; nilai tak dikenal tampil apa adanya. */
+function methodName(method: string | null, t: (key: string) => string): string {
+  if (!method) return "—"
+  const key = methodLabelKey[method]
+  return key ? t(key) : method
+}
+
+function formatDate(value: string | null, lang: Lang): string {
   if (!value) return "—"
   const d = new Date(value)
   if (Number.isNaN(d.getTime())) return value
-  return d.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" })
+  return d.toLocaleDateString(localeOf(lang), { day: "2-digit", month: "short", year: "numeric" })
 }
 
 /** Waktu steril = tanggal + jam:menit, mis. "05 Agu 2026, 13.00". */
-function formatDateTime(value: string | null): string {
+function formatDateTime(value: string | null, lang: Lang): string {
   if (!value) return "—"
   const d = new Date(value)
   if (Number.isNaN(d.getTime())) return value
-  return d.toLocaleString("en-GB", {
+  return d.toLocaleString(localeOf(lang), {
     day: "2-digit",
     month: "short",
     year: "numeric",
@@ -98,8 +108,8 @@ function formatTemperature(value: string | number | null): string {
 }
 
 /** Durasi batch dalam menit, mis. "30 mnt". */
-function formatDuration(value: number | null): string {
-  return value === null ? "—" : `${value} min`
+function formatDuration(value: number | null, unit: string): string {
+  return value === null ? "—" : `${value} ${unit}`
 }
 
 /**
@@ -139,14 +149,15 @@ type Filters = ReturnType<typeof defaultFilters>
 
 // Indikator biologi hanya bernilai Negatif / Positif (lihat validasi hasil batch).
 const BIO_OPTIONS = [
-  { value: "Negatif", label: "Negative" },
-  { value: "Positif", label: "Positive" },
+  { value: "Negatif", labelKey: "report.bioNegative" },
+  { value: "Positif", labelKey: "report.bioPositive" },
 ]
 
 /** Opsi kosong = tidak menyaring. Ditulis "-" sesuai tampilan kolomnya di tabel. */
 const ANY_LABEL = "-"
 
 export default function LaporanPerAlatPage() {
+  const { t, lang } = useLanguage()
   const [rows, setRows] = useState<ReportGroup[]>([])
   const [loading, setLoading] = useState(true)
   const [exporting, setExporting] = useState(false)
@@ -233,48 +244,48 @@ export default function LaporanPerAlatPage() {
       const res = await api.get("/master/reports/cssd-per-item", { params: buildParams({ per_page: 2000 }) })
       const data: ReportGroup[] = res.data.data.data
       const headers = [
-        "Sterilized At",
-        "Barcode",
-        "Label Name",
-        "Instrument Name",
+        t("report.sterilizedAt"),
+        t("report.barcode"),
+        t("report.labelName"),
+        t("report.instrumentName"),
         // Warna baris tidak terbawa ke file, jadi berhasil/gagal ditulis eksplisit.
-        "Status",
-        "Machine",
-        "Method",
-        "Cycle No.",
-        "Temperature",
-        "Duration",
-        "Chemical Indicator",
-        "Biological Indicator (Control)",
-        "Biological Indicator (Test)",
-        "Operator",
-        "Expiry",
+        t("common.status"),
+        t("report.machine"),
+        t("report.method"),
+        t("report.cycleNo"),
+        t("report.temperature"),
+        t("report.duration"),
+        t("report.chemicalIndicator"),
+        t("report.bioControlFull"),
+        t("report.bioTestFull"),
+        t("report.operator"),
+        t("report.expiry"),
       ]
       // Isi file tetap per aset (per unit): baris gabungan diuraikan jadi baris-baris unitnya.
       const rows = data.flatMap((g) =>
         g.units.map((u) => [
-          formatDateTime(g.sterilized_at),
+          formatDateTime(g.sterilized_at, lang),
           g.barcode_no ?? "",
           g.name ?? "",
           u.name ?? "",
-          u.failed ? "Failed" : "Passed",
+          u.failed ? t("report.resultFailed") : t("report.resultPassed"),
           g.machine ?? "",
-          methodLabel[g.method ?? ""] ?? g.method ?? "",
+          g.method ? methodName(g.method, t) : "",
           g.cycle_number ?? "",
           g.temperature === null ? "" : formatTemperature(g.temperature),
-          g.duration_minutes === null ? "" : formatDuration(g.duration_minutes),
+          g.duration_minutes === null ? "" : formatDuration(g.duration_minutes, t("common.minutesShort")),
           // Batch yang belum divalidasi ditulis "-" (bukan sel kosong) supaya jelas
           // memang tidak ada nilainya, bukan kolomnya yang bergeser.
           g.chemical_indicator ?? "-",
           g.bio_indicator_control ?? "-",
           g.bio_indicator_test ?? "-",
           g.operator ?? "",
-          formatDate(g.expiry_date),
+          formatDate(g.expiry_date, lang),
         ]),
       )
       downloadXlsx(
-        `cssd-instrument-report-${new Date().toISOString().slice(0, 10)}.xlsx`,
-        "CSSD Instrument Report",
+        `${t("report.fileName")}-${new Date().toISOString().slice(0, 10)}.xlsx`,
+        t("report.sheetName"),
         headers,
         rows,
       )
@@ -286,8 +297,8 @@ export default function LaporanPerAlatPage() {
   return (
     <div className="space-y-6">
       <PageHeader
-        title="CSSD Instrument Report"
-        subtitle="Recap per sterilization batch — one row per package label (barcode)"
+        title={t("report.title")}
+        subtitle={t("report.subtitle")}
       />
 
       <Card className="p-0">
@@ -301,11 +312,11 @@ export default function LaporanPerAlatPage() {
               Di layar sedang jadi dua kolom per baris, di ponsel menumpuk. */}
           <div className="grid grid-cols-1 items-end gap-4 sm:grid-cols-2 lg:grid-cols-6">
             <div className="space-y-1 sm:col-span-2 lg:col-span-4">
-              <label className="text-xs font-semibold uppercase tracking-wide text-gray-400">Instrument Name</label>
+              <label className="text-xs font-semibold uppercase tracking-wide text-gray-400">{t("report.instrumentName")}</label>
               <div className="relative">
                 <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
                 <Input
-                  placeholder="Search instrument name..."
+                  placeholder={t("report.searchInstrument")}
                   value={form.search}
                   onChange={(e) => setForm((f) => ({ ...f, search: e.target.value }))}
                   className="pl-9"
@@ -314,8 +325,8 @@ export default function LaporanPerAlatPage() {
             </div>
 
             <DateRangeFields
-              fromLabel="From Date"
-              toLabel="To Date"
+              fromLabel={t("report.fromDate")}
+              toLabel={t("report.toDate")}
               from={form.dateFrom}
               to={form.dateTo}
               onFromChange={(v) => setForm((f) => ({ ...f, dateFrom: v }))}
@@ -324,31 +335,29 @@ export default function LaporanPerAlatPage() {
 
             {/* ── Baris 2: pilihan mesin/status + indikator hasil validasi ───── */}
             <div className="space-y-1">
-              <label className="text-xs font-semibold uppercase tracking-wide text-gray-400">Machine</label>
+              <label className="text-xs font-semibold uppercase tracking-wide text-gray-400">{t("report.machine")}</label>
               {/* Opsi bernilai kosong = kembali ke semua mesin (SelectSearch di app ini
                   tidak punya tombol clear sendiri). */}
               <SelectSearch
                 options={[
-                  { value: "", label: "All Machines" },
+                  { value: "", label: t("report.allMachines") },
                   ...machines.map((m) => ({ value: m, label: m })),
                 ]}
                 value={form.machine}
                 onChange={(v) => setForm((f) => ({ ...f, machine: v }))}
-                placeholder="All Machines"
-                searchPlaceholder="Search machine..."
-                loadingText="Loading options..."
-                emptyText="Not found."
+                placeholder={t("report.allMachines")}
+                searchPlaceholder={t("report.searchMachine")}
                 triggerClassName="py-2"
               />
             </div>
 
             <div className="space-y-1">
-              <label className="text-xs font-semibold uppercase tracking-wide text-gray-400">Status</label>
+              <label className="text-xs font-semibold uppercase tracking-wide text-gray-400">{t("common.status")}</label>
               <Select value={form.result} onChange={(e) => setForm((f) => ({ ...f, result: e.target.value }))}>
-                <option value="">All Statuses</option>
+                <option value="">{t("report.allStatuses")}</option>
                 {RESULT_OPTIONS.map((o) => (
                   <option key={o.value} value={o.value}>
-                    {o.label}
+                    {t(o.labelKey)}
                   </option>
                 ))}
               </Select>
@@ -356,7 +365,7 @@ export default function LaporanPerAlatPage() {
 
             <div className="space-y-1">
               <label className="text-xs font-semibold uppercase tracking-wide text-gray-400">
-                Chemical Indicator
+                {t("report.chemicalIndicator")}
               </label>
               <SelectSearch
                 options={[
@@ -366,16 +375,14 @@ export default function LaporanPerAlatPage() {
                 value={form.chemical}
                 onChange={(v) => setForm((f) => ({ ...f, chemical: v }))}
                 placeholder={ANY_LABEL}
-                searchPlaceholder="Search lot no..."
-                loadingText="Loading options..."
-                emptyText="Not found."
+                searchPlaceholder={t("report.searchLot")}
                 triggerClassName="py-2"
               />
             </div>
 
             <div className="space-y-1">
               <label className="text-xs font-semibold uppercase tracking-wide text-gray-400">
-                Bio Indicator (Control)
+                {t("report.bioControl")}
               </label>
               <Select
                 value={form.bioControl}
@@ -384,7 +391,7 @@ export default function LaporanPerAlatPage() {
                 <option value="">{ANY_LABEL}</option>
                 {BIO_OPTIONS.map((o) => (
                   <option key={o.value} value={o.value}>
-                    {o.label}
+                    {t(o.labelKey)}
                   </option>
                 ))}
               </Select>
@@ -392,7 +399,7 @@ export default function LaporanPerAlatPage() {
 
             <div className="space-y-1">
               <label className="text-xs font-semibold uppercase tracking-wide text-gray-400">
-                Bio Indicator (Test)
+                {t("report.bioTest")}
               </label>
               <Select
                 value={form.bioTest}
@@ -401,7 +408,7 @@ export default function LaporanPerAlatPage() {
                 <option value="">{ANY_LABEL}</option>
                 {BIO_OPTIONS.map((o) => (
                   <option key={o.value} value={o.value}>
-                    {o.label}
+                    {t(o.labelKey)}
                   </option>
                 ))}
               </Select>
@@ -414,7 +421,7 @@ export default function LaporanPerAlatPage() {
               className="w-full justify-center bg-[#075489] hover:bg-[#075489]/90 text-white"
             >
               <Search className="h-4 w-4" />
-              Search
+              {t("common.search")}
             </Button>
           </div>
 
@@ -429,15 +436,15 @@ export default function LaporanPerAlatPage() {
               className="w-full justify-center sm:w-auto"
             >
               <Sheet className="h-4 w-4" />
-              {exporting ? "Exporting..." : "Export Excel"}
+              {exporting ? t("report.exporting") : t("report.exportExcel")}
             </Button>
           </div>
         </form>
 
         {loading ? (
-          <div className="py-16 text-center text-sm text-gray-400">Loading data...</div>
+          <div className="py-16 text-center text-sm text-gray-400">{t("common.loading")}</div>
         ) : rows.length === 0 ? (
-          <div className="py-16 text-center text-sm text-gray-400">No data.</div>
+          <div className="py-16 text-center text-sm text-gray-400">{t("report.noData")}</div>
         ) : (
           <>
             {/* Mobile: tiap baris jadi kartu (label : nilai) agar tak terpotong. */}
@@ -453,20 +460,20 @@ export default function LaporanPerAlatPage() {
             <table className="w-full min-w-[1640px] text-sm">
               <thead>
                 <tr className="border-b border-gray-100 bg-gray-50 text-xs font-semibold uppercase tracking-wide text-gray-400">
-                  <th className="whitespace-nowrap py-2.5 px-4 text-left">Sterilized At</th>
-                  <th className="whitespace-nowrap py-2.5 px-4 text-left">Barcode</th>
+                  <th className="whitespace-nowrap py-2.5 px-4 text-left">{t("report.sterilizedAt")}</th>
+                  <th className="whitespace-nowrap py-2.5 px-4 text-left">{t("report.barcode")}</th>
                   {/* Kolom terpanjang isinya (nama set bisa panjang) — diberi lantai
                       lebar sendiri supaya tidak ikut menyusut saat kolom lain melebar. */}
-                  <th className="min-w-[340px] py-2.5 px-4 text-left">Instrument Name</th>
-                  <th className="whitespace-nowrap py-2.5 px-4 text-left">Machine</th>
-                  <th className="whitespace-nowrap py-2.5 px-4 text-left">Method</th>
-                  <th className="whitespace-nowrap py-2.5 px-4 text-left">Cycle No.</th>
-                  <th className="whitespace-nowrap py-2.5 px-4 text-left">Temperature</th>
-                  <th className="whitespace-nowrap py-2.5 px-4 text-left">Duration</th>
-                  <th className="whitespace-nowrap py-2.5 px-4 text-left">Chemical Indicator</th>
-                  <th className="whitespace-nowrap py-2.5 px-4 text-left">Bio Indicator (Control)</th>
-                  <th className="whitespace-nowrap py-2.5 px-4 text-left">Bio Indicator (Test)</th>
-                  <th className="whitespace-nowrap py-2.5 px-4 text-left">Expiry</th>
+                  <th className="min-w-[340px] py-2.5 px-4 text-left">{t("report.instrumentName")}</th>
+                  <th className="whitespace-nowrap py-2.5 px-4 text-left">{t("report.machine")}</th>
+                  <th className="whitespace-nowrap py-2.5 px-4 text-left">{t("report.method")}</th>
+                  <th className="whitespace-nowrap py-2.5 px-4 text-left">{t("report.cycleNo")}</th>
+                  <th className="whitespace-nowrap py-2.5 px-4 text-left">{t("report.temperature")}</th>
+                  <th className="whitespace-nowrap py-2.5 px-4 text-left">{t("report.duration")}</th>
+                  <th className="whitespace-nowrap py-2.5 px-4 text-left">{t("report.chemicalIndicator")}</th>
+                  <th className="whitespace-nowrap py-2.5 px-4 text-left">{t("report.bioControl")}</th>
+                  <th className="whitespace-nowrap py-2.5 px-4 text-left">{t("report.bioTest")}</th>
+                  <th className="whitespace-nowrap py-2.5 px-4 text-left">{t("report.expiry")}</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-50">
@@ -485,7 +492,6 @@ export default function LaporanPerAlatPage() {
           totalItems={totalItems}
           itemsPerPage={perPage}
           onPageChange={setPage}
-          labels={{ showing: "Showing", of: "of", items: "items" }}
         />
       </Card>
     </div>
@@ -503,11 +509,12 @@ function IndicatorValue({ value }: { value: string | null }) {
  * unit di dalamnya tetap tersedia lewat export CSV (yang memang per aset).
  */
 function ReportRows({ group: g }: { group: ReportGroup }) {
+  const { t, lang } = useLanguage()
   // Bungkus yang gagal steril tetap dilaporkan, hanya ditandai merah — laporan ini
   // juga dipakai menelusuri kegagalan, jadi barisnya tidak boleh disembunyikan.
   return (
     <tr className={g.failed ? "bg-red-50/70" : ""}>
-      <td className="whitespace-nowrap py-2.5 px-4 text-gray-600">{formatDateTime(g.sterilized_at)}</td>
+      <td className="whitespace-nowrap py-2.5 px-4 text-gray-600">{formatDateTime(g.sterilized_at, lang)}</td>
       <td className="whitespace-nowrap py-2.5 px-4">
         {g.barcode_no ? (
           <span className="font-mono text-xs text-gray-700">{g.barcode_no}</span>
@@ -520,7 +527,7 @@ function ReportRows({ group: g }: { group: ReportGroup }) {
       </td>
       <td className="whitespace-nowrap py-2.5 px-4 text-gray-700">{g.machine ?? "—"}</td>
       <td className="whitespace-nowrap py-2.5 px-4 text-gray-700">
-        {methodLabel[g.method ?? ""] ?? g.method ?? "—"}
+        {methodName(g.method, t)}
       </td>
       <td className="whitespace-nowrap py-2.5 px-4 font-mono text-xs text-gray-700">
         {g.cycle_number ?? <span className="text-gray-400">—</span>}
@@ -529,7 +536,7 @@ function ReportRows({ group: g }: { group: ReportGroup }) {
         {formatTemperature(g.temperature)}
       </td>
       <td className="whitespace-nowrap py-2.5 px-4 tabular-nums text-gray-700">
-        {formatDuration(g.duration_minutes)}
+        {formatDuration(g.duration_minutes, t("common.minutesShort"))}
       </td>
       <td className="whitespace-nowrap py-2.5 px-4 text-gray-700">
         <IndicatorValue value={g.chemical_indicator} />
@@ -540,7 +547,7 @@ function ReportRows({ group: g }: { group: ReportGroup }) {
       <td className="whitespace-nowrap py-2.5 px-4 text-gray-700">
         <IndicatorValue value={g.bio_indicator_test} />
       </td>
-      <td className="whitespace-nowrap py-2.5 px-4 text-gray-600">{formatDate(g.expiry_date)}</td>
+      <td className="whitespace-nowrap py-2.5 px-4 text-gray-600">{formatDate(g.expiry_date, lang)}</td>
     </tr>
   )
 }
@@ -548,6 +555,7 @@ function ReportRows({ group: g }: { group: ReportGroup }) {
 // Versi kartu (mobile) dari satu baris laporan: header berisi nama + barcode, lalu
 // daftar field label:nilai. Sama seperti versi tabel, kartunya tidak bisa dibuka.
 function ReportCard({ group: g }: { group: ReportGroup }) {
+  const { t, lang } = useLanguage()
   return (
     <div
       className={
@@ -565,28 +573,30 @@ function ReportCard({ group: g }: { group: ReportGroup }) {
         </div>
         {g.failed && (
           <span className="shrink-0 rounded bg-red-100 px-1.5 py-0.5 text-xs font-medium text-red-700">
-            Failed
+            {t("report.resultFailed")}
           </span>
         )}
       </div>
 
       <dl className="divide-y divide-gray-50 border-t border-gray-100">
-        <ReportField label="Sterilized At">{formatDateTime(g.sterilized_at)}</ReportField>
-        <ReportField label="Machine">{g.machine ?? "—"}</ReportField>
-        <ReportField label="Method">{methodLabel[g.method ?? ""] ?? g.method ?? "—"}</ReportField>
-        <ReportField label="Cycle No.">{g.cycle_number ?? "—"}</ReportField>
-        <ReportField label="Temperature">{formatTemperature(g.temperature)}</ReportField>
-        <ReportField label="Duration">{formatDuration(g.duration_minutes)}</ReportField>
-        <ReportField label="Chemical Indicator">
+        <ReportField label={t("report.sterilizedAt")}>{formatDateTime(g.sterilized_at, lang)}</ReportField>
+        <ReportField label={t("report.machine")}>{g.machine ?? "—"}</ReportField>
+        <ReportField label={t("report.method")}>{methodName(g.method, t)}</ReportField>
+        <ReportField label={t("report.cycleNo")}>{g.cycle_number ?? "—"}</ReportField>
+        <ReportField label={t("report.temperature")}>{formatTemperature(g.temperature)}</ReportField>
+        <ReportField label={t("report.duration")}>
+          {formatDuration(g.duration_minutes, t("common.minutesShort"))}
+        </ReportField>
+        <ReportField label={t("report.chemicalIndicator")}>
           <IndicatorValue value={g.chemical_indicator} />
         </ReportField>
-        <ReportField label="Bio Indicator (Control)">
+        <ReportField label={t("report.bioControl")}>
           <IndicatorValue value={g.bio_indicator_control} />
         </ReportField>
-        <ReportField label="Bio Indicator (Test)">
+        <ReportField label={t("report.bioTest")}>
           <IndicatorValue value={g.bio_indicator_test} />
         </ReportField>
-        <ReportField label="Expiry">{formatDate(g.expiry_date)}</ReportField>
+        <ReportField label={t("report.expiry")}>{formatDate(g.expiry_date, lang)}</ReportField>
       </dl>
     </div>
   )
