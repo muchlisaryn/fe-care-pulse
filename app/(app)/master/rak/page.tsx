@@ -21,6 +21,7 @@ import {
   type Rack,
 } from "@/lib/store/slices/rackSlice"
 import api from "@/lib/axios"
+import { useT } from "@/lib/i18n"
 
 const emptyForm = {
   name: "",
@@ -43,6 +44,7 @@ export default function MasterRakPage() {
     (s) => s.racks
   )
 
+  const t = useT()
   const [searchInput, setSearchInput] = useState(search)
   const [modal, setModal] = useState<"tambah" | "edit" | null>(null)
   const [form, setForm] = useState(emptyForm)
@@ -119,7 +121,7 @@ export default function MasterRakPage() {
     w.document.write(`
       <html>
         <head>
-          <title>Label ${escapeHtml(labelTarget.name)}</title>
+          <title>${escapeHtml(t("masterRack.labelTitle"))} ${escapeHtml(labelTarget.name)}</title>
           <style>
             * { box-sizing: border-box; }
             body { margin: 0; font-family: Arial, Helvetica, sans-serif; }
@@ -137,7 +139,7 @@ export default function MasterRakPage() {
           <div class="label">
             <div class="qr">${qr}</div>
             <div class="body">
-              <div class="kind">LOKASI RAK</div>
+              <div class="kind">${escapeHtml(t("masterRack.labelKind"))}</div>
               <div class="name">${escapeHtml(labelTarget.name)}</div>
               ${labelTarget.note ? `<div class="note">${escapeHtml(labelTarget.note)}</div>` : ""}
             </div>
@@ -152,11 +154,11 @@ export default function MasterRakPage() {
 
   const columns: Column<Rack>[] = [
     {
-      header: "Nama Rak",
+      header: t("masterRack.colName"),
       cell: (row) => <span className="font-medium text-gray-900">{row.name}</span>,
     },
     {
-      header: "Keterangan",
+      header: t("common.description"),
       cell: (row) =>
         row.note ? (
           <span className="text-gray-700">{row.note}</span>
@@ -174,14 +176,14 @@ export default function MasterRakPage() {
             <Archive className="h-6 w-6" />
           </div>
           <div>
-            <h1 className="text-2xl font-bold text-gray-900">Master Rak</h1>
+            <h1 className="text-2xl font-bold text-gray-900">{t("masterRack.title")}</h1>
             <p className="text-sm text-gray-500 mt-0.5">
-              Kelola rak gudang steril — dipakai sebagai pilihan lokasi rak saat menyimpan ke gudang
+              {t("masterRack.subtitle")}
             </p>
           </div>
         </div>
         <Button onClick={openTambah} className="bg-[#075489] hover:bg-[#075489]/90 text-white">
-          + Tambah Rak
+          {t("masterRack.addRack")}
         </Button>
       </div>
 
@@ -191,30 +193,30 @@ export default function MasterRakPage() {
             <div className="relative flex-1">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 pointer-events-none" />
               <Input
-                placeholder="Cari nama rak / keterangan..."
+                placeholder={t("masterRack.searchPlaceholder")}
                 value={searchInput}
                 onChange={(e) => setSearchInput(e.target.value)}
                 className="pl-9"
               />
             </div>
             <Button type="submit" className="bg-[#075489] hover:bg-[#075489]/90 text-white shrink-0">
-              Cari
+              {t("common.search")}
             </Button>
           </form>
         </div>
 
         {loading ? (
-          <div className="py-16 text-center text-sm text-gray-400">Memuat data...</div>
+          <div className="py-16 text-center text-sm text-gray-400">{t("common.loading")}</div>
         ) : (
           <DataTable
             rowNumberOffset={(page - 1) * 20}
             columns={columns}
             data={items}
-            extraActions={[{ label: "Cetak Label", onClick: (row) => setLabelTarget(row) }]}
+            extraActions={[{ label: t("masterRack.printLabel"), onClick: (row) => setLabelTarget(row) }]}
             onEdit={openEdit}
             onDelete={(row) => setDeleteTarget(row)}
             isRowLoading={(row) => deletingId === row.id}
-            emptyMessage="Belum ada rak."
+            emptyMessage={t("masterRack.empty")}
           />
         )}
 
@@ -230,18 +232,18 @@ export default function MasterRakPage() {
       <Modal
         open={labelTarget !== null}
         onClose={() => setLabelTarget(null)}
-        title="Label Rak"
+        title={t("masterRack.labelTitle")}
         size="sm"
         footer={
           <>
             <Button variant="outline" onClick={() => setLabelTarget(null)}>
-              Tutup
+              {t("common.close")}
             </Button>
             <Button
               onClick={handlePrintLabel}
               className="bg-[#075489] hover:bg-[#075489]/90 text-white"
             >
-              Cetak
+              {t("common.print")}
             </Button>
           </>
         }
@@ -258,14 +260,13 @@ export default function MasterRakPage() {
                 className="shrink-0"
               />
               <div className="min-w-0">
-                <p className="text-[11px] font-semibold tracking-wider text-gray-500">LOKASI RAK</p>
+                <p className="text-[11px] font-semibold tracking-wider text-gray-500">{t("masterRack.labelKind")}</p>
                 <p className="text-lg font-bold uppercase text-gray-900 break-words">{labelTarget.name}</p>
                 {labelTarget.note && <p className="mt-1 text-xs text-gray-500">{labelTarget.note}</p>}
               </div>
             </div>
             <p className="text-xs text-gray-500">
-              Tempel label ini di rak. QR-nya berisi nama rak, jadi bila nama rak diubah, label
-              wajib dicetak ulang.
+              {t("masterRack.labelHint")}
             </p>
           </div>
         )}
@@ -281,38 +282,38 @@ export default function MasterRakPage() {
       <Modal
         open={modal !== null}
         onClose={() => setModal(null)}
-        title={modal === "tambah" ? "Tambah Rak" : "Edit Rak"}
+        title={modal === "tambah" ? t("masterRack.modalAdd") : t("masterRack.modalEdit")}
         size="sm"
         footer={
           <>
             <Button variant="outline" onClick={() => setModal(null)}>
-              Batal
+              {t("common.cancel")}
             </Button>
             <Button
               onClick={handleSave}
               disabled={saving || !form.name.trim()}
               className="bg-[#075489] hover:bg-[#075489]/90 text-white"
             >
-              {saving ? "Menyimpan..." : "Simpan"}
+              {saving ? t("common.saving") : t("common.save")}
             </Button>
           </>
         }
       >
         <div className="space-y-4">
           <div className="space-y-1.5">
-            <Label htmlFor="rak-name">Nama Rak</Label>
+            <Label htmlFor="rak-name">{t("masterRack.colName")}</Label>
             <Input
               id="rak-name"
-              placeholder="Contoh: Rak A1"
+              placeholder={t("masterRack.namePlaceholder")}
               value={form.name}
               onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
             />
           </div>
           <div className="space-y-1.5">
-            <Label htmlFor="rak-note">Keterangan</Label>
+            <Label htmlFor="rak-note">{t("common.description")}</Label>
             <Textarea
               id="rak-note"
-              placeholder="Opsional"
+              placeholder={t("common.optionalPlaceholder")}
               value={form.note}
               onChange={(e) => setForm((f) => ({ ...f, note: e.target.value }))}
             />

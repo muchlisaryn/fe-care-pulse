@@ -1,6 +1,7 @@
 "use client"
 
 import { Input } from "@/components/atoms/Input"
+import { useT } from "@/lib/i18n"
 
 type DateRangeFieldsProps = {
   from: string
@@ -23,18 +24,20 @@ export function DateRangeFields({
   to,
   onFromChange,
   onToChange,
-  fromLabel = "Tanggal Awal",
-  toLabel = "Tanggal Akhir",
+  fromLabel,
+  toLabel,
 }: DateRangeFieldsProps) {
+  const t = useT()
+
   return (
     <>
       <div className="space-y-1">
-        <label className="text-xs font-semibold uppercase tracking-wide text-gray-400">{fromLabel}</label>
+        <label className="text-xs font-semibold uppercase tracking-wide text-gray-400">{fromLabel ?? t("common.dateFrom")}</label>
         <Input type="date" value={from} max={to || undefined} onChange={(e) => onFromChange(e.target.value)} />
       </div>
 
       <div className="space-y-1">
-        <label className="text-xs font-semibold uppercase tracking-wide text-gray-400">{toLabel}</label>
+        <label className="text-xs font-semibold uppercase tracking-wide text-gray-400">{toLabel ?? t("common.dateTo")}</label>
         <Input type="date" value={to} min={from || undefined} onChange={(e) => onToChange(e.target.value)} />
       </div>
     </>

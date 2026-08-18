@@ -20,6 +20,7 @@ import {
   type Bmhp,
 } from "@/lib/store/slices/bmhpSlice"
 import api from "@/lib/axios"
+import { useT } from "@/lib/i18n"
 
 const emptyForm = { name: "", unit: "pcs", stock_qty: 0, description: "" }
 
@@ -29,6 +30,7 @@ export default function MasterBmhpPage() {
     (s) => s.bmhps
   )
 
+  const t = useT()
   const [searchInput, setSearchInput] = useState(search)
   const [modal, setModal] = useState<"tambah" | "edit" | null>(null)
   const [form, setForm] = useState(emptyForm)
@@ -100,7 +102,7 @@ export default function MasterBmhpPage() {
 
   const columns: Column<Bmhp>[] = [
     {
-      header: "Kode",
+      header: t("common.code"),
       cell: (row) => (
         <span className="font-mono text-xs font-semibold text-[#075489] bg-[#075489]/8 px-2 py-1 rounded">
           {row.code}
@@ -109,16 +111,16 @@ export default function MasterBmhpPage() {
       className: "w-32",
     },
     {
-      header: "Nama BMHP",
+      header: t("masterBmhp.colName"),
       cell: (row) => <span className="font-medium text-gray-900">{row.name}</span>,
     },
     {
-      header: "Satuan",
+      header: t("common.unitOfMeasure"),
       cell: (row) => <span className="text-gray-700">{row.unit}</span>,
       className: "w-24",
     },
     {
-      header: "Stok",
+      header: t("common.stock"),
       cell: (row) => (
         <span className={`font-semibold ${row.stock_qty <= 5 ? "text-red-500" : "text-gray-900"}`}>
           {row.stock_qty}
@@ -136,12 +138,12 @@ export default function MasterBmhpPage() {
             <Boxes className="h-6 w-6" />
           </div>
           <div>
-            <h1 className="text-2xl font-bold text-gray-900">Master BMHP</h1>
-            <p className="text-sm text-gray-500 mt-0.5">Kelola Bahan Medis Habis Pakai (consumables)</p>
+            <h1 className="text-2xl font-bold text-gray-900">{t("masterBmhp.title")}</h1>
+            <p className="text-sm text-gray-500 mt-0.5">{t("masterBmhp.subtitle")}</p>
           </div>
         </div>
         <Button onClick={openTambah} className="bg-[#075489] hover:bg-[#075489]/90 text-white">
-          + Tambah BMHP
+          {t("masterBmhp.addBmhp")}
         </Button>
       </div>
 
@@ -151,20 +153,20 @@ export default function MasterBmhpPage() {
             <div className="relative flex-1">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 pointer-events-none" />
               <Input
-                placeholder="Cari nama / kode BMHP..."
+                placeholder={t("masterBmhp.searchPlaceholder")}
                 value={searchInput}
                 onChange={(e) => setSearchInput(e.target.value)}
                 className="pl-9"
               />
             </div>
             <Button type="submit" className="bg-[#075489] hover:bg-[#075489]/90 text-white shrink-0">
-              Cari
+              {t("common.search")}
             </Button>
           </form>
         </div>
 
         {loading ? (
-          <div className="py-16 text-center text-sm text-gray-400">Memuat data...</div>
+          <div className="py-16 text-center text-sm text-gray-400">{t("common.loading")}</div>
         ) : (
           <DataTable
             rowNumberOffset={(page - 1) * 20}
@@ -173,7 +175,7 @@ export default function MasterBmhpPage() {
             onEdit={openEdit}
             onDelete={(row) => setDeleteTarget(row)}
             isRowLoading={(row) => deletingId === row.id}
-            emptyMessage="Belum ada data BMHP."
+            emptyMessage={t("masterBmhp.empty")}
           />
         )}
 
@@ -196,36 +198,36 @@ export default function MasterBmhpPage() {
       <Modal
         open={modal !== null}
         onClose={() => setModal(null)}
-        title={modal === "tambah" ? "Tambah BMHP" : "Edit BMHP"}
+        title={modal === "tambah" ? t("masterBmhp.modalAdd") : t("masterBmhp.modalEdit")}
         size="sm"
         footer={
           <>
             <Button variant="outline" onClick={() => setModal(null)}>
-              Batal
+              {t("common.cancel")}
             </Button>
             <Button
               onClick={handleSave}
               disabled={saving || !form.name.trim()}
               className="bg-[#075489] hover:bg-[#075489]/90 text-white"
             >
-              {saving ? "Menyimpan..." : "Simpan"}
+              {saving ? t("common.saving") : t("common.save")}
             </Button>
           </>
         }
       >
         <div className="space-y-4">
           <div className="space-y-1.5">
-            <Label htmlFor="bmhp-name">Nama BMHP</Label>
+            <Label htmlFor="bmhp-name">{t("masterBmhp.colName")}</Label>
             <Input
               id="bmhp-name"
-              placeholder="Contoh: Kasa Steril"
+              placeholder={t("masterBmhp.namePlaceholder")}
               value={form.name}
               onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
             />
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1.5">
-              <Label htmlFor="bmhp-unit">Satuan</Label>
+              <Label htmlFor="bmhp-unit">{t("common.unitOfMeasure")}</Label>
               <Input
                 id="bmhp-unit"
                 placeholder="pcs / box"
@@ -234,7 +236,7 @@ export default function MasterBmhpPage() {
               />
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="bmhp-stock">Stok</Label>
+              <Label htmlFor="bmhp-stock">{t("common.stock")}</Label>
               <Input
                 id="bmhp-stock"
                 type="number"
@@ -245,10 +247,10 @@ export default function MasterBmhpPage() {
             </div>
           </div>
           <div className="space-y-1.5">
-            <Label htmlFor="bmhp-desc">Keterangan</Label>
+            <Label htmlFor="bmhp-desc">{t("common.description")}</Label>
             <Textarea
               id="bmhp-desc"
-              placeholder="Opsional"
+              placeholder={t("common.optionalPlaceholder")}
               value={form.description}
               onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))}
             />

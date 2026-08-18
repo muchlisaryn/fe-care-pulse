@@ -22,6 +22,7 @@ import {
   type SterilizerMachine,
 } from "@/lib/store/slices/sterilizerMachineSlice"
 import api from "@/lib/axios"
+import { useT } from "@/lib/i18n"
 
 const emptyForm = {
   name: "",
@@ -38,6 +39,7 @@ export default function MasterSterilizerMachinePage() {
     (s) => s.sterilizerMachines
   )
 
+  const t = useT()
   const [searchInput, setSearchInput] = useState(search)
   const [modal, setModal] = useState<"tambah" | "edit" | null>(null)
   const [form, setForm] = useState(emptyForm)
@@ -117,7 +119,7 @@ export default function MasterSterilizerMachinePage() {
 
   const columns: Column<SterilizerMachine>[] = [
     {
-      header: "Kode",
+      header: t("common.code"),
       cell: (row) => (
         <span className="font-mono text-xs font-semibold text-[#075489] bg-[#075489]/8 px-2 py-1 rounded">
           {row.code}
@@ -126,7 +128,7 @@ export default function MasterSterilizerMachinePage() {
       className: "w-28",
     },
     {
-      header: "Nama Mesin",
+      header: t("machine.colName"),
       cell: (row) => (
         <div>
           <span className="font-medium text-gray-900">{row.name}</span>
@@ -135,19 +137,21 @@ export default function MasterSterilizerMachinePage() {
       ),
     },
     {
-      header: "Suhu",
+      header: t("machine.colTemp"),
       cell: (row) => <span className="text-gray-700">{fmtValue(row.temperature, "°C")}</span>,
       className: "w-28",
     },
     {
-      header: "Durasi",
-      cell: (row) => <span className="text-gray-700">{fmtValue(row.duration_minutes, " mnt")}</span>,
+      header: t("machine.colDuration"),
+      cell: (row) => <span className="text-gray-700">{fmtValue(row.duration_minutes, " " + t("common.minutesShort"))}</span>,
       className: "w-28",
     },
     {
-      header: "Status",
+      header: t("common.status"),
       cell: (row) => (
-        <Badge variant={row.status === "aktif" ? "success" : "default"}>{row.status}</Badge>
+        <Badge variant={row.status === "aktif" ? "success" : "default"}>
+          {row.status === "aktif" ? t("common.active") : t("common.inactive")}
+        </Badge>
       ),
       className: "w-24",
     },
@@ -161,14 +165,14 @@ export default function MasterSterilizerMachinePage() {
             <WashingMachine className="h-6 w-6" />
           </div>
           <div>
-            <h1 className="text-2xl font-bold text-gray-900">Master Mesin Sterilisator</h1>
+            <h1 className="text-2xl font-bold text-gray-900">{t("machine.sterilizerTitle")}</h1>
             <p className="text-sm text-gray-500 mt-0.5">
-              Kelola mesin sterilisator (autoclave) & parameter standar sterilisasi
+              {t("machine.sterilizerSubtitle")}
             </p>
           </div>
         </div>
         <Button onClick={openTambah} className="bg-[#075489] hover:bg-[#075489]/90 text-white">
-          + Tambah Mesin
+          {t("machine.addMachine")}
         </Button>
       </div>
 
@@ -178,20 +182,20 @@ export default function MasterSterilizerMachinePage() {
             <div className="relative flex-1">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 pointer-events-none" />
               <Input
-                placeholder="Cari nama / kode / lokasi mesin..."
+                placeholder={t("machine.searchPlaceholder")}
                 value={searchInput}
                 onChange={(e) => setSearchInput(e.target.value)}
                 className="pl-9"
               />
             </div>
             <Button type="submit" className="bg-[#075489] hover:bg-[#075489]/90 text-white shrink-0">
-              Cari
+              {t("common.search")}
             </Button>
           </form>
         </div>
 
         {loading ? (
-          <div className="py-16 text-center text-sm text-gray-400">Memuat data...</div>
+          <div className="py-16 text-center text-sm text-gray-400">{t("common.loading")}</div>
         ) : (
           <DataTable
             rowNumberOffset={(page - 1) * 20}
@@ -200,7 +204,7 @@ export default function MasterSterilizerMachinePage() {
             onEdit={openEdit}
             onDelete={(row) => setDeleteTarget(row)}
             isRowLoading={(row) => deletingId === row.id}
-            emptyMessage="Belum ada mesin sterilisator."
+            emptyMessage={t("machine.sterilizerEmpty")}
           />
         )}
 
@@ -223,45 +227,45 @@ export default function MasterSterilizerMachinePage() {
       <Modal
         open={modal !== null}
         onClose={() => setModal(null)}
-        title={modal === "tambah" ? "Tambah Mesin Sterilisator" : "Edit Mesin Sterilisator"}
+        title={modal === "tambah" ? t("machine.sterilizerModalAdd") : t("machine.sterilizerModalEdit")}
         size="sm"
         footer={
           <>
             <Button variant="outline" onClick={() => setModal(null)}>
-              Batal
+              {t("common.cancel")}
             </Button>
             <Button
               onClick={handleSave}
               disabled={saving || !form.name.trim()}
               className="bg-[#075489] hover:bg-[#075489]/90 text-white"
             >
-              {saving ? "Menyimpan..." : "Simpan"}
+              {saving ? t("common.saving") : t("common.save")}
             </Button>
           </>
         }
       >
         <div className="space-y-4">
           <div className="space-y-1.5">
-            <Label htmlFor="sm-name">Nama Mesin</Label>
+            <Label htmlFor="sm-name">{t("machine.colName")}</Label>
             <Input
               id="sm-name"
-              placeholder="Contoh: Autoclave 1"
+              placeholder={t("machine.sterilizerNamePlaceholder")}
               value={form.name}
               onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
             />
           </div>
           <div className="space-y-1.5">
-            <Label htmlFor="sm-location">Lokasi</Label>
+            <Label htmlFor="sm-location">{t("common.location")}</Label>
             <Input
               id="sm-location"
-              placeholder="Contoh: Ruang Sterilisasi"
+              placeholder={t("machine.sterilizerLocationPlaceholder")}
               value={form.location}
               onChange={(e) => setForm((f) => ({ ...f, location: e.target.value }))}
             />
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1.5">
-              <Label htmlFor="sm-temp">Suhu Standar (°C)</Label>
+              <Label htmlFor="sm-temp">{t("machine.stdTemp")}</Label>
               <Input
                 id="sm-temp"
                 type="number"
@@ -272,7 +276,7 @@ export default function MasterSterilizerMachinePage() {
               />
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="sm-dur">Durasi Standar (mnt)</Label>
+              <Label htmlFor="sm-dur">{t("machine.stdDuration")}</Label>
               <Input
                 id="sm-dur"
                 type="number"
@@ -284,21 +288,21 @@ export default function MasterSterilizerMachinePage() {
             </div>
           </div>
           <div className="space-y-1.5">
-            <Label htmlFor="sm-status">Status</Label>
+            <Label htmlFor="sm-status">{t("common.status")}</Label>
             <Select
               id="sm-status"
               value={form.status}
               onChange={(e) => setForm((f) => ({ ...f, status: e.target.value }))}
             >
-              <option value="aktif">Aktif</option>
-              <option value="nonaktif">Nonaktif</option>
+              <option value="aktif">{t("common.active")}</option>
+              <option value="nonaktif">{t("common.inactive")}</option>
             </Select>
           </div>
           <div className="space-y-1.5">
-            <Label htmlFor="sm-note">Keterangan</Label>
+            <Label htmlFor="sm-note">{t("common.description")}</Label>
             <Textarea
               id="sm-note"
-              placeholder="Opsional"
+              placeholder={t("common.optionalPlaceholder")}
               value={form.note}
               onChange={(e) => setForm((f) => ({ ...f, note: e.target.value }))}
             />

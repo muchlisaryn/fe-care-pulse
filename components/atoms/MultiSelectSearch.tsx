@@ -4,6 +4,7 @@ import { useState, useRef, useEffect } from "react"
 import { createPortal } from "react-dom"
 import { Loader2, X } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { useT } from "@/lib/i18n"
 
 export type MultiSelectSearchOption = {
   value: string
@@ -52,18 +53,25 @@ export function MultiSelectSearch({
   options,
   value,
   onChange,
-  placeholder = "-- Pilih --",
-  searchPlaceholder = "Cari...",
+  placeholder,
+  searchPlaceholder,
   max,
   disabled = false,
   error = false,
   loading = false,
   className,
-  loadingText = "Memuat opsi...",
-  emptyText = "Tidak ditemukan.",
-  noOptionsText = "Tidak ada pilihan lain.",
-  removeText = "Hapus",
+  loadingText,
+  emptyText,
+  noOptionsText,
+  removeText,
 }: MultiSelectSearchProps) {
+  const t = useT()
+  const placeholderText = placeholder ?? t("common.selectPlaceholder")
+  const searchText = searchPlaceholder ?? t("common.searchPlaceholder")
+  const loadingLabel = loadingText ?? t("common.loadingOptions")
+  const emptyLabel = emptyText ?? t("common.notFound")
+  const noOptionsLabel = noOptionsText ?? t("common.noOtherOptions")
+  const removeLabel = removeText ?? t("common.remove")
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState("")
   const [pos, setPos] = useState<DropdownPos | null>(null)
@@ -172,7 +180,7 @@ export function MultiSelectSearch({
             type="text"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder={searchPlaceholder}
+            placeholder={searchText}
             className="w-full rounded-md border border-gray-200 px-3 py-1.5 text-sm outline-none focus:border-[#075489] focus:ring-1 focus:ring-[#075489]/20 placeholder:text-gray-400"
           />
         </div>
@@ -180,11 +188,11 @@ export function MultiSelectSearch({
           {loading ? (
             <li className="flex items-center justify-center gap-2 px-3 py-4 text-sm text-gray-400">
               <Loader2 className="h-4 w-4 animate-spin" />
-              {loadingText}
+              {loadingLabel}
             </li>
           ) : filtered.length === 0 ? (
             <li className="px-3 py-2 text-sm text-gray-400 text-center">
-              {available.length === 0 ? noOptionsText : emptyText}
+              {available.length === 0 ? noOptionsLabel : emptyLabel}
             </li>
           ) : (
             filtered.map((option) => (
@@ -220,7 +228,7 @@ export function MultiSelectSearch({
                 type="button"
                 disabled={disabled}
                 onClick={() => onChange(value.filter((v) => v !== option.value))}
-                aria-label={`${removeText} ${option.label}`}
+                aria-label={`${removeLabel} ${option.label}`}
                 className="grid h-7 w-7 shrink-0 place-items-center rounded-md text-[#075489] transition-colors hover:bg-[#075489]/10 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 <X className="h-4 w-4" />
@@ -248,7 +256,7 @@ export function MultiSelectSearch({
           )}
         >
           <span className="truncate text-gray-400">
-            {loading ? loadingText : placeholder}
+            {loading ? loadingLabel : placeholderText}
           </span>
           {loading ? (
             <Loader2 className="h-4 w-4 shrink-0 animate-spin text-gray-400" />

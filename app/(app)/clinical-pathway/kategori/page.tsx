@@ -20,6 +20,7 @@ import {
   type CategoriClinicalPathway,
 } from "@/lib/store/slices/categoriClinicalPathwaySlice"
 import api from "@/lib/axios"
+import { useT } from "@/lib/i18n"
 
 const emptyForm = { urutan: "", label: "" }
 
@@ -28,6 +29,7 @@ export default function CategoriClinicalPathwayPage() {
   const { items, totalItems, totalPages, page, search, loading, loaded, dirty } =
     useAppSelector((s) => s.categoriCP)
 
+  const t = useT()
   const [searchInput, setSearchInput] = useState(search)
   const [modal, setModal] = useState<"tambah" | "edit" | null>(null)
   const [form, setForm] = useState(emptyForm)
@@ -63,7 +65,7 @@ export default function CategoriClinicalPathwayPage() {
 
   async function handleSave() {
     if (!form.urutan.trim() || !form.label.trim()) {
-      setFormError("Urutan dan label wajib diisi.")
+      setFormError(t("cpCategory.errRequired"))
       return
     }
     setSaving(true)
@@ -82,7 +84,7 @@ export default function CategoriClinicalPathwayPage() {
       setFormError(
         x.response?.data?.errors?.sort_order?.[0] ??
           x.response?.data?.message ??
-          "Gagal menyimpan. Pastikan urutan belum dipakai.",
+          t("cpCategory.errSave"),
       )
     } finally {
       setSaving(false)
@@ -103,7 +105,7 @@ export default function CategoriClinicalPathwayPage() {
 
   const columns: Column<CategoriClinicalPathway>[] = [
     {
-      header: "Urutan",
+      header: t("cpCategory.colOrder"),
       cell: (row) => (
         <span className="font-mono text-xs font-semibold text-[#075489] bg-[#075489]/8 px-2 py-1 rounded">
           {row.sort_order}
@@ -112,7 +114,7 @@ export default function CategoriClinicalPathwayPage() {
       className: "w-24",
     },
     {
-      header: "Label",
+      header: t("cpCategory.colLabel"),
       cell: (row) => <span className="font-medium text-gray-900">{row.label}</span>,
     },
   ]
@@ -120,9 +122,9 @@ export default function CategoriClinicalPathwayPage() {
   return (
     <div className="space-y-6">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <PageHeader title="Kategori Clinical Pathway" subtitle="Kelola kategori template clinical pathway" />
+        <PageHeader title={t("cpCategory.title")} subtitle={t("cpCategory.subtitle")} />
         <Button onClick={openTambah} className="bg-[#075489] hover:bg-[#075489]/90 text-white">
-          + Tambah Kategori
+          {t("cpCategory.addCategory")}
         </Button>
       </div>
 
@@ -132,20 +134,20 @@ export default function CategoriClinicalPathwayPage() {
             <div className="relative flex-1">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 pointer-events-none" />
               <Input
-                placeholder="Cari label atau urutan..."
+                placeholder={t("cpCategory.searchPlaceholder")}
                 value={searchInput}
                 onChange={(e) => setSearchInput(e.target.value)}
                 className="pl-9"
               />
             </div>
             <Button type="submit" className="bg-[#075489] hover:bg-[#075489]/90 text-white shrink-0">
-              Cari
+              {t("common.search")}
             </Button>
           </form>
         </div>
 
         {loading ? (
-          <div className="py-16 text-center text-sm text-gray-400">Memuat data...</div>
+          <div className="py-16 text-center text-sm text-gray-400">{t("common.loading")}</div>
         ) : (
           <DataTable
             columns={columns}
@@ -153,7 +155,7 @@ export default function CategoriClinicalPathwayPage() {
             onEdit={openEdit}
             onDelete={(row) => setDeleteTarget(row)}
             isRowLoading={(row) => deletingId === row.id}
-            emptyMessage="Belum ada kategori."
+            emptyMessage={t("cpCategory.empty")}
             hideRowNumber
           />
         )}
@@ -177,19 +179,19 @@ export default function CategoriClinicalPathwayPage() {
       <Modal
         open={modal !== null}
         onClose={() => setModal(null)}
-        title={modal === "tambah" ? "Tambah Kategori" : "Edit Kategori"}
+        title={modal === "tambah" ? t("cpCategory.modalAdd") : t("cpCategory.modalEdit")}
         size="sm"
         footer={
           <>
             <Button variant="outline" onClick={() => setModal(null)}>
-              Batal
+              {t("common.cancel")}
             </Button>
             <Button
               onClick={handleSave}
               disabled={saving}
               className="bg-[#075489] hover:bg-[#075489]/90 text-white"
             >
-              {saving ? "Menyimpan..." : "Simpan"}
+              {saving ? t("common.saving") : t("common.save")}
             </Button>
           </>
         }
@@ -199,22 +201,22 @@ export default function CategoriClinicalPathwayPage() {
             <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600">{formError}</p>
           )}
           <div className="space-y-1.5">
-            <Label htmlFor="cp-urutan">Urutan</Label>
+            <Label htmlFor="cp-urutan">{t("cpCategory.colOrder")}</Label>
             <Input
               id="cp-urutan"
               type="number"
               min={1}
-              placeholder="Contoh: 1"
+              placeholder={t("cpCategory.orderPlaceholder")}
               value={form.urutan}
               onChange={(e) => setForm((f) => ({ ...f, urutan: e.target.value }))}
             />
-            <p className="text-xs text-gray-400">Urutan harus unik (tidak boleh sama).</p>
+            <p className="text-xs text-gray-400">{t("cpCategory.orderHint")}</p>
           </div>
           <div className="space-y-1.5">
-            <Label htmlFor="cp-label">Label</Label>
+            <Label htmlFor="cp-label">{t("cpCategory.colLabel")}</Label>
             <Input
               id="cp-label"
-              placeholder="Contoh: Anamnesis"
+              placeholder={t("cpCategory.labelPlaceholder")}
               value={form.label}
               onChange={(e) => setForm((f) => ({ ...f, label: e.target.value }))}
             />

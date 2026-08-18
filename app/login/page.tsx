@@ -10,11 +10,13 @@ import { useAppDispatch } from "@/lib/store/hooks"
 import { setCredentials } from "@/lib/store/slices/authSlice"
 import { saveAuth } from "@/lib/auth"
 import api from "@/lib/axios"
+import { useT } from "@/lib/i18n"
 
 function LoginForm() {
   const dispatch = useAppDispatch()
   const router = useRouter()
   const searchParams = useSearchParams()
+  const t = useT()
 
   const [username, setUsername] = useState("")
   const [password, setPassword] = useState("")
@@ -35,7 +37,7 @@ function LoginForm() {
     const pass =
       password || (form.elements.namedItem("password") as HTMLInputElement | null)?.value || ""
     if (!uname || !pass) {
-      setError("No Pegawai dan kata sandi wajib diisi.")
+      setError(t("login.errRequired"))
       return
     }
     setError("")
@@ -50,7 +52,7 @@ function LoginForm() {
     } catch (err: unknown) {
       const msg =
         (err as { response?: { data?: { message?: string } } })?.response?.data?.message
-        ?? "Terjadi kesalahan. Silakan coba lagi."
+        ?? t("login.errGeneric")
       setError(msg)
     } finally {
       setLoading(false)
@@ -62,9 +64,9 @@ function LoginForm() {
       <div className="w-full max-w-sm">
         <div className="mb-8 flex flex-col items-center">
           <Logo width={140} height={48} className="mb-6" />
-          <h2 className="text-2xl font-bold text-gray-900">Selamat Datang</h2>
+          <h2 className="text-2xl font-bold text-gray-900">{t("login.welcome")}</h2>
           <p className="mt-1 text-sm text-gray-500">
-            Masuk ke akun Anda untuk melanjutkan
+            {t("login.subtitle")}
           </p>
         </div>
 
@@ -78,9 +80,9 @@ function LoginForm() {
           <FormField
             id="username"
             name="username"
-            label="No Pegawai"
+            label={t("login.employeeNo")}
             type="text"
-            placeholder="Masukkan nomor pegawai"
+            placeholder={t("login.employeeNoPlaceholder")}
             autoComplete="username"
             value={username}
             onChange={(e) => setUsername(e.target.value)}
@@ -90,7 +92,7 @@ function LoginForm() {
           <FormField
             id="password"
             name="password"
-            label="Kata Sandi"
+            label={t("login.password")}
             type={showPassword ? "text" : "password"}
             placeholder="••••••••"
             autoComplete="current-password"
@@ -102,7 +104,7 @@ function LoginForm() {
                 type="button"
                 onClick={() => setShowPassword((v) => !v)}
                 disabled={loading}
-                aria-label={showPassword ? "Sembunyikan kata sandi" : "Tampilkan kata sandi"}
+                aria-label={showPassword ? t("login.hidePassword") : t("login.showPassword")}
                 className="flex h-7 w-7 items-center justify-center rounded text-gray-400 hover:text-gray-600 transition-colors disabled:opacity-50"
               >
                 {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
@@ -115,18 +117,18 @@ function LoginForm() {
             disabled={loading}
             className="w-full h-11 bg-[#075489] hover:bg-[#075489]/90 text-white rounded-lg font-medium text-sm transition-colors disabled:opacity-60"
           >
-            {loading ? "Masuk..." : "Masuk"}
+            {loading ? t("login.signingIn") : t("login.signIn")}
           </Button>
         </form>
 
         <p className="mt-6 text-center text-xs text-gray-400">
-          Dengan masuk, Anda menyetujui{" "}
+          {t("login.termsPrefix")}{" "}
           <a href="#" className="text-[#075489] hover:underline">
-            Syarat & Ketentuan
+            {t("login.terms")}
           </a>{" "}
-          dan{" "}
+          {t("login.and")}{" "}
           <a href="#" className="text-[#075489] hover:underline">
-            Kebijakan Privasi
+            {t("login.privacy")}
           </a>
         </p>
       </div>

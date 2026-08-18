@@ -6,6 +6,7 @@ import { usePathname } from "next/navigation"
 import { Printer, Settings, KeyRound, Circle, type LucideIcon } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useAppSelector } from "@/lib/store/hooks"
+import { useLanguage } from "@/lib/i18n"
 
 // Ikon untuk item sub-nav (dari kolom `icon` menu). Fallback: lingkaran kecil.
 const ICON_MAP: Record<string, LucideIcon> = {
@@ -23,6 +24,7 @@ const FALLBACK_ITEMS = [{ name: "Master Printer", url: "/pengaturan/master-print
 export default function PengaturanLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname()
   const menus = useAppSelector((s) => s.auth.menus)
+  const { t, tn } = useLanguage()
 
   // Sidebar kedua dibangun dari ANAK menu "Pengaturan" (/pengaturan) di master —
   // jadi menambah/menghapus sub-halaman cukup lewat Master Menu (terintegrasi).
@@ -46,7 +48,7 @@ export default function PengaturanLayout({ children }: { children: React.ReactNo
         <div className="lg:sticky lg:top-2">
           <p className="mb-2 flex items-center gap-2 px-3 text-[11px] font-bold uppercase tracking-widest text-gray-400">
             <Settings className="h-3.5 w-3.5" />
-            Pengaturan
+            {t("settings.title")}
           </p>
           <nav className="flex flex-col gap-1">
             {items.map((item) => {
@@ -64,7 +66,7 @@ export default function PengaturanLayout({ children }: { children: React.ReactNo
                   )}
                 >
                   <Icon className="h-5 w-5 shrink-0" />
-                  <span>{item.name}</span>
+                  <span>{tn(item.name)}</span>
                 </Link>
               )
             })}

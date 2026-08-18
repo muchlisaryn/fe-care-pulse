@@ -921,7 +921,6 @@ function ProduksiCssdPage() {
                 totalItems={activeCount}
                 itemsPerPage={ITEMS_PER_PAGE}
                 onPageChange={setPage}
-                labels={{ showing: t("common.showing"), of: t("common.of"), items: t("common.items") }}
               />
             </>
           )}

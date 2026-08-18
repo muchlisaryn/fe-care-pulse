@@ -28,10 +28,12 @@ import {
   type PatientGroup,
 } from "@/lib/orderRequest"
 import api from "@/lib/axios"
+import { useT } from "@/lib/i18n"
 
 export default function TambahOrderInstrumenPage() {
   const router = useRouter()
   const dispatch = useAppDispatch()
+  const t = useT()
 
   const rooms = useAppSelector((s) => s.rooms.options)
   // Pilihan ruangan di-cache di Redux: `optionsLoaded` baru true setelah
@@ -209,9 +211,7 @@ export default function TambahOrderInstrumenPage() {
   async function handleSubmit() {
     if (!canSubmit) {
       setFormError(
-        needPatient
-          ? "Complete the identity & at least one request for every patient, plus all required fields (marked *)."
-          : "Complete all required fields (marked *) and add at least one request.",
+        needPatient ? t("orderCreate.errRequiredPatient") : t("orderCreate.errRequired"),
       )
       return
     }
@@ -220,14 +220,14 @@ export default function TambahOrderInstrumenPage() {
       p.requests.some((r) => !/^\d+$/.test(r.quantity) || Number(r.quantity) < 1),
     )
     if (invalid) {
-      setFormError("Quantity on every request must be at least 1.")
+      setFormError(t("orderCreate.errQty"))
       return
     }
     // Satu pasien = satu order: No. RM tidak boleh dobel antar grup.
     if (needPatient) {
       const rms = patients.map((p) => p.medicalRecordNo.trim())
       if (new Set(rms).size !== rms.length) {
-        setFormError("Medical record numbers must be unique per patient — merge the requests into one patient.")
+        setFormError(t("orderCreate.errDuplicateMr"))
         return
       }
     }
@@ -245,7 +245,12 @@ export default function TambahOrderInstrumenPage() {
     if (over) {
       const avail = sterileAvailFor(over.type, over.refId)
       setFormError(
-        `"${over.name}" exceeds sterile stock (max ${avail}${over.type === "paket" ? " sets" : ""}, requested ${over.qty}).`,
+        t("orderCreate.errOverStock", {
+          name: over.name,
+          max: avail,
+          unit: over.type === "paket" ? t("orderCreate.setsSuffix") : "",
+          qty: over.qty,
+        }),
       )
       return
     }
@@ -287,15 +292,15 @@ export default function TambahOrderInstrumenPage() {
       // Modal "berhasil" muncul di halaman daftar setelah redirect.
       setOrderFlash(
         patients.length > 1
-          ? `${patients.length} instrument orders were created.`
-          : "Instrument order was created.",
+          ? t("orderCreate.createdMany", { n: patients.length })
+          : t("orderCreate.createdOne"),
       )
       router.push("/cssd/order/instrumen")
     } catch (err) {
       // Server memvalidasi ulang stok steril saat menyimpan (422) — stok bisa
       // sudah diambil order lain sejak halaman ini dimuat. Tampilkan alasannya
       // agar peminjam tahu harus memuat ulang, bukan gagal diam-diam.
-      const message = apiErrorMessage(err, "Failed to save the order.")
+      const message = apiErrorMessage(err, t("orderCreate.errSave"))
       setFormError(message)
       setSaveError(message)
     } finally {
@@ -306,8 +311,8 @@ export default function TambahOrderInstrumenPage() {
   return (
     <div className="space-y-6">
       <PageHeader
-        title="New Instrument Order"
-        subtitle="Create a CSSD instrument borrowing order — several patients at once is supported"
+        title={t("orderCreate.title")}
+        subtitle={t("orderCreate.subtitle")}
       />
 
       {/* Data peminjaman — SATU kotak berisi peminjam, jadwal & catatan. Ketiganya
@@ -315,14 +320,14 @@ export default function TambahOrderInstrumenPage() {
           menjadi beberapa kartu. */}
       <Card className="space-y-4">
         <FormSectionHeader
-          title="Borrowing Details"
-          description="Borrower, room, schedule & note are recorded on this order"
+          title={t("orderCreate.sectionTitle")}
+          description={t("orderCreate.sectionDesc")}
         />
 
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <div className="space-y-1.5">
             <Label>
-              Borrowed By <span className="text-red-500">*</span>
+              {t("orderCreate.borrowedBy")} <span className="text-red-500">*</span>
             </Label>
             <SelectSearch
               options={userOptions}
@@ -330,16 +335,14 @@ export default function TambahOrderInstrumenPage() {
               onChange={setBorrowedBy}
               loading={userLoading}
               disabled={userLoading}
-              placeholder="-- Select Borrower --"
-              searchPlaceholder="Search borrower name..."
-              loadingText="Loading options..."
-              emptyText="Not found."
+              placeholder={t("orderCreate.selectBorrower")}
+              searchPlaceholder={t("orderCreate.searchBorrower")}
             />
           </div>
 
           <div className="space-y-1.5">
             <Label>
-              Room / Unit <span className="text-red-500">*</span>
+              {t("orderCreate.roomUnit")} <span className="text-red-500">*</span>
             </Label>
             <SelectSearch
               options={roomOptions}
@@ -348,10 +351,8 @@ export default function TambahOrderInstrumenPage() {
               loading={roomLoading}
               // Terkunci setelah identitas pasien diisi — lihat `roomLocked`.
               disabled={roomLoading || roomLocked}
-              placeholder="-- Select Room --"
-              searchPlaceholder="Search room..."
-              loadingText="Loading options..."
-              emptyText="Not found."
+              placeholder={t("orderCreate.selectRoom")}
+              searchPlaceholder={t("orderCreate.searchRoom")}
             />
           </div>
         </div>
@@ -360,7 +361,7 @@ export default function TambahOrderInstrumenPage() {
         <div className="grid grid-cols-1 gap-4 border-t border-gray-100 pt-4 sm:grid-cols-3">
           <div className="space-y-1.5">
             <Label htmlFor="tgl-pinjam">
-              Borrow Date <span className="text-red-500">*</span>
+              {t("orderCreate.borrowDate")} <span className="text-red-500">*</span>
             </Label>
             <Input
               id="tgl-pinjam"
@@ -371,7 +372,7 @@ export default function TambahOrderInstrumenPage() {
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="jam-pinjam">
-              Borrow Time <span className="text-red-500">*</span>
+              {t("orderCreate.borrowTime")} <span className="text-red-500">*</span>
             </Label>
             <Input
               id="jam-pinjam"
@@ -381,7 +382,7 @@ export default function TambahOrderInstrumenPage() {
             />
           </div>
           <div className="space-y-1.5">
-            <Label htmlFor="tgl-kembali">Planned Return</Label>
+            <Label htmlFor="tgl-kembali">{t("orderCreate.plannedReturn")}</Label>
             <Input
               id="tgl-kembali"
               type="date"
@@ -393,11 +394,11 @@ export default function TambahOrderInstrumenPage() {
 
         {/* Catatan (opsional) */}
         <div className="space-y-1.5 border-t border-gray-100 pt-4">
-          <Label htmlFor="note">Note</Label>
+          <Label htmlFor="note">{t("common.note")}</Label>
           <Textarea
             id="note"
             rows={2}
-            placeholder="Additional note (optional)..."
+            placeholder={t("orderCreate.notePlaceholder")}
             value={note}
             onChange={(e) => setNote(e.target.value)}
           />
@@ -411,9 +412,9 @@ export default function TambahOrderInstrumenPage() {
       {roomId && (
       <div className="space-y-3">
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <h2 className="text-sm font-semibold text-gray-900">Requests</h2>
+          <h2 className="text-sm font-semibold text-gray-900">{t("orderCreate.requests")}</h2>
           <p className="text-xs text-gray-500">
-            {filledPatients.length} orders · {totalQty} units
+            {t("orderCreate.summary", { orders: filledPatients.length, units: totalQty })}
           </p>
         </div>
 
@@ -445,7 +446,7 @@ export default function TambahOrderInstrumenPage() {
             className="w-full justify-center bg-[#075489] text-white hover:bg-[#075489]/90"
           >
             <UserPlus className="h-4 w-4" />
-            Add Patient
+            {t("orderCreate.addPatient")}
           </Button>
         )}
       </div>
@@ -456,7 +457,7 @@ export default function TambahOrderInstrumenPage() {
           <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600 sm:mr-auto">{formError}</p>
         )}
         <Button variant="outline" type="button" onClick={() => router.push("/cssd/order/instrumen")}>
-          Cancel
+          {t("common.cancel")}
         </Button>
         <Button
           type="button"
@@ -464,7 +465,11 @@ export default function TambahOrderInstrumenPage() {
           disabled={!canSubmit}
           className="bg-[#075489] text-white hover:bg-[#075489]/90"
         >
-          {saving ? "Saving..." : patients.length > 1 ? `Save ${patients.length} Orders` : "Save Order"}
+          {saving
+            ? t("common.saving")
+            : patients.length > 1
+              ? t("orderCreate.saveOrders", { n: patients.length })
+              : t("orderCreate.saveOrder")}
         </Button>
       </div>
 
@@ -473,9 +478,9 @@ export default function TambahOrderInstrumenPage() {
         open={saveError !== null}
         onClose={() => setSaveError(null)}
         variant="error"
-        title="Order Failed to Save"
+        title={t("orderCreate.saveFailedTitle")}
         description={saveError}
-        actionLabel="Close"
+        actionLabel={t("common.close")}
       />
     </div>
   )

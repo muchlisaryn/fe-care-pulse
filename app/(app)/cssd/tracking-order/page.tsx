@@ -49,6 +49,7 @@ import { DistributeReady } from "@/components/molecules/DistributeReady"
 import { SelectSearch } from "@/components/atoms/SelectSearch"
 import { useUserOptions } from "@/lib/useUserOptions"
 import api from "@/lib/axios"
+import { useLanguage, useT, localeOf, type Lang } from "@/lib/i18n"
 import { getEcho } from "@/lib/echo"
 
 // Tab kategori order pada halaman monitoring (tahapan alur CSSD).
@@ -66,14 +67,17 @@ function parseTab(value: string | null): MonitoringTab {
   return MONITORING_TABS.includes(value as MonitoringTab) ? (value as MonitoringTab) : MONITORING_TABS[0]
 }
 
+/** Penerjemah dari useT — dioper ke helper di luar komponen. */
+type Translate = (key: string, vars?: Record<string, string | number>) => string
+
 // Tab "Order Masuk": daftarnya dimuat sekaligus lalu dipotong di klien.
 const ITEMS_PER_PAGE = 20
 
 // Tipe data monitoring (MonitoredRoom, IncomingOrder, ReturnedOrder, dll.)
 // kini tinggal di lib/store/slices/monitoringSlice dan di-impor di atas.
 
-const incomingStatusLabel: Record<IncomingStatus, string> = {
-  diajukan: "Submitted",
+const incomingStatusLabelKey: Record<IncomingStatus, string> = {
+  diajukan: "orderInstrument.statusSubmitted",
 }
 const incomingStatusVariant: Record<IncomingStatus, "warning" | "default"> = {
   diajukan: "warning",
@@ -175,11 +179,11 @@ function titleCodes(order: ReturnOrder) {
 // lengkap supaya jelas mana yang set paket & mana yang unit satuan.
 // `fallbackUnits` dipakai bila jumlah set belum tersedia (data monitoring lama)
 // agar kartu tidak tampil "0".
-function qtySummary(sets: number, units: number, fallbackUnits: number): string {
+function qtySummary(sets: number, units: number, fallbackUnits: number, t: Translate): string {
   const parts: string[] = []
-  if (sets > 0) parts.push(`${sets} package sets`)
-  if (units > 0) parts.push(`${units} single units`)
-  return parts.length > 0 ? parts.join(" · ") : `${fallbackUnits} units`
+  if (sets > 0) parts.push(t("tracking.packageSets", { n: sets }))
+  if (units > 0) parts.push(t("tracking.singleUnits", { n: units }))
+  return parts.length > 0 ? parts.join(" · ") : t("tracking.fallbackUnits", { n: fallbackUnits })
 }
 
 // Satu grup unit pada modal Pengembalian & Riwayat Pengembalian = satu BUNGKUS fisik.
@@ -191,10 +195,10 @@ type ReturnGroup = { key: string; name: string | null; barcodeNo: string | null;
 // terbaca langsung dari banyaknya grup, tak perlu ditulis lagi.
 // Nama paket/satuan tetap ikut jadi kunci agar unit tanpa label (data lama) tidak
 // tercampur antar jenis.
-function buildReturnGroups(items: ReturnUnit[]): ReturnGroup[] {
+function buildReturnGroups(items: ReturnUnit[], t: Translate): ReturnGroup[] {
   const map = new Map<string, ReturnGroup>()
   for (const u of items) {
-    const name = u.source === "paket" ? (u.package_name ?? "Package") : null
+    const name = u.source === "paket" ? (u.package_name ?? t("common.package")) : null
     const key = `${name ?? "__satuan__"}|${u.barcode_no ?? "__tanpa-label__"}`
     const g = map.get(key) ?? { key, name, barcodeNo: u.barcode_no, units: [] }
     g.units.push(u)
@@ -203,11 +207,11 @@ function buildReturnGroups(items: ReturnUnit[]): ReturnGroup[] {
   return [...map.values()]
 }
 
-function formatDate(value: string | null) {
+function formatDate(value: string | null, lang: Lang) {
   if (!value) return "—"
   const d = new Date(value)
   if (Number.isNaN(d.getTime())) return value
-  return d.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" })
+  return d.toLocaleDateString(localeOf(lang), { day: "2-digit", month: "short", year: "numeric" })
 }
 
 /**
@@ -220,7 +224,7 @@ function OrderMeta({
   medicalRecordNo,
   room,
   borrowDate,
-  returnLabel = "Return",
+  returnLabelKey = "orderCreate.plannedReturn",
   returnDate,
   showRoom = true,
 }: {
@@ -228,18 +232,34 @@ function OrderMeta({
   medicalRecordNo: string | null
   room: string | null
   borrowDate: string | null
-  returnLabel?: string
+  /** Kunci kamus untuk label tanggal kembali — rencana kembali atau tanggal kembalinya. */
+  returnLabelKey?: string
   returnDate: string | null
   showRoom?: boolean
 }) {
+  const { t, lang } = useLanguage()
   return (
     <div className="mt-1 flex flex-wrap gap-x-4 gap-y-0.5 text-xs text-gray-500">
-      {patientName && <span className="font-medium text-gray-700">Patient: {patientName}</span>}
-      {medicalRecordNo && <span className="font-mono">MR No.: {medicalRecordNo}</span>}
-      {showRoom && <span>Room: {room ?? "—"}</span>}
-      <span>Borrowed: {formatDate(borrowDate)}</span>
+      {patientName && (
+        <span className="font-medium text-gray-700">
+          {t("tracking.metaPatient")} {patientName}
+        </span>
+      )}
+      {medicalRecordNo && (
+        <span className="font-mono">
+          {t("tracking.metaMrNo")} {medicalRecordNo}
+        </span>
+      )}
+      {showRoom && (
+        <span>
+          {t("tracking.metaRoom")} {room ?? "—"}
+        </span>
+      )}
       <span>
-        {returnLabel}: {formatDate(returnDate)}
+        {t("tracking.metaBorrowed")} {formatDate(borrowDate, lang)}
+      </span>
+      <span>
+        {t(returnLabelKey)}: {formatDate(returnDate, lang)}
       </span>
     </div>
   )
@@ -278,11 +298,13 @@ type LabelGroup = {
 // Ratakan baris monitoring (per katalog instrumen) menjadi grup per nomor label
 // kemasan — dasar tampilan rincian saat kartu order dibuka. Unit tanpa label (data
 // lama sebelum tahap packaging) berdiri sebagai grup sendiri agar tidak tercampur.
-function buildLabelGroups(rows: MonitoredInstrument[]): LabelGroup[] {
+function buildLabelGroups(rows: MonitoredInstrument[], t: Translate): LabelGroup[] {
   const map = new Map<string, LabelGroup>()
   for (const r of rows) {
     const name =
-      r.source === "paket" ? (r.package_name ?? "Package") : (r.instrument?.name ?? "Instrument")
+      r.source === "paket"
+        ? (r.package_name ?? t("common.package"))
+        : (r.instrument?.name ?? t("common.instrument"))
     for (const u of r.units) {
       const label = u.barcode_no ?? `__tanpa-label#${u.instrument_stock_id ?? u.code}`
       const key = `${r.source}|${name}|${label}`
@@ -338,6 +360,7 @@ type CombinedRow =
 // modal per-ruangan, ruangannya sudah pasti).
 function buildOrderGroups(
   items: (MonitoredInstrument & { room?: string })[],
+  t: Translate,
   roomFallback: string | null = null,
 ): OrderGroup[] {
   const map = new Map<string, (MonitoredInstrument & { room?: string })[]>()
@@ -352,7 +375,7 @@ function buildOrderGroups(
     const satuan: MonitoredInstrument[] = []
     for (const r of rows) {
       if (r.source === "paket") {
-        const name = r.package_name ?? "Package"
+        const name = r.package_name ?? t("common.package")
         const a = paket.get(name) ?? []
         a.push(r)
         paket.set(name, a)
@@ -389,6 +412,7 @@ function buildOrderGroups(
 
 function MonitoringCssd() {
   const dispatch = useAppDispatch()
+  const { t, lang } = useLanguage()
   // Data monitoring disimpan di Redux global. Hanya di-fetch saat store masih
   // kosong (mis. halaman di-refresh / dibuka pertama kali), bukan tiap kali
   // berpindah antar halaman.
@@ -607,10 +631,10 @@ function MonitoringCssd() {
   const conditions = useAppSelector((s) => s.conditions.items)
   // Tombol Kondisi Masuk pengembalian: B/KB/H/R → nama kondisi di master.
   const RETURN_CONDITIONS = [
-    { code: "B", name: "Baik", label: "Good" },
-    { code: "KB", name: "Kurang Baik", label: "Fair" },
-    { code: "H", name: "Hilang", label: "Lost" },
-    { code: "R", name: "Rusak", label: "Damaged" },
+    { code: "B", name: "Baik", label: t("tracking.condGood") },
+    { code: "KB", name: "Kurang Baik", label: t("tracking.condFair") },
+    { code: "H", name: "Hilang", label: t("tracking.condLost") },
+    { code: "R", name: "Rusak", label: t("tracking.condDamaged") },
   ]
   const [returnOpen, setReturnOpen] = useState(false)
   const [lookupLoading, setLookupLoading] = useState(false)
@@ -658,7 +682,7 @@ function MonitoringCssd() {
       const order: ReturnOrder = res.data.data
       if (order.status !== "dipinjam") {
         setReturnOrder(null)
-        setReturnError(`Order ${order.code} has status "${order.status}", not a currently borrowed order.`)
+        setReturnError(t("tracking.errWrongStatus", { code: order.code, status: order.status }))
       } else {
         setReturnOrder(order)
         setReturnDate(order.return_actual_date?.slice(0, 10) || todayInput())
@@ -669,7 +693,7 @@ function MonitoringCssd() {
     } catch (err) {
       const x = err as { response?: { data?: { message?: string } } }
       setReturnOrder(null)
-      setReturnError(x.response?.data?.message ?? "Order not found.")
+      setReturnError(x.response?.data?.message ?? t("tracking.errOrderNotFound"))
     } finally {
       setLookupLoading(false)
     }
@@ -689,13 +713,13 @@ function MonitoringCssd() {
     if (!returnOrder || returnSaving) return
     const pending = returnOrder.items.filter((u) => !u.is_returned)
     if (pending.length === 0) {
-      setReturnError("There is no unit left to return.")
+      setReturnError(t("tracking.errNoUnitLeft"))
       return
     }
     // Hanya unit yang sudah dipilih kondisi masuknya yang dikembalikan kali ini.
     const ready = pending.filter((u) => returnCondById[u.id])
     if (ready.length === 0) {
-      setReturnError("Set the incoming condition for at least one unit to return.")
+      setReturnError(t("tracking.errNoCondition"))
       return
     }
     setReturnSaving(true)
@@ -717,7 +741,7 @@ function MonitoringCssd() {
       dispatch(invalidateOrders())
     } catch (err) {
       const x = err as { response?: { data?: { message?: string } } }
-      setReturnError(x.response?.data?.message ?? "Failed to save the return.")
+      setReturnError(x.response?.data?.message ?? t("tracking.errSaveReturn"))
       setConfirmReturnOpen(false)
     } finally {
       setReturnSaving(false)
@@ -780,7 +804,7 @@ function MonitoringCssd() {
       dispatch(fetchIncomingCount()) // perbarui badge notifikasi sidebar seketika
     } catch (err) {
       const e = err as { response?: { data?: { message?: string } } }
-      setProcessError(e.response?.data?.message ?? "Failed to accept the order.")
+      setProcessError(e.response?.data?.message ?? t("tracking.errAccept"))
     } finally {
       setProcessing(false)
     }
@@ -985,12 +1009,13 @@ function MonitoringCssd() {
         if (row.kind === "returned") return [{ kind: "returned", order: row.order }]
         const group = buildOrderGroups(
           row.instruments.map((i) => ({ ...i, room: i.room ?? undefined })),
+          t,
         )[0]
         // Order yang seluruh unitnya tidak punya master instrumen tidak bisa
         // digambarkan sebagai kartu — dilewati, bukan dirender kosong.
         return group ? [{ kind: "borrowed", group }] : []
       }),
-    [tracking],
+    [tracking, t],
   )
 
   // Order siap distribusi (status digudang) — disaring kata kunci & rentang tanggal
@@ -1082,8 +1107,8 @@ function MonitoringCssd() {
                 (u.barcode_no ?? "").toLowerCase().includes(rq),
             ),
         )
-    return buildOrderGroups(items, detailRoom.name)
-  }, [detailRoom, roomDetailSearch])
+    return buildOrderGroups(items, t, detailRoom.name)
+  }, [detailRoom, roomDetailSearch, t])
 
   const toggle = (set: (fn: (prev: Set<string>) => Set<string>) => void) => (k: string) =>
     set((prev) => {
@@ -1112,17 +1137,17 @@ function MonitoringCssd() {
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Instrument Distribution Monitoring"
-        subtitle="Track instruments currently borrowed by each room"
+        title={t("tracking.title")}
+        subtitle={t("tracking.subtitle")}
       />
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {/* Ketiga angka dihitung di server (satu permintaan ringkasan), bukan dari
             daftar ruangan yang dimuat penuh lalu dijumlah di klien. */}
-        <StatCard title="Instruments Currently Borrowed" value={`${borrowedSummary.borrowed}`} icon={Scissors} />
-        <StatCard title="Active Orders" value={`${borrowedSummary.orders}`} icon={ClipboardList} />
+        <StatCard title={t("tracking.statBorrowed")} value={`${borrowedSummary.borrowed}`} icon={Scissors} />
+        <StatCard title={t("tracking.statOrders")} value={`${borrowedSummary.orders}`} icon={ClipboardList} />
         <StatCard
-          title="Overdue Instruments"
+          title={t("tracking.statOverdue")}
           value={`${borrowedSummary.overdue}`}
           icon={AlertTriangle}
           positive={false}
@@ -1130,13 +1155,13 @@ function MonitoringCssd() {
       </div>
 
       <div>
-        <h2 className="mb-3 text-sm font-semibold text-gray-700">Distribution by Room</h2>
+        <h2 className="mb-3 text-sm font-semibold text-gray-700">{t("tracking.byRoom")}</h2>
         {roomsSummaryLoading ? (
-          <div className="py-10 text-center text-sm text-gray-400">Loading data...</div>
+          <div className="py-10 text-center text-sm text-gray-400">{t("common.loading")}</div>
         ) : roomSummary.length === 0 ? (
           <Card>
             <p className="py-6 text-center text-sm text-gray-400">
-              No instrument is currently borrowed.
+              {t("tracking.noBorrowed")}
             </p>
           </Card>
         ) : (
@@ -1163,7 +1188,7 @@ function MonitoringCssd() {
                   }}
                   className="text-sm font-medium text-[#075489] hover:underline"
                 >
-                  Show all ({roomSummary.length} rooms)
+                  {t("tracking.showAllRooms", { n: roomSummary.length })}
                 </button>
               </div>
             )}
@@ -1174,17 +1199,17 @@ function MonitoringCssd() {
       <Card className="p-0">
         <div className="space-y-3 border-b border-gray-100 px-5 py-4">
           <div>
-            <h2 className="text-base font-semibold text-gray-900">Order List</h2>
+            <h2 className="text-base font-semibold text-gray-900">{t("tracking.orderList")}</h2>
             <p className="mt-0.5 text-xs text-gray-400">
-              Pick a tab: incoming orders, sterilization &amp; packing stage, or already distributed.
+              {t("tracking.orderListHint")}
             </p>
           </div>
           {/* Tab kategori order — gaya underline (seperti tab Google) */}
           <div className="flex gap-5 overflow-x-auto border-b border-gray-200 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
             {(
               [
-                { key: "masuk", label: "Incoming Orders", count: masukBadge },
-                { key: "distribusi", label: "Distribution & Tracking", count: distribusiBadge },
+                { key: "masuk", label: t("tracking.tabIncoming"), count: masukBadge },
+                { key: "distribusi", label: t("tracking.tabDistribution"), count: distribusiBadge },
               ] as { key: MonitoringTab; label: string; count: number }[]
             ).map((t) => {
               const active = activeTab === t.key
@@ -1222,7 +1247,7 @@ function MonitoringCssd() {
             className="flex flex-col gap-3 lg:flex-row lg:flex-wrap lg:items-end"
           >
             <div className="min-w-[220px] flex-1 space-y-1.5">
-              <Label htmlFor="monitoring-search">Search</Label>
+              <Label htmlFor="monitoring-search">{t("tracking.searchLabel")}</Label>
               <div className="relative">
               {listLoading || scanLoading ? (
                 <Loader2 className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 animate-spin text-[#075489] pointer-events-none" />
@@ -1233,10 +1258,10 @@ function MonitoringCssd() {
                 id="monitoring-search"
                 placeholder={
                   scanLoading
-                    ? "Searching the database..."
+                    ? t("tracking.searchingDb")
                     : scanArmed
-                      ? "Scan mode active — scan the transaction barcode..."
-                      : "Search borrower / invoice no. / label barcode..."
+                      ? t("tracking.scanActive")
+                      : t("tracking.searchPlaceholder")
                 }
                 value={searchInput}
                 onChange={(e) => setSearchInput(e.target.value)}
@@ -1252,9 +1277,7 @@ function MonitoringCssd() {
                 type="button"
                 onClick={toggleScan}
                 title={
-                  scanArmed
-                    ? "Turn off scan mode (back to manual search)"
-                    : "Enable transaction barcode scan mode"
+                  scanArmed ? t("tracking.scanOff") : t("tracking.scanOn")
                 }
                 aria-pressed={scanArmed}
                 className={
@@ -1273,7 +1296,7 @@ function MonitoringCssd() {
             {activeTab === "distribusi" && (
               <>
                 <div className="space-y-1.5">
-                  <Label htmlFor="tracking-date-from">From Date</Label>
+                  <Label htmlFor="tracking-date-from">{t("tracking.fromDate")}</Label>
                   <Input
                     id="tracking-date-from"
                     type="date"
@@ -1284,7 +1307,7 @@ function MonitoringCssd() {
                   />
                 </div>
                 <div className="space-y-1.5">
-                  <Label htmlFor="tracking-date-to">To Date</Label>
+                  <Label htmlFor="tracking-date-to">{t("tracking.toDate")}</Label>
                   <Input
                     id="tracking-date-to"
                     type="date"
@@ -1305,9 +1328,9 @@ function MonitoringCssd() {
                   variant="outline"
                   onClick={resetFilter}
                   className="shrink-0"
-                  title="Reset to the last 7 days"
+                  title={t("tracking.resetHint")}
                 >
-                  Reset
+                  {t("common.reset")}
                 </Button>
               )}
               <Button
@@ -1315,16 +1338,14 @@ function MonitoringCssd() {
                 disabled={scanArmed}
                 className="bg-[#075489] hover:bg-[#075489]/90 text-white shrink-0"
               >
-                Search
+                {t("common.search")}
               </Button>
             </div>
           </form>
 
           {scanArmed && (
             <p className="text-xs text-gray-400">
-              Scan mode is active: manual search is disabled. Scan a transaction barcode to open
-              Return (borrowed order) or History (already returned). Press Esc or click the scan icon
-              again to go back to manual search.
+              {t("tracking.scanHint")}
             </p>
           )}
 
@@ -1348,15 +1369,15 @@ function MonitoringCssd() {
         )}
 
         {listLoading ? (
-          <div className="py-16 text-center text-sm text-gray-400">Loading data...</div>
+          <div className="py-16 text-center text-sm text-gray-400">{t("common.loading")}</div>
         ) : activeCount === 0 &&
           !(activeTab === "distribusi" && readyDistributeFiltered.length > 0) ? (
           <div className="py-16 text-center text-sm text-gray-400">
             {searchQuery
-              ? "No order matches the search."
+              ? t("tracking.noMatch")
               : activeTab === "masuk"
-                ? "No incoming order yet."
-                : "No order in this date range."}
+                ? t("tracking.noIncoming")
+                : t("tracking.noInRange")}
           </div>
         ) : (
           <div className="space-y-2 p-4">
@@ -1405,7 +1426,6 @@ function MonitoringCssd() {
           totalItems={activeCount}
           itemsPerPage={perPage}
           onPageChange={setPage}
-          labels={{ showing: "Showing", of: "of", items: "items" }}
         />
       </Card>
 
@@ -1414,7 +1434,10 @@ function MonitoringCssd() {
       <Modal
         open={detailRoomId !== null}
         onClose={() => setDetailRoomId(null)}
-        title={`Borrowed Instruments — ${detailRoom?.name ?? roomSummary.find((r) => r.id === detailRoomId)?.ruangan ?? ""}`}
+        title={t("tracking.borrowedInRoom", {
+          room:
+            detailRoom?.name ?? roomSummary.find((r) => r.id === detailRoomId)?.ruangan ?? "",
+        })}
         size="lg"
         footer={
           <Button variant="outline" onClick={() => setDetailRoomId(null)}>
@@ -1423,17 +1446,17 @@ function MonitoringCssd() {
         }
       >
         {loading && !detailRoom ? (
-          <div className="py-10 text-center text-sm text-gray-400">Loading data...</div>
+          <div className="py-10 text-center text-sm text-gray-400">{t("common.loading")}</div>
         ) : !detailRoom || detailRoom.instruments.length === 0 ? (
           <div className="py-10 text-center text-sm text-gray-400">
-            No instrument is currently borrowed in this room.
+            {t("tracking.noBorrowedInRoom")}
           </div>
         ) : (
           <div className="space-y-3">
             <div className="relative">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 pointer-events-none" />
               <Input
-                placeholder="Search borrower, invoice no., label barcode, package, or instrument..."
+                placeholder={t("tracking.searchRoomDetail")}
                 value={roomDetailSearch}
                 onChange={(e) => setRoomDetailSearch(e.target.value)}
                 className="pl-9"
@@ -1441,7 +1464,7 @@ function MonitoringCssd() {
             </div>
             {roomOrderGroups.length === 0 ? (
               <div className="py-8 text-center text-sm text-gray-400">
-                No instrument matches the search.
+                {t("tracking.noInstrumentMatch")}
               </div>
             ) : (
               <OrderGroupList
@@ -1461,7 +1484,7 @@ function MonitoringCssd() {
       <Modal
         open={roomsModalOpen}
         onClose={() => setRoomsModalOpen(false)}
-        title="Distribution by Room"
+        title={t("tracking.byRoom")}
         size="lg"
         footer={
           <Button variant="outline" onClick={() => setRoomsModalOpen(false)}>
@@ -1473,7 +1496,7 @@ function MonitoringCssd() {
           <div className="relative">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 pointer-events-none" />
             <Input
-              placeholder="Search room..."
+              placeholder={t("tracking.searchRoom")}
               value={roomSearch}
               onChange={(e) => setRoomSearch(e.target.value)}
               className="pl-9"
@@ -1484,7 +1507,7 @@ function MonitoringCssd() {
             const filteredRooms = roomSummary.filter((r) => r.ruangan.toLowerCase().includes(rs))
             return filteredRooms.length === 0 ? (
               <div className="py-8 text-center text-sm text-gray-400">
-                No room matches the search.
+                {t("tracking.noRoomMatch")}
               </div>
             ) : (
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
@@ -1511,19 +1534,19 @@ function MonitoringCssd() {
       <Modal
         open={cancelTarget !== null}
         onClose={cancelling ? () => {} : () => setCancelTarget(null)}
-        title="Cancel Order"
+        title={t("tracking.cancelOrder")}
         size="sm"
         footer={
           <>
             <Button variant="outline" onClick={() => setCancelTarget(null)} disabled={cancelling}>
-              Back
+              {t("common.back")}
             </Button>
             <Button
               onClick={handleCancelOrder}
               disabled={cancelling}
               className="bg-red-600 hover:bg-red-700 text-white"
             >
-              {cancelling ? "Canceling..." : "Cancel Order"}
+              {cancelling ? t("tracking.canceling") : t("tracking.cancelOrder")}
             </Button>
           </>
         }
@@ -1533,10 +1556,11 @@ function MonitoringCssd() {
             <AlertTriangle className="h-5 w-5 text-red-600" />
           </div>
           <p className="pt-1.5 text-sm leading-relaxed text-gray-600">
-            Cancel order{" "}
+            {t("tracking.cancelBefore")}{" "}
             <span className="font-semibold text-gray-900">{cancelTarget?.code}</span>
-            {cancelTarget?.borrowed_by ? ` (${cancelTarget.borrowed_by})` : ""}? The order will be marked{" "}
-            <span className="font-medium">canceled</span> and removed from the incoming order list.
+            {cancelTarget?.borrowed_by ? ` (${cancelTarget.borrowed_by})` : ""}
+            {t("tracking.cancelAfter")} <span className="font-medium">{t("tracking.cancelWord")}</span>{" "}
+            {t("tracking.cancelTail")}
           </p>
         </div>
       </Modal>
@@ -1545,7 +1569,11 @@ function MonitoringCssd() {
       <Modal
         open={processTarget !== null}
         onClose={processing ? () => {} : () => setProcessTarget(null)}
-        title={processTarget ? `Accept Order — ${processTarget.code}` : "Accept Order"}
+        title={
+          processTarget
+            ? t("tracking.acceptOrderWith", { code: processTarget.code })
+            : t("tracking.acceptOrder")
+        }
         size="lg"
         footer={
           <div className="flex w-full flex-col items-stretch gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
@@ -1553,19 +1581,19 @@ function MonitoringCssd() {
               <p className="text-sm text-red-600">{processError}</p>
             ) : (
               <span className="text-xs text-gray-400">
-                Sterile units are allocated automatically (FEFO) & the order is ready to distribute.
+                {t("tracking.fefoHint")}
               </span>
             )}
             <div className="flex shrink-0 justify-end gap-2">
               <Button variant="outline" onClick={() => setProcessTarget(null)} disabled={processing}>
-                Cancel
+                {t("common.cancel")}
               </Button>
               <Button
                 onClick={handleProcess}
                 disabled={processing}
                 className="bg-[#4ba69d] hover:bg-[#4ba69d]/90 text-white"
               >
-                {processing ? "Processing..." : "Accept & Prepare Distribution"}
+                {processing ? t("tracking.processing") : t("tracking.acceptAndPrepare")}
               </Button>
             </div>
           </div>
@@ -1574,31 +1602,34 @@ function MonitoringCssd() {
         {processTarget && (
           <div className="space-y-5">
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-              <DetailField label="Borrowed By" value={processTarget.borrowed_by} />
-              <DetailField label="Room / Unit" value={processTarget.room?.name} />
-              <DetailField label="Borrow Date" value={formatDate(processTarget.order_date)} />
-              <DetailField label="Planned Return" value={formatDate(processTarget.return_plan_date)} />
+              <DetailField label={t("tracking.borrowedBy")} value={processTarget.borrowed_by} />
+              <DetailField label={t("tracking.roomUnit")} value={processTarget.room?.name} />
+              <DetailField label={t("tracking.borrowDate")} value={formatDate(processTarget.order_date, lang)} />
+              <DetailField
+                label={t("tracking.plannedReturn")}
+                value={formatDate(processTarget.return_plan_date, lang)}
+              />
               <div className="space-y-1">
-                <p className="text-xs font-semibold uppercase tracking-wide text-gray-400">Status</p>
+                <p className="text-xs font-semibold uppercase tracking-wide text-gray-400">{t("common.status")}</p>
                 <Badge variant={incomingStatusVariant[processTarget.status]}>
-                  {incomingStatusLabel[processTarget.status]}
+                  {t(incomingStatusLabelKey[processTarget.status])}
                 </Badge>
               </div>
             </div>
 
             {processTarget.note && (
               <div className="space-y-1">
-                <p className="text-xs font-semibold uppercase tracking-wide text-gray-400">Note</p>
+                <p className="text-xs font-semibold uppercase tracking-wide text-gray-400">{t("common.note")}</p>
                 <p className="text-sm text-gray-700">{processTarget.note}</p>
               </div>
             )}
 
             <div>
               <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-400">
-                Requested Items
+                {t("tracking.requestedItems")}
               </p>
               {processTarget.items.length === 0 ? (
-                <div className="py-6 text-center text-sm text-gray-400">No requested item.</div>
+                <div className="py-6 text-center text-sm text-gray-400">{t("tracking.noRequestedItem")}</div>
               ) : (
                 <div className="space-y-2">
                   {processTarget.items.map((it, idx) => (
@@ -1619,7 +1650,7 @@ function MonitoringCssd() {
           if (confirmReturnOpen || returnSaving) return
           setReturnOpen(false)
         }}
-        title="Instrument Return"
+        title={t("tracking.returnTitle")}
         size="lg"
         footer={(() => {
           // Unit yang siap dikembalikan kali ini = belum kembali & kondisi masuk terisi.
@@ -1631,15 +1662,15 @@ function MonitoringCssd() {
               {returnOrder && returnOrder.status !== "dikembalikan" ? (
                 <span className="text-xs text-gray-400">
                   {readyCount > 0
-                    ? `${readyCount} units ready to return. The rest can be returned later.`
-                    : "Set the incoming condition of the returned units, then save."}
+                    ? t("tracking.readyToReturn", { n: readyCount })
+                    : t("tracking.setConditionHint")}
                 </span>
               ) : (
                 <span />
               )}
               <div className="flex shrink-0 justify-end gap-2">
                 <Button variant="outline" onClick={() => setReturnOpen(false)}>
-                  Close
+                  {t("common.close")}
                 </Button>
                 {returnOrder && returnOrder.status !== "dikembalikan" && (
                   <Button
@@ -1647,7 +1678,7 @@ function MonitoringCssd() {
                     disabled={returnSaving || readyCount === 0}
                     className="bg-[#075489] hover:bg-[#075489]/90 text-white"
                   >
-                    {returnSaving ? "Saving..." : "Save Return"}
+                    {returnSaving ? t("common.saving") : t("tracking.saveReturn")}
                   </Button>
                 )}
               </div>
@@ -1662,11 +1693,11 @@ function MonitoringCssd() {
               {lookupLoading ? (
                 <>
                   <Loader2 className="h-6 w-6 animate-spin text-[#4ba69d]" />
-                  <p className="mt-4 text-sm text-gray-500">Loading order data...</p>
+                  <p className="mt-4 text-sm text-gray-500">{t("tracking.loadingOrder")}</p>
                 </>
               ) : (
                 <p className="max-w-sm text-sm text-red-600">
-                  {returnError ?? "Order data could not be loaded. Close and try again."}
+                  {returnError ?? t("tracking.orderLoadFailed")}
                 </p>
               )}
             </div>
@@ -1680,7 +1711,7 @@ function MonitoringCssd() {
 
               {returnOrder.status === "dikembalikan" && (
                 <p className="rounded-lg bg-green-50 px-3 py-2 text-sm text-green-700">
-                  All units have been returned. The order is closed.
+                  {t("tracking.allReturned")}
                 </p>
               )}
 
@@ -1697,11 +1728,11 @@ function MonitoringCssd() {
                   )}
                 </div>
                 <div className="grid grid-cols-1 gap-4 px-4 py-3 sm:grid-cols-3">
-                  <DetailField label="Room / Unit" value={returnOrder.room?.name} />
-                  <DetailField label="Borrowed By" value={returnOrder.borrowed_by} />
+                  <DetailField label={t("tracking.roomUnit")} value={returnOrder.room?.name} />
+                  <DetailField label={t("tracking.borrowedBy")} value={returnOrder.borrowed_by} />
                   <DetailField
-                    label="Period"
-                    value={`${formatDate(returnOrder.order_date)} → ${formatDate(returnOrder.return_plan_date)}`}
+                    label={t("tracking.period")}
+                    value={`${formatDate(returnOrder.order_date, lang)} → ${formatDate(returnOrder.return_plan_date, lang)}`}
                   />
                 </div>
               </section>
@@ -1712,25 +1743,23 @@ function MonitoringCssd() {
               {/* Data pengembalian */}
               <section className="space-y-3">
                 <p className="text-xs font-semibold uppercase tracking-wide text-gray-400">
-                  Return Details
+                  {t("tracking.returnDetails")}
                 </p>
                 <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                   <div className="space-y-1.5">
-                    <Label>Returned By</Label>
+                    <Label>{t("tracking.returnedBy")}</Label>
                     <SelectSearch
                       options={userOptionsWith(returnedBy)}
                       value={returnedBy}
                       onChange={setReturnedBy}
                       loading={userLoading}
                       disabled={userLoading || returnOrder.status === "dikembalikan"}
-                      placeholder="-- Select Returner --"
-                      searchPlaceholder="Search name or staff ID..."
-                      loadingText="Loading options..."
-                      emptyText="Not found."
+                      placeholder={t("tracking.selectReturner")}
+                      searchPlaceholder={t("tracking.searchStaff")}
                     />
                   </div>
                   <div className="space-y-1.5">
-                    <Label htmlFor="return-date">Return Date</Label>
+                    <Label htmlFor="return-date">{t("tracking.returnDate")}</Label>
                     <Input
                       id="return-date"
                       type="date"
@@ -1758,7 +1787,7 @@ function MonitoringCssd() {
                     })
                   : returnOrder.items
 
-                const groups = buildReturnGroups(visibleUnits)
+                const groups = buildReturnGroups(visibleUnits, t)
 
                 const readonly = returnOrder.status === "dikembalikan"
                 const condIdByName = (n: string) => {
@@ -1771,15 +1800,15 @@ function MonitoringCssd() {
                   <section className="space-y-3">
                     <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                       <p className="text-xs font-semibold uppercase tracking-wide text-gray-400">
-                        Instrument Units
+                        {t("tracking.instrumentUnits")}
                         <span className="ml-2 font-normal normal-case tracking-normal text-gray-500">
-                          {back}/{total} returned
+                          {t("tracking.returnedCount", { back, total })}
                         </span>
                       </p>
                       <div className="relative sm:w-72">
                         <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 pointer-events-none" />
                         <Input
-                          placeholder="Search unit (code / name / package / barcode)..."
+                          placeholder={t("tracking.searchUnit")}
                           value={returnUnitSearch}
                           onChange={(e) => setReturnUnitSearch(e.target.value)}
                           className="pl-9"
@@ -1789,7 +1818,7 @@ function MonitoringCssd() {
 
                     {groups.length === 0 ? (
                       <div className="rounded-lg border border-gray-200 py-8 text-center text-sm text-gray-400">
-                        No unit matches the search.
+                        {t("tracking.noUnitMatch")}
                       </div>
                     ) : (
                       <div className="space-y-3">
@@ -1810,7 +1839,7 @@ function MonitoringCssd() {
                                     <Wrench className="h-4 w-4 shrink-0 text-gray-400" />
                                   )}
                                   <span className="truncate text-sm font-semibold text-gray-800">
-                                    {g.name ?? "Single Instruments"}
+                                    {g.name ?? t("tracking.singleInstruments")}
                                   </span>
                                   {/* Nomor label fisik (barcode_no) bungkus ini — dasar
                                       pengelompokan, jadi selalu tepat satu per grup. */}
@@ -1833,7 +1862,7 @@ function MonitoringCssd() {
                                     disabled={allBaik}
                                     className="shrink-0 text-xs font-medium text-[#075489] hover:underline disabled:text-gray-300 disabled:no-underline"
                                   >
-                                    Mark all Good
+                                    {t("tracking.markAllGood")}
                                   </button>
                                 )}
                               </div>
@@ -1858,7 +1887,7 @@ function MonitoringCssd() {
 
                                     <div className="flex items-center gap-1.5 text-gray-700">
                                       <span className="text-xs text-gray-400 sm:hidden">
-                                        Condition out:
+                                        {t("tracking.conditionOut")}
                                       </span>
                                       {u.condition_out?.name ?? (
                                         <span className="text-xs text-gray-400">—</span>
@@ -1868,7 +1897,7 @@ function MonitoringCssd() {
                                     {u.is_returned ? (
                                       <div className="flex items-center gap-1.5">
                                         <span className="text-xs text-gray-400 sm:hidden">
-                                          Condition in:
+                                          {t("tracking.conditionIn")}
                                         </span>
                                         <span className="text-gray-700">
                                           {u.condition_in?.name ?? (
@@ -1886,7 +1915,11 @@ function MonitoringCssd() {
                                               key={rc.code}
                                               type="button"
                                               disabled={!id}
-                                              title={active ? `${rc.label} — click again to clear` : rc.label}
+                                              title={
+                                                active
+                                                  ? t("tracking.clickAgainToClear", { label: rc.label })
+                                                  : rc.label
+                                              }
                                               // Klik tombol yang sedang aktif = batalkan pilihan (salah pencet).
                                               onClick={() =>
                                                 setReturnCondById((prev) => {
@@ -1929,7 +1962,7 @@ function MonitoringCssd() {
       <Modal
         open={confirmReturnOpen}
         onClose={returnSaving ? () => {} : () => setConfirmReturnOpen(false)}
-        title="Confirm Return"
+        title={t("tracking.confirmReturn")}
         size="md"
         footer={
           <>
@@ -1938,14 +1971,14 @@ function MonitoringCssd() {
               onClick={() => setConfirmReturnOpen(false)}
               disabled={returnSaving}
             >
-              Review Again
+              {t("tracking.reviewAgain")}
             </Button>
             <Button
               onClick={handleSaveReturns}
               disabled={returnSaving}
               className="bg-[#075489] hover:bg-[#075489]/90 text-white"
             >
-              {returnSaving ? "Saving..." : "Yes, Save Return"}
+              {returnSaving ? t("common.saving") : t("tracking.yesSaveReturn")}
             </Button>
           </>
         }
@@ -1972,9 +2005,8 @@ function MonitoringCssd() {
                     <AlertTriangle className="h-5 w-5 text-amber-600" />
                   </div>
                   <p className="pt-1 text-sm leading-relaxed text-gray-600">
-                    Make sure the incoming condition of each unit is correct. Once saved, the
-                    return data <span className="font-semibold text-gray-900">cannot be changed or
-                    canceled</span>.
+                    {t("tracking.confirmBefore")}{" "}
+                    <span className="font-semibold text-gray-900">{t("tracking.confirmWord")}</span>.
                   </p>
                 </div>
 
@@ -1995,7 +2027,7 @@ function MonitoringCssd() {
                 {/* Instrumen yang dikembalikan kali ini, lengkap dengan kondisi masuknya. */}
                 <div className="space-y-2">
                   <p className="text-xs font-semibold uppercase tracking-wide text-gray-400">
-                    Returned ({ready.length})
+                    {t("tracking.returnedHeading", { n: ready.length })}
                   </p>
                   <div className="divide-y divide-gray-100 overflow-hidden rounded-lg border border-gray-200">
                     {ready.map((u) => (
@@ -2029,9 +2061,9 @@ function MonitoringCssd() {
                 {!willClose && (
                   <div className="space-y-2">
                     <p className="text-xs font-semibold uppercase tracking-wide text-gray-400">
-                      Not Returned ({pending.length - ready.length})
+                      {t("tracking.notReturnedHeading", { n: pending.length - ready.length })}
                       <span className="ml-2 font-normal normal-case tracking-normal text-gray-500">
-                        still recorded as borrowed
+                        {t("tracking.stillBorrowed")}
                       </span>
                     </p>
                     <div className="divide-y divide-gray-100 overflow-hidden rounded-lg border border-gray-200 bg-gray-50/60">
@@ -2056,7 +2088,7 @@ function MonitoringCssd() {
                               )}
                             </div>
                             <span className="shrink-0 text-xs text-gray-400">
-                              Condition not set
+                              {t("tracking.conditionNotSet")}
                             </span>
                           </div>
                         ))}
@@ -2072,40 +2104,44 @@ function MonitoringCssd() {
       <Modal
         open={historyOpen}
         onClose={() => setHistoryOpen(false)}
-        title={historyOrder ? `Return History: ${titleCodes(historyOrder)}` : "Return History"}
+        title={
+          historyOrder
+            ? t("tracking.historyTitleWith", { codes: titleCodes(historyOrder) })
+            : t("tracking.historyTitle")
+        }
         size="lg"
         footer={
           <Button variant="outline" onClick={() => setHistoryOpen(false)}>
-            Close
+            {t("common.close")}
           </Button>
         }
       >
         {historyLoading ? (
-          <div className="py-10 text-center text-sm text-gray-400">Loading history...</div>
+          <div className="py-10 text-center text-sm text-gray-400">{t("tracking.loadingHistory")}</div>
         ) : !historyOrder ? (
-          <div className="py-10 text-center text-sm text-gray-400">History data not found.</div>
+          <div className="py-10 text-center text-sm text-gray-400">{t("tracking.historyNotFound")}</div>
         ) : (
           <div className="space-y-4">
             <div className="grid grid-cols-1 gap-4 rounded-lg border border-gray-200 bg-gray-50 px-4 py-3 sm:grid-cols-2">
-              <DetailField label="Order Number" value={historyOrder.code} />
-              <DetailField label="Transaction No." value={historyOrder.code_transaction} />
-              <DetailField label="Room / Unit" value={historyOrder.room?.name} />
-              <DetailField label="Borrowed By" value={historyOrder.borrowed_by} />
+              <DetailField label={t("tracking.orderNumber")} value={historyOrder.code} />
+              <DetailField label={t("tracking.transactionNo")} value={historyOrder.code_transaction} />
+              <DetailField label={t("tracking.roomUnit")} value={historyOrder.room?.name} />
+              <DetailField label={t("tracking.borrowedBy")} value={historyOrder.borrowed_by} />
               {/* Periode NYATA: tanggal pinjam → tanggal saat CSSD menerima
                   pengembaliannya (return_actual_date), bukan rencana kembali —
                   order ini memang sudah selesai. */}
               <DetailField
-                label="Period"
-                value={`${formatDate(historyOrder.order_date)} → ${formatDate(historyOrder.return_actual_date)}`}
+                label={t("tracking.period")}
+                value={`${formatDate(historyOrder.order_date, lang)} → ${formatDate(historyOrder.return_actual_date, lang)}`}
               />
-              <DetailField label="Returned By" value={historyOrder.returned_by} />
+              <DetailField label={t("tracking.returnedBy")} value={historyOrder.returned_by} />
             </div>
 
             {/* Tautan RM pasien (traceability loop) — bila alat sempat didistribusikan ke pasien */}
             {(historyOrder.medical_record_no || historyOrder.patient_name) && (
               <div className="grid grid-cols-1 gap-4 rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 sm:grid-cols-2">
-                <DetailField label="Patient MR No." value={historyOrder.medical_record_no} />
-                <DetailField label="Patient Name" value={historyOrder.patient_name} />
+                <DetailField label={t("tracking.patientMrNo")} value={historyOrder.medical_record_no} />
+                <DetailField label={t("tracking.patientName")} value={historyOrder.patient_name} />
               </div>
             )}
 
@@ -2115,7 +2151,7 @@ function MonitoringCssd() {
             {/* Grouping sama seperti Pengembalian: per paket/satuan + header nama &
                 barcode_no; read-only (kondisi keluar → masuk + status). */}
             {(() => {
-              const groups = buildReturnGroups(historyOrder.items)
+              const groups = buildReturnGroups(historyOrder.items, t)
               return (
                 <div className="space-y-3">
                   {groups.map((g) => (
@@ -2128,7 +2164,7 @@ function MonitoringCssd() {
                           <Wrench className="h-4 w-4 shrink-0 text-gray-400" />
                         )}
                         <span className="truncate text-sm font-semibold text-gray-800">
-                          {g.name ?? "Single Instruments"}
+                          {g.name ?? t("tracking.singleInstruments")}
                         </span>
                         {/* Nomor label fisik (barcode_no) bungkus ini — dasar
                             pengelompokan, jadi selalu tepat satu per grup. */}
@@ -2155,18 +2191,22 @@ function MonitoringCssd() {
                               </span>
                             </div>
                             <div className="text-gray-700">
-                              <span className="text-xs text-gray-400 sm:hidden">Condition out: </span>
+                              <span className="text-xs text-gray-400 sm:hidden">
+                                {t("tracking.conditionOut")}{" "}
+                              </span>
                               {u.condition_out?.name ?? <span className="text-xs text-gray-400">—</span>}
                             </div>
                             <div className="text-gray-700">
-                              <span className="text-xs text-gray-400 sm:hidden">Condition in: </span>
+                              <span className="text-xs text-gray-400 sm:hidden">
+                                {t("tracking.conditionIn")}{" "}
+                              </span>
                               {u.condition_in?.name ?? <span className="text-xs text-gray-400">—</span>}
                             </div>
                             <div>
                               {u.is_returned ? (
-                                <Badge variant="success">Returned</Badge>
+                                <Badge variant="success">{t("tracking.badgeReturned")}</Badge>
                               ) : (
-                                <Badge variant="warning">Pending</Badge>
+                                <Badge variant="warning">{t("tracking.badgePending")}</Badge>
                               )}
                             </div>
                           </div>
@@ -2246,6 +2286,7 @@ function OrderGroupCard({
   onReturn?: (orderCode: string) => void
   showRoom?: boolean
 }) {
+  const t = useT()
   const orderOpen = expandedOrder.has(o.order_code)
   return (
           <div className={"rounded-lg border border-gray-200 border-l-4 " + STATUS_BORDER.dipinjam}>
@@ -2270,7 +2311,9 @@ function OrderGroupCard({
                       <span className="font-mono text-xs font-semibold text-[#075489] bg-[#075489]/8 px-2 py-0.5 rounded">
                         {o.code_transaction ?? o.order_code}
                       </span>
-                      {isOverdue(o.return_plan_date) && <Badge variant="danger">Overdue</Badge>}
+                      {isOverdue(o.return_plan_date) && (
+                        <Badge variant="danger">{t("tracking.overdue")}</Badge>
+                      )}
                     </div>
                     <OrderMeta
                       patientName={o.patient_name}
@@ -2283,7 +2326,7 @@ function OrderGroupCard({
                   </div>
                 </div>
                 <span className="shrink-0 text-xs text-gray-500">
-                  {qtySummary(o.totalSets, o.satuanQty, o.totalQty)}
+                  {qtySummary(o.totalSets, o.satuanQty, o.totalQty, t)}
                 </span>
               </button>
               {onReturn && (
@@ -2291,10 +2334,10 @@ function OrderGroupCard({
                   <button
                     type="button"
                     onClick={() => onReturn(o.order_code)}
-                    title="Return this order"
+                    title={t("tracking.returnThisOrder")}
                     className="flex flex-1 items-center justify-center rounded-md border border-[#075489] bg-[#075489] px-4 py-1.5 text-xs font-medium text-white hover:bg-[#075489]/90 sm:flex-none"
                   >
-                    Return
+                    {t("tracking.return")}
                   </button>
                 </div>
               )}
@@ -2305,10 +2348,10 @@ function OrderGroupCard({
                 masing-masing bisa dibuka untuk melihat instrumen di dalamnya. */}
             {orderOpen && (
               <div className="space-y-2 border-t border-gray-100 bg-gray-50/40 px-3 py-2.5">
-                {buildLabelGroups([
-                  ...o.paketGroups.flatMap((g) => g.instruments),
-                  ...o.satuanInstruments,
-                ]).map((g) => {
+                {buildLabelGroups(
+                  [...o.paketGroups.flatMap((g) => g.instruments), ...o.satuanInstruments],
+                  t,
+                ).map((g) => {
                   const key = `${o.order_code}::${g.key}`
                   const groupOpen = expandedPaket.has(key)
                   const isPaket = g.source === "paket"
@@ -2326,7 +2369,7 @@ function OrderGroupCard({
                           }
                         />
                         <Badge variant={isPaket ? "info" : "default"}>
-                          {isPaket ? "Package" : "Single"}
+                          {isPaket ? t("common.package") : t("common.single")}
                         </Badge>
                         <span className="truncate text-sm font-medium text-gray-800">{g.name}</span>
                         {g.barcodeNo ? (
@@ -2334,10 +2377,10 @@ function OrderGroupCard({
                             {g.barcodeNo}
                           </span>
                         ) : (
-                          <span className="shrink-0 text-xs text-gray-400">no label</span>
+                          <span className="shrink-0 text-xs text-gray-400">{t("tracking.noLabel")}</span>
                         )}
                         <span className="ml-auto shrink-0 text-xs text-gray-500">
-                          {g.units.length} instruments
+                          {t("tracking.instrumentsCount", { n: g.units.length })}
                         </span>
                       </button>
 
@@ -2374,23 +2417,24 @@ function OrderGroupCard({
 // Satu baris item permintaan order masuk. Untuk item paket, ikut menampilkan
 // rincian instrumen di dalam satu paket (komposisi katalog).
 function IncomingItemRow({ item }: { item: IncomingItem }) {
+  const t = useT()
   return (
     <div className="rounded-lg border border-gray-200 bg-white px-3 py-2">
       <div className="flex items-center justify-between gap-2">
         <div className="flex min-w-0 items-center gap-2">
           <Badge variant={item.type === "paket" ? "info" : "default"}>
-            {item.type === "paket" ? "Package" : "Single"}
+            {item.type === "paket" ? t("common.package") : t("common.single")}
           </Badge>
           <span className="truncate text-sm font-medium text-gray-800">{item.name}</span>
         </div>
         <span className="shrink-0 text-xs text-gray-500">
-          {item.quantity} {item.type === "paket" ? "packages" : "units"}
+          {item.quantity} {item.type === "paket" ? t("tracking.packagesUnit") : t("common.units")}
         </span>
       </div>
       {item.type === "paket" && item.contents && item.contents.length > 0 && (
         <div className="mt-2 space-y-1 border-t border-gray-100 pt-2">
           <p className="text-[11px] font-semibold uppercase tracking-wide text-gray-400">
-            Package contents (per package)
+            {t("tracking.packageContentsPer")}
           </p>
           {item.contents.map((c, ci) => (
             <div key={ci} className="flex items-center justify-between gap-2 text-xs">
@@ -2427,6 +2471,7 @@ function IncomingOrderCard({
   onProcess: () => void
   onCancel: () => void
 }) {
+  const t = useT()
   return (
     <div
       className={
@@ -2453,7 +2498,9 @@ function IncomingOrderCard({
                 <span className="font-mono text-xs font-semibold text-[#075489] bg-[#075489]/8 px-2 py-0.5 rounded">
                   {order.code}
                 </span>
-                {isOverdue(order.return_plan_date) && <Badge variant="danger">Overdue</Badge>}
+                {isOverdue(order.return_plan_date) && (
+                  <Badge variant="danger">{t("tracking.overdue")}</Badge>
+                )}
               </div>
               <OrderMeta
                 patientName={order.patient_name}
@@ -2471,14 +2518,14 @@ function IncomingOrderCard({
             onClick={onProcess}
             className="flex-1 rounded-md border border-[#4ba69d] bg-[#4ba69d] px-3 py-1.5 text-xs font-medium text-white hover:bg-[#4ba69d]/90 sm:flex-none sm:px-2 sm:py-1"
           >
-            Accept
+            {t("tracking.accept")}
           </button>
           <button
             type="button"
             onClick={onCancel}
             className="flex-1 rounded-md border border-red-300 px-3 py-1.5 text-xs font-medium text-red-600 hover:bg-red-50 sm:flex-none sm:px-2 sm:py-1"
           >
-            Reject
+            {t("tracking.reject")}
           </button>
         </div>
       </div>
@@ -2486,7 +2533,7 @@ function IncomingOrderCard({
       {expanded && (
         <div className="space-y-1.5 border-t border-gray-100 bg-gray-50/40 px-3 py-2.5">
           {order.items.length === 0 ? (
-            <p className="py-2 text-center text-xs text-gray-400">No requested item.</p>
+            <p className="py-2 text-center text-xs text-gray-400">{t("tracking.noRequestedItem")}</p>
           ) : (
             order.items.map((it, idx) => <IncomingItemRow key={idx} item={it} />)
           )}
@@ -2514,6 +2561,7 @@ function ReturnedOrderCard({
   detailLoading: boolean
   onHistory: () => void
 }) {
+  const t = useT()
   return (
     <div className={"rounded-lg border border-gray-200 border-l-4 " + STATUS_BORDER.dikembalikan}>
       {/* sm:items-center → tombol Riwayat sejajar tengah kartu, bukan menempel atas */}
@@ -2543,25 +2591,25 @@ function ReturnedOrderCard({
                 medicalRecordNo={order.medical_record_no}
                 room={order.room?.name ?? null}
                 borrowDate={order.order_date}
-                returnLabel="Returned"
+                returnLabelKey="tracking.returnedLabel"
                 returnDate={order.returned_at}
               />
             </div>
           </div>
           {/* Aturan yang sama dengan kartu order aktif: paket per SET, satuan per UNIT. */}
           <span className="shrink-0 text-xs text-gray-500">
-            {qtySummary(order.total_sets, order.total_satuan, order.total_units)}
+            {qtySummary(order.total_sets, order.total_satuan, order.total_units, t)}
           </span>
         </button>
         <div className="flex justify-center border-t border-gray-100 px-2 py-2 sm:shrink-0 sm:items-center sm:border-0 sm:px-0 sm:py-0 sm:pr-1">
           <button
             type="button"
             onClick={onHistory}
-            title="Borrowing history"
+            title={t("tracking.borrowingHistory")}
             className="flex flex-1 items-center justify-center gap-1.5 rounded-md border border-[#075489] px-4 py-1.5 text-xs font-medium text-[#075489] hover:bg-[#075489]/10 sm:flex-none"
           >
             <History className="h-4 w-4" />
-            History
+            {t("tracking.history")}
           </button>
         </div>
       </div>
@@ -2569,7 +2617,7 @@ function ReturnedOrderCard({
       {expanded && (
         <div className="space-y-2 border-t border-gray-100 bg-gray-50/40 px-3 py-2.5">
           {detailLoading || !detail ? (
-            <p className="py-2 text-center text-xs text-gray-400">Loading details...</p>
+            <p className="py-2 text-center text-xs text-gray-400">{t("tracking.loadingDetails")}</p>
           ) : (
             <ReturnedUnitsDetail order={detail} />
           )}
@@ -2582,24 +2630,29 @@ function ReturnedOrderCard({
 // Rincian unit order dikembalikan — dikelompokkan per BUNGKUS (nomor label kemasan),
 // sama seperti modal Pengembalian & Riwayat: paket 2 set tampil sebagai 2 kartu.
 function ReturnedUnitsDetail({ order }: { order: ReturnOrder }) {
+  const t = useT()
   if (order.items.length === 0) {
-    return <p className="py-2 text-center text-xs text-gray-400">No unit.</p>
+    return <p className="py-2 text-center text-xs text-gray-400">{t("tracking.noUnit")}</p>
   }
   return (
     <>
-      {buildReturnGroups(order.items).map((g) => (
+      {buildReturnGroups(order.items, t).map((g) => (
         <div key={g.key} className="rounded-lg border border-gray-200 bg-white">
           <div className="flex flex-wrap items-center gap-2 border-b border-gray-100 px-3 py-2">
-            <Badge variant={g.name ? "info" : "default"}>{g.name ? "Package" : "Single"}</Badge>
+            <Badge variant={g.name ? "info" : "default"}>
+              {g.name ? t("common.package") : t("common.single")}
+            </Badge>
             <span className="truncate text-sm font-medium text-gray-800">
-              {g.name ?? "Single Instruments"}
+              {g.name ?? t("tracking.singleInstruments")}
             </span>
             {g.barcodeNo && (
               <span className="shrink-0 rounded bg-[#075489]/8 px-1.5 py-0.5 font-mono text-xs font-semibold text-[#075489]">
                 {g.barcodeNo}
               </span>
             )}
-            <span className="ml-auto shrink-0 text-xs text-gray-500">{g.units.length} instruments</span>
+            <span className="ml-auto shrink-0 text-xs text-gray-500">
+              {t("tracking.instrumentsCount", { n: g.units.length })}
+            </span>
           </div>
           <div className="divide-y divide-gray-50">
             {g.units.map((u) => (

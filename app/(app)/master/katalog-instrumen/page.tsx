@@ -13,6 +13,7 @@ import { Modal } from "@/components/molecules/Modal"
 import { ConfirmDialog } from "@/components/molecules/ConfirmDialog"
 import { Pagination } from "@/components/molecules/Pagination"
 import api from "@/lib/axios"
+import { useT } from "@/lib/i18n"
 // Halaman Instrumen dipakai ulang sebagai salah satu tab di sini (fitur terpusat).
 import MasterInstrumenPage from "../instrumen/page"
 
@@ -51,6 +52,7 @@ type PickedItem = {
 const emptyForm = { code: "", name: "", type: "paket" as "single" | "paket", description: "" }
 
 function SetManager() {
+  const t = useT()
   const [catalogs, setCatalogs] = useState<InstrumentCatalog[]>([])
   const [loading, setLoading] = useState(true)
   const [totalPages, setTotalPages] = useState(1)
@@ -227,7 +229,7 @@ function SetManager() {
     if (!id || picked.some((p) => p.instrument_id === id)) return
     // Tipe single hanya boleh punya tepat 1 rincian.
     if (form.type === "single" && picked.length >= 1) {
-      setFormError("Tipe satuan hanya boleh memiliki 1 rincian instrumen.")
+      setFormError(t("catalog.errSingleOne"))
       return
     }
     const instrument = instruments.find((s) => s.id === id)
@@ -251,15 +253,15 @@ function SetManager() {
   async function handleSave() {
     if (saving) return
     if (!form.code.trim() || !form.name.trim()) {
-      setFormError("Kode dan nama katalog wajib diisi.")
+      setFormError(t("catalog.errCodeName"))
       return
     }
     if (picked.length === 0) {
-      setFormError("Tambahkan minimal 1 rincian instrumen.")
+      setFormError(t("catalog.errMinOne"))
       return
     }
     if (form.type === "single" && picked.length !== 1) {
-      setFormError("Tipe satuan hanya boleh memiliki tepat 1 rincian instrumen.")
+      setFormError(t("catalog.errSingleExactly"))
       return
     }
     setSaving(true)
@@ -311,7 +313,7 @@ function SetManager() {
         response?: { data?: { message?: string; errors?: Record<string, string[]> } }
       }
       const fieldError = Object.values(e.response?.data?.errors ?? {})[0]?.[0]
-      setFormError(fieldError ?? e.response?.data?.message ?? "Gagal menyimpan katalog.")
+      setFormError(fieldError ?? e.response?.data?.message ?? t("catalog.errSave"))
     } finally {
       setSaving(false)
     }
@@ -344,14 +346,14 @@ function SetManager() {
             <Library className="h-6 w-6" />
           </div>
           <div>
-            <h1 className="text-2xl font-bold text-gray-900">Set Instrumen</h1>
+            <h1 className="text-2xl font-bold text-gray-900">{t("catalog.title")}</h1>
             <p className="text-sm text-gray-500 mt-0.5">
-              Kelola set instrumen (satuan &amp; paket) beserta rinciannya
+              {t("catalog.subtitle")}
             </p>
           </div>
         </div>
         <Button onClick={openTambah} className="bg-[#075489] hover:bg-[#075489]/90 text-white">
-          + Tambah Set
+          {t("catalog.addSet")}
         </Button>
       </div>
 
@@ -361,30 +363,30 @@ function SetManager() {
             <div className="relative flex-1">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 pointer-events-none" />
               <Input
-                placeholder="Cari nama atau kode set..."
+                placeholder={t("catalog.searchPlaceholder")}
                 value={searchInput}
                 onChange={(e) => setSearchInput(e.target.value)}
                 className="pl-9"
               />
             </div>
             <Button type="submit" className="bg-[#075489] hover:bg-[#075489]/90 text-white shrink-0">
-              Cari
+              {t("common.search")}
             </Button>
           </form>
         </div>
 
         {loading ? (
-          <div className="py-16 text-center text-sm text-gray-400">Memuat data...</div>
+          <div className="py-16 text-center text-sm text-gray-400">{t("common.loading")}</div>
         ) : catalogs.length === 0 ? (
-          <div className="py-16 text-center text-sm text-gray-400">Belum ada set instrumen.</div>
+          <div className="py-16 text-center text-sm text-gray-400">{t("catalog.empty")}</div>
         ) : (
           <div className="divide-y divide-gray-100">
             {/* Header tabel */}
             <div className="hidden sm:grid grid-cols-12 gap-3 px-5 py-2.5 text-xs font-semibold text-gray-500 bg-gray-50/60">
-              <div className="col-span-2">Kode</div>
-              <div className="col-span-4">Nama Set</div>
-              <div className="col-span-1 text-center">Rincian</div>
-              <div className="col-span-5 text-right">Aksi</div>
+              <div className="col-span-2">{t("catalog.colCode")}</div>
+              <div className="col-span-4">{t("catalog.colName")}</div>
+              <div className="col-span-1 text-center">{t("catalog.colItems")}</div>
+              <div className="col-span-5 text-right">{t("common.actions")}</div>
             </div>
 
             {catalogs.map((cat) => {
@@ -410,7 +412,7 @@ function SetManager() {
                         <button
                           type="button"
                           onClick={() => setPreviewImage({ src: cat.image_url!, name: cat.name })}
-                          title="Lihat gambar"
+                          title={t("catalog.viewImage")}
                           className="group relative shrink-0 cursor-zoom-in overflow-hidden rounded border border-gray-200 transition hover:ring-2 hover:ring-[#075489]/40"
                         >
                           {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -428,11 +430,11 @@ function SetManager() {
                     </div>
                     <div className="order-2 ml-auto text-sm font-semibold text-gray-700 sm:order-none sm:col-span-1 sm:ml-0 sm:text-center">
                       {cat.items_count}
-                      <span className="ml-1 text-xs font-normal text-gray-400 sm:hidden">rincian</span>
+                      <span className="ml-1 text-xs font-normal text-gray-400 sm:hidden">{t("catalog.itemsSuffix")}</span>
                     </div>
                     <div className="order-4 flex w-full justify-end gap-2 sm:order-none sm:col-span-5 sm:w-auto">
                       <Button size="xs" variant="outline" onClick={() => openEdit(cat)}>
-                        Edit
+                        {t("common.edit")}
                       </Button>
                       <Button
                         size="xs"
@@ -441,7 +443,7 @@ function SetManager() {
                         disabled={deletingId === cat.id}
                         onClick={() => setDeleteTarget(cat)}
                       >
-                        Hapus
+                        {t("common.delete")}
                       </Button>
                     </div>
                   </div>
@@ -453,9 +455,9 @@ function SetManager() {
                         <p className="py-2 text-xs text-gray-500">{cat.description}</p>
                       )}
                       {expandedLoading[cat.id] ? (
-                        <p className="py-3 text-xs text-gray-400">Memuat rincian...</p>
+                        <p className="py-3 text-xs text-gray-400">{t("catalog.loadingItems")}</p>
                       ) : !items || items.length === 0 ? (
-                        <p className="py-3 text-xs text-gray-400">Set ini belum punya rincian.</p>
+                        <p className="py-3 text-xs text-gray-400">{t("catalog.noItems")}</p>
                       ) : (
                         <div className="divide-y divide-gray-100 rounded-lg border border-gray-200 bg-white">
                           {items.map((it) => (
@@ -504,19 +506,19 @@ function SetManager() {
       <Modal
         open={modal !== null}
         onClose={() => setModal(null)}
-        title={modal === "tambah" ? "Tambah Set Instrumen" : "Edit Set Instrumen"}
+        title={modal === "tambah" ? t("catalog.modalAdd") : t("catalog.modalEdit")}
         size="lg"
         footer={
           <>
             <Button variant="outline" onClick={() => setModal(null)}>
-              Batal
+              {t("common.cancel")}
             </Button>
             <Button
               onClick={handleSave}
               disabled={saving || !form.code.trim() || !form.name.trim()}
               className="bg-[#075489] hover:bg-[#075489]/90 text-white"
             >
-              {saving ? "Menyimpan..." : "Simpan"}
+              {saving ? t("common.saving") : t("common.save")}
             </Button>
           </>
         }
@@ -524,29 +526,29 @@ function SetManager() {
         <div className="space-y-4">
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div className="space-y-1.5">
-              <Label htmlFor="cat-code">Kode Set</Label>
+              <Label htmlFor="cat-code">{t("catalog.codeLabel")}</Label>
               <Input
                 id="cat-code"
-                placeholder="Contoh: KAT-MINOR"
+                placeholder={t("catalog.codePlaceholder")}
                 value={form.code}
                 onChange={(e) => setForm((f) => ({ ...f, code: e.target.value }))}
               />
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="cat-name">Nama Set</Label>
+              <Label htmlFor="cat-name">{t("catalog.colName")}</Label>
               <Input
                 id="cat-name"
-                placeholder="Contoh: Set Bedah Minor"
+                placeholder={t("catalog.namePlaceholder")}
                 value={form.name}
                 onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
               />
             </div>
             <div className="space-y-1.5 sm:col-span-2">
-              <Label htmlFor="cat-desc">Deskripsi (opsional)</Label>
+              <Label htmlFor="cat-desc">{t("catalog.descLabel")}</Label>
               <Textarea
                 id="cat-desc"
                 rows={2}
-                placeholder="Keterangan tambahan"
+                placeholder={t("catalog.descPlaceholder")}
                 value={form.description}
                 onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))}
               />
@@ -555,12 +557,12 @@ function SetManager() {
 
           {/* Gambar set/paket (opsional) */}
           <div className="space-y-1.5 border-t border-gray-100 pt-4">
-            <Label>Gambar Set (opsional)</Label>
+            <Label>{t("catalog.imageLabel")}</Label>
             <div className="flex items-center gap-4">
               <div className="flex h-20 w-20 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-gray-200 bg-gray-50">
                 {previewSrc ? (
                   // eslint-disable-next-line @next/next/no-img-element
-                  <img src={previewSrc} alt="Pratinjau gambar set" className="h-full w-full object-cover" />
+                  <img src={previewSrc} alt={t("catalog.imagePreviewAlt")} className="h-full w-full object-cover" />
                 ) : (
                   <ImageIcon className="h-7 w-7 text-gray-300" />
                 )}
@@ -575,7 +577,7 @@ function SetManager() {
                     className="border-[#075489] text-[#075489] hover:bg-[#075489]/10"
                   >
                     <Upload className="h-3.5 w-3.5" />
-                    {previewSrc ? "Ganti" : "Pilih Gambar"}
+                    {previewSrc ? t("catalog.replaceImage") : t("catalog.pickImage")}
                   </Button>
                   {previewSrc && (
                     <Button
@@ -586,11 +588,11 @@ function SetManager() {
                       className="border-red-300 text-red-500 hover:bg-red-50"
                     >
                       <X className="h-3.5 w-3.5" />
-                      Hapus
+                      {t("common.delete")}
                     </Button>
                   )}
                 </div>
-                <p className="text-xs text-gray-400">JPG/PNG/WEBP, maks 2 MB.</p>
+                <p className="text-xs text-gray-400">{t("catalog.imageHint")}</p>
               </div>
               <input
                 ref={fileInputRef}
@@ -604,17 +606,17 @@ function SetManager() {
 
           {/* Pemilih rincian instrumen */}
           <div className="space-y-2 border-t border-gray-100 pt-4">
-            <Label>Rincian Instrumen</Label>
+            <Label>{t("catalog.itemsLabel")}</Label>
             <SelectSearch
               options={instrumentOptions}
               value={pickValue}
               onChange={addPicked}
-              placeholder="+ Tambah instrumen ke set"
-              searchPlaceholder="Cari kode / nama instrumen..."
+              placeholder={t("catalog.addInstrument")}
+              searchPlaceholder={t("catalog.searchInstrument")}
               disabled={form.type === "single" && picked.length >= 1}
             />
             {picked.length === 0 ? (
-              <p className="text-xs text-gray-400">Belum ada rincian dipilih.</p>
+              <p className="text-xs text-gray-400">{t("catalog.noPicked")}</p>
             ) : (
               <div className="space-y-2 pt-1">
                 {picked.map((p) => (
@@ -629,7 +631,7 @@ function SetManager() {
                     </span>
                     <div className="flex w-full items-center gap-2 sm:ml-auto sm:w-auto">
                       <div className="flex items-center gap-1.5">
-                        <span className="text-xs text-gray-400">Qty</span>
+                        <span className="text-xs text-gray-400">{t("catalog.qty")}</span>
                         <Input
                           type="number"
                           min={1}
@@ -645,7 +647,7 @@ function SetManager() {
                           options={conditionOptions}
                           value={p.standard_condition_id}
                           onChange={(v) => updatePicked(p.instrument_id, { standard_condition_id: v })}
-                          placeholder="Kondisi standar"
+                          placeholder={t("catalog.standardCondition")}
                         />
                       </div>
                       <button
@@ -662,8 +664,8 @@ function SetManager() {
             )}
             <p className="text-xs text-gray-400">
               {form.type === "single"
-                ? "Tipe satuan: tepat 1 rincian instrumen."
-                : `Tipe paket: minimal 1 rincian. ${picked.length} rincian dipilih.`}
+                ? t("catalog.hintSingle")
+                : t("catalog.hintPackage", { n: picked.length })}
             </p>
           </div>
 
@@ -677,11 +679,11 @@ function SetManager() {
       <Modal
         open={previewImage !== null}
         onClose={() => setPreviewImage(null)}
-        title={previewImage?.name ?? "Gambar Set"}
+        title={previewImage?.name ?? t("catalog.imageModalTitle")}
         size="lg"
         footer={
           <Button variant="outline" onClick={() => setPreviewImage(null)}>
-            Tutup
+            {t("common.close")}
           </Button>
         }
       >
@@ -702,6 +704,7 @@ function SetManager() {
 
 // Halaman terpusat: tab "Satuan" (jenis instrumen + unit fisik) dan "Set Paket".
 export default function SetInstrumenPage() {
+  const t = useT()
   const [tab, setTab] = useState<"instrumen" | "set">("instrumen")
 
   const tabClass = (active: boolean) =>
@@ -713,10 +716,10 @@ export default function SetInstrumenPage() {
     <div className="space-y-5">
       <div className="inline-flex rounded-lg border border-gray-200 bg-white p-0.5">
         <button type="button" onClick={() => setTab("instrumen")} className={tabClass(tab === "instrumen")}>
-          Satuan
+          {t("catalog.tabSingle")}
         </button>
         <button type="button" onClick={() => setTab("set")} className={tabClass(tab === "set")}>
-          Set Paket
+          {t("catalog.tabPackage")}
         </button>
       </div>
 

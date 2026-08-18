@@ -2,6 +2,7 @@
 
 import { createContext, useCallback, useContext, useMemo, useState } from "react"
 import { CheckCircle2, XCircle, Info, X } from "lucide-react"
+import { useT } from "@/lib/i18n"
 
 type ToastType = "success" | "error" | "info"
 type ToastItem = { id: number; type: ToastType; message: string }
@@ -28,6 +29,8 @@ const STYLES: Record<ToastType, { ring: string; icon: React.ReactNode }> = {
 }
 
 export function ToastProvider({ children }: { children: React.ReactNode }) {
+  // Dinamai `translate`, bukan `t`, karena `t` di bawah sudah dipakai tiap item toast.
+  const translate = useT()
   const [toasts, setToasts] = useState<ToastItem[]>([])
 
   const remove = useCallback((id: number) => {
@@ -72,7 +75,7 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
               type="button"
               onClick={() => remove(t.id)}
               className="shrink-0 text-gray-400 transition-colors hover:text-gray-600"
-              aria-label="Tutup"
+              aria-label={translate("common.close")}
             >
               <X className="h-4 w-4" />
             </button>

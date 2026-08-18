@@ -21,6 +21,7 @@ import {
   type Icd10,
 } from "@/lib/store/slices/icd10Slice"
 import api from "@/lib/axios"
+import { useT } from "@/lib/i18n"
 
 const emptyForm = { code: "", display: "", version: "" }
 
@@ -78,6 +79,7 @@ export default function MasterIcd10Page() {
   const { items, totalItems, totalPages, page, search, loading, loaded, dirty } =
     useAppSelector((s) => s.icd10)
 
+  const t = useT()
   const [searchInput, setSearchInput] = useState(search)
   const [modal, setModal] = useState<"tambah" | "edit" | null>(null)
   const [form, setForm] = useState(emptyForm)
@@ -168,14 +170,14 @@ export default function MasterIcd10Page() {
       const items = parseRows(rows)
 
       if (items.length === 0) {
-        setImportError("File tidak berisi data ICD 10 yang valid (kolom: code, display, version).")
+        setImportError(t("masterIcd10.errNoValidRows"))
         return
       }
 
       setPreviewFileName(file.name)
       setPreviewRows(items)
     } catch {
-      setImportError("Gagal membaca file. Pastikan formatnya Excel/CSV yang benar.")
+      setImportError(t("masterIcd10.errReadFile"))
     }
   }
 
@@ -210,7 +212,7 @@ export default function MasterIcd10Page() {
       dispatch(invalidateIcd10())
     } catch (err) {
       const x = err as { response?: { data?: { message?: string } } }
-      setImportError(x.response?.data?.message ?? "Gagal mengimpor file. Pastikan formatnya benar.")
+      setImportError(x.response?.data?.message ?? t("masterIcd10.errImport"))
       setPreviewRows(null)
     } finally {
       setImporting(false)
@@ -219,7 +221,7 @@ export default function MasterIcd10Page() {
 
   const columns: Column<Icd10>[] = [
     {
-      header: "Code",
+      header: t("masterIcd10.colCode"),
       cell: (row) => (
         <span className="font-mono text-xs font-semibold text-[#075489] bg-[#075489]/8 px-2 py-1 rounded">
           {row.code}
@@ -228,11 +230,11 @@ export default function MasterIcd10Page() {
       className: "w-32",
     },
     {
-      header: "Display",
+      header: t("masterIcd10.colDisplay"),
       cell: (row) => <span className="text-gray-800">{row.display}</span>,
     },
     {
-      header: "Version",
+      header: t("masterIcd10.colVersion"),
       cell: (row) =>
         row.version ? (
           <span className="text-gray-700">{row.version}</span>
@@ -246,7 +248,7 @@ export default function MasterIcd10Page() {
   return (
     <div className="space-y-6">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <PageHeader title="ICD 10" subtitle="Kelola data master ICD 10" />
+        <PageHeader title={t("masterIcd10.title")} subtitle={t("masterIcd10.subtitle")} />
         <div className="flex flex-col gap-2 sm:flex-row">
           <input
             ref={fileRef}
@@ -262,10 +264,10 @@ export default function MasterIcd10Page() {
             className="border-[#075489] text-[#075489] hover:bg-[#075489]/10"
           >
             <Upload className="h-4 w-4" />
-            {importing ? "Mengimpor..." : "Import Excel"}
+            {importing ? t("masterIcd10.importing") : t("masterIcd10.importExcel")}
           </Button>
           <Button onClick={openTambah} className="bg-[#075489] hover:bg-[#075489]/90 text-white">
-            + Tambah ICD 10
+            {t("masterIcd10.addIcd")}
           </Button>
         </div>
       </div>
@@ -276,20 +278,20 @@ export default function MasterIcd10Page() {
             <div className="relative flex-1">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 pointer-events-none" />
               <Input
-                placeholder="Cari code, display, atau version..."
+                placeholder={t("masterIcd10.searchPlaceholder")}
                 value={searchInput}
                 onChange={(e) => setSearchInput(e.target.value)}
                 className="pl-9"
               />
             </div>
             <Button type="submit" className="bg-[#075489] hover:bg-[#075489]/90 text-white shrink-0">
-              Cari
+              {t("common.search")}
             </Button>
           </form>
         </div>
 
         {loading ? (
-          <div className="py-16 text-center text-sm text-gray-400">Memuat data...</div>
+          <div className="py-16 text-center text-sm text-gray-400">{t("common.loading")}</div>
         ) : (
           <DataTable
             rowNumberOffset={(page - 1) * 20}
@@ -298,7 +300,7 @@ export default function MasterIcd10Page() {
             onEdit={openEdit}
             onDelete={(row) => setDeleteTarget(row)}
             isRowLoading={(row) => deletingId === row.id}
-            emptyMessage="Belum ada data ICD 10."
+            emptyMessage={t("masterIcd10.empty")}
           />
         )}
 
@@ -322,47 +324,47 @@ export default function MasterIcd10Page() {
       <Modal
         open={modal !== null}
         onClose={() => setModal(null)}
-        title={modal === "tambah" ? "Tambah ICD 10" : "Edit ICD 10"}
+        title={modal === "tambah" ? t("masterIcd10.modalAdd") : t("masterIcd10.modalEdit")}
         size="sm"
         footer={
           <>
             <Button variant="outline" onClick={() => setModal(null)}>
-              Batal
+              {t("common.cancel")}
             </Button>
             <Button
               onClick={handleSave}
               disabled={saving}
               className="bg-[#075489] hover:bg-[#075489]/90 text-white"
             >
-              {saving ? "Menyimpan..." : "Simpan"}
+              {saving ? t("common.saving") : t("common.save")}
             </Button>
           </>
         }
       >
         <div className="space-y-4">
           <div className="space-y-1.5">
-            <Label htmlFor="icd-code">Code</Label>
+            <Label htmlFor="icd-code">{t("masterIcd10.colCode")}</Label>
             <Input
               id="icd-code"
-              placeholder="Contoh: A00"
+              placeholder={t("masterIcd10.codePlaceholder")}
               value={form.code}
               onChange={(e) => setForm((f) => ({ ...f, code: e.target.value }))}
             />
           </div>
           <div className="space-y-1.5">
-            <Label htmlFor="icd-display">Display</Label>
+            <Label htmlFor="icd-display">{t("masterIcd10.colDisplay")}</Label>
             <Input
               id="icd-display"
-              placeholder="Contoh: Cholera"
+              placeholder={t("masterIcd10.displayPlaceholder")}
               value={form.display}
               onChange={(e) => setForm((f) => ({ ...f, display: e.target.value }))}
             />
           </div>
           <div className="space-y-1.5">
-            <Label htmlFor="icd-version">Version</Label>
+            <Label htmlFor="icd-version">{t("masterIcd10.colVersion")}</Label>
             <Input
               id="icd-version"
-              placeholder="Contoh: 2010"
+              placeholder={t("masterIcd10.versionPlaceholder")}
               value={form.version}
               onChange={(e) => setForm((f) => ({ ...f, version: e.target.value }))}
             />
@@ -374,17 +376,16 @@ export default function MasterIcd10Page() {
       <Modal
         open={previewRows !== null}
         onClose={() => !importing && setPreviewRows(null)}
-        title="Preview Import ICD 10"
+        title={t("masterIcd10.previewTitle")}
         size="lg"
         footer={
           <div className="flex w-full items-center justify-between gap-3">
             <span className="text-xs text-gray-400">
-              {previewRows?.length ?? 0} baris siap diimpor. Duplikat (code &amp; version sudah ada)
-              akan dilewati otomatis.
+              {t("masterIcd10.previewHint", { n: previewRows?.length ?? 0 })}
             </span>
             <div className="flex shrink-0 gap-2">
               <Button variant="outline" onClick={() => setPreviewRows(null)} disabled={importing}>
-                Batal
+                {t("common.cancel")}
               </Button>
               <Button
                 onClick={handleConfirmImport}
@@ -392,8 +393,11 @@ export default function MasterIcd10Page() {
                 className="bg-[#075489] hover:bg-[#075489]/90 text-white"
               >
                 {importing
-                  ? `Menyimpan... (${importDone}/${previewRows?.length ?? 0})`
-                  : `Simpan ${previewRows?.length ?? 0} Data`}
+                  ? t("masterIcd10.savingProgress", {
+                      done: importDone,
+                      total: previewRows?.length ?? 0,
+                    })
+                  : t("masterIcd10.saveCount", { n: previewRows?.length ?? 0 })}
               </Button>
             </div>
           </div>
@@ -402,7 +406,7 @@ export default function MasterIcd10Page() {
         {previewRows && (
           <div className="space-y-3">
             <p className="text-xs text-gray-500">
-              File: <span className="font-medium text-gray-700">{previewFileName}</span>
+              {t("masterIcd10.fileLabel")} <span className="font-medium text-gray-700">{previewFileName}</span>
             </p>
             <div className="max-h-[55vh] overflow-auto rounded-lg border border-gray-200">
               <table className="w-full text-sm">
@@ -412,13 +416,13 @@ export default function MasterIcd10Page() {
                       #
                     </th>
                     <th className="py-2 px-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-400">
-                      Code
+                      {t("masterIcd10.colCode")}
                     </th>
                     <th className="py-2 px-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-400">
-                      Display
+                      {t("masterIcd10.colDisplay")}
                     </th>
                     <th className="py-2 px-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-400 w-28">
-                      Version
+                      {t("masterIcd10.colVersion")}
                     </th>
                   </tr>
                 </thead>
@@ -438,8 +442,7 @@ export default function MasterIcd10Page() {
             </div>
             {previewRows.length > 200 && (
               <p className="text-xs text-gray-400">
-                Menampilkan 200 dari {previewRows.length} baris. Semua baris akan tetap diimpor saat
-                disimpan.
+                {t("masterIcd10.previewLimit", { n: previewRows.length })}
               </p>
             )}
           </div>
@@ -454,7 +457,7 @@ export default function MasterIcd10Page() {
           setImportError(null)
           setSkippedRows([])
         }}
-        title="Hasil Import Excel"
+        title={t("masterIcd10.resultTitle")}
         size={importResult && importResult.skipped > 0 ? "lg" : "sm"}
         footer={
           <Button
@@ -465,7 +468,7 @@ export default function MasterIcd10Page() {
             }}
             className="bg-[#075489] hover:bg-[#075489]/90 text-white"
           >
-            Tutup
+            {t("common.close")}
           </Button>
         }
       >
@@ -476,38 +479,38 @@ export default function MasterIcd10Page() {
             <div className="grid grid-cols-3 gap-3 text-center">
               <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2">
                 <p className="text-lg font-semibold text-gray-800">{importResult.total}</p>
-                <p className="text-xs text-gray-400">Total dibaca</p>
+                <p className="text-xs text-gray-400">{t("masterIcd10.totalRead")}</p>
               </div>
               <div className="rounded-lg border border-green-200 bg-green-50 px-3 py-2">
                 <p className="text-lg font-semibold text-green-700">{importResult.imported}</p>
-                <p className="text-xs text-green-600">Ditambahkan</p>
+                <p className="text-xs text-green-600">{t("masterIcd10.added")}</p>
               </div>
               <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2">
                 <p className="text-lg font-semibold text-amber-700">{importResult.skipped}</p>
-                <p className="text-xs text-amber-600">Dilewati</p>
+                <p className="text-xs text-amber-600">{t("masterIcd10.skipped")}</p>
               </div>
             </div>
 
             {skippedRows.length > 0 && (
               <div className="space-y-2">
                 <p className="text-xs font-semibold uppercase tracking-wide text-gray-400">
-                  Baris yang dilewati
+                  {t("masterIcd10.skippedRows")}
                 </p>
                 <div className="max-h-[45vh] overflow-auto rounded-lg border border-gray-200">
                   <table className="w-full text-sm">
                     <thead className="sticky top-0 bg-gray-50">
                       <tr className="border-b border-gray-100">
                         <th className="py-2 px-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-400">
-                          Code
+                          {t("masterIcd10.colCode")}
                         </th>
                         <th className="py-2 px-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-400">
-                          Display
+                          {t("masterIcd10.colDisplay")}
                         </th>
                         <th className="py-2 px-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-400 w-24">
-                          Version
+                          {t("masterIcd10.colVersion")}
                         </th>
                         <th className="py-2 px-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-400 w-64">
-                          Alasan
+                          {t("masterIcd10.colReason")}
                         </th>
                       </tr>
                     </thead>
@@ -529,7 +532,7 @@ export default function MasterIcd10Page() {
                 </div>
                 {skippedRows.length > 200 && (
                   <p className="text-xs text-gray-400">
-                    Menampilkan 200 dari {skippedRows.length} baris yang dilewati.
+                    {t("masterIcd10.skippedLimit", { n: skippedRows.length })}
                   </p>
                 )}
               </div>

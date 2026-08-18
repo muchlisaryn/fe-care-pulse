@@ -12,12 +12,14 @@ import { useAppDispatch, useAppSelector } from "@/lib/store/hooks"
 import { updateProfile } from "@/lib/store/slices/authSlice"
 import { saveAuth, loadAuth } from "@/lib/auth"
 import api from "@/lib/axios"
+import { useT } from "@/lib/i18n"
 
 type ProfileForm = { name: string; username: string; email: string }
 
 export default function ProfilPage() {
   const dispatch = useAppDispatch()
   const { name, username, email } = useAppSelector((s) => s.auth)
+  const t = useT()
 
   const [profile, setProfile] = useState<ProfileForm>({
     name: name ?? "",
@@ -47,11 +49,11 @@ export default function ProfilPage() {
       if (stored) {
         saveAuth(updated.username, stored.token, stored.menus, updated.name, updated.email)
       }
-      setProfileMsg({ type: "success", text: "Profil berhasil diperbarui." })
+      setProfileMsg({ type: "success", text: t("profile.updated") })
     } catch (err: unknown) {
       const msg =
         (err as { response?: { data?: { message?: string } } })?.response?.data?.message
-        ?? "Gagal memperbarui profil."
+        ?? t("profile.updateFailed")
       setProfileMsg({ type: "error", text: msg })
     } finally {
       setProfileSaving(false)
@@ -63,7 +65,7 @@ export default function ProfilPage() {
 
   return (
     <div className="space-y-6">
-      <PageHeader title="Profil" subtitle="Kelola informasi akun Anda" />
+      <PageHeader title={t("profile.title")} subtitle={t("profile.subtitle")} />
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
         {/* Avatar card */}
@@ -76,11 +78,11 @@ export default function ProfilPage() {
             <p className="text-sm text-gray-400">@{username ?? "—"}</p>
           </div>
           <div className="w-full border-t border-gray-100 pt-3 space-y-1 text-left">
-            <p className="text-xs text-gray-400">Username</p>
+            <p className="text-xs text-gray-400">{t("profile.username")}</p>
             <p className="text-sm font-medium text-gray-700">{username ?? "—"}</p>
           </div>
           <div className="w-full space-y-1 text-left">
-            <p className="text-xs text-gray-400">Email</p>
+            <p className="text-xs text-gray-400">{t("profile.email")}</p>
             <p className="text-sm font-medium text-gray-700 break-all">{email ?? "—"}</p>
           </div>
         </Card>
@@ -88,7 +90,7 @@ export default function ProfilPage() {
         <div className="lg:col-span-2 space-y-5">
           {/* Profile info form */}
           <Card>
-            <h2 className="mb-5 text-base font-semibold text-gray-900">Informasi Pribadi</h2>
+            <h2 className="mb-5 text-base font-semibold text-gray-900">{t("profile.personalInfo")}</h2>
 
             {profileMsg && (
               <div
@@ -104,7 +106,7 @@ export default function ProfilPage() {
 
             <form onSubmit={handleProfileSave} className="space-y-4">
               <div className="space-y-1.5">
-                <Label htmlFor="profile-name">Nama Lengkap</Label>
+                <Label htmlFor="profile-name">{t("profile.fullName")}</Label>
                 <Input
                   id="profile-name"
                   value={profile.name}
@@ -114,7 +116,7 @@ export default function ProfilPage() {
               </div>
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                 <div className="space-y-1.5">
-                  <Label htmlFor="profile-username">Username</Label>
+                  <Label htmlFor="profile-username">{t("profile.username")}</Label>
                   <Input
                     id="profile-username"
                     value={profile.username}
@@ -123,7 +125,7 @@ export default function ProfilPage() {
                   />
                 </div>
                 <div className="space-y-1.5">
-                  <Label htmlFor="profile-email">Email</Label>
+                  <Label htmlFor="profile-email">{t("profile.email")}</Label>
                   <Input
                     id="profile-email"
                     type="email"
@@ -139,7 +141,7 @@ export default function ProfilPage() {
                   disabled={profileSaving}
                   className="bg-[#075489] hover:bg-[#075489]/90 text-white"
                 >
-                  {profileSaving ? "Menyimpan..." : "Simpan Perubahan"}
+                  {profileSaving ? t("common.saving") : t("profile.saveChanges")}
                 </Button>
               </div>
             </form>
@@ -149,15 +151,15 @@ export default function ProfilPage() {
               di sini cukup penunjuk arah, bukan formulir kedua. */}
           <Card className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div>
-              <h2 className="text-base font-semibold text-gray-900">Kata Sandi</h2>
+              <h2 className="text-base font-semibold text-gray-900">{t("profile.passwordCard")}</h2>
               <p className="mt-0.5 text-sm text-gray-500">
-                Ganti kata sandi akun di halaman terpisah.
+                {t("profile.passwordCardHint")}
               </p>
             </div>
             <Link href="/pengaturan/kata-sandi" className="shrink-0">
               <Button variant="outline" className="border-[#075489] text-[#075489] hover:bg-[#075489]/10">
                 <KeyRound className="h-4 w-4" />
-                Ubah Kata Sandi
+                {t("profile.changePassword")}
               </Button>
             </Link>
           </Card>

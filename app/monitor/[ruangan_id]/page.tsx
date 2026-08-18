@@ -7,6 +7,7 @@ import { useAppDispatch, useAppSelector } from "@/lib/store/hooks"
 import { setCredentials } from "@/lib/store/slices/authSlice"
 import { loadAuth } from "@/lib/auth"
 import api from "@/lib/axios"
+import { useLanguage, localeOf, type Lang } from "@/lib/i18n"
 
 type BoardLine = { jenis: "Paket" | "Satuan"; name: string; qty: number }
 
@@ -25,15 +26,15 @@ type BoardOrder = {
 
 const REFRESH_MS = 20000 // auto-refresh tiap 20 detik
 
-const STATUS_LABEL: Record<string, string> = {
-  diajukan: "Diajukan",
-  pencucian: "Pencucian",
-  pengemasan: "Packaging",
-  selesai: "Siap Steril",
-  sterilisasi: "Sterilisasi",
-  steril: "Steril",
-  digudang: "Di Gudang",
-  dipinjam: "Terdistribusi",
+const STATUS_LABEL_KEY: Record<string, string> = {
+  diajukan: "monitorBoard.statusSubmitted",
+  pencucian: "monitorBoard.statusCleaning",
+  pengemasan: "monitorBoard.statusPackaging",
+  selesai: "monitorBoard.statusReadySterile",
+  sterilisasi: "monitorBoard.statusSterilizing",
+  steril: "monitorBoard.statusSterile",
+  digudang: "monitorBoard.statusInStorage",
+  dipinjam: "monitorBoard.statusDistributed",
 }
 const STATUS_COLOR: Record<string, string> = {
   diajukan: "bg-amber-300 text-amber-950",
@@ -46,11 +47,11 @@ const STATUS_COLOR: Record<string, string> = {
   dipinjam: "bg-blue-200 text-blue-950",
 }
 
-function formatDate(value: string | null) {
+function formatDate(value: string | null, lang: Lang) {
   if (!value) return "—"
   const d = new Date(value)
   if (Number.isNaN(d.getTime())) return value
-  return d.toLocaleDateString("id-ID", { day: "2-digit", month: "short", year: "numeric" })
+  return d.toLocaleDateString(localeOf(lang), { day: "2-digit", month: "short", year: "numeric" })
 }
 
 // Kolom Qty dilebarkan dari 80px agar muat angka + satuannya ("set" / "unit").
@@ -59,6 +60,7 @@ const GRID = "grid grid-cols-[150px_160px_150px_130px_84px_1fr_110px] items-star
 export default function MonitorRuanganPage() {
   const dispatch = useAppDispatch()
   const token = useAppSelector((s) => s.auth.token)
+  const { t, lang } = useLanguage()
   const params = useParams()
   const roomId = Number(params.ruangan_id)
 
@@ -90,8 +92,8 @@ export default function MonitorRuanganPage() {
   // Jam berjalan.
   useEffect(() => {
     setNow(new Date())
-    const t = setInterval(() => setNow(new Date()), 1000)
-    return () => clearInterval(t)
+    const timer = setInterval(() => setNow(new Date()), 1000)
+    return () => clearInterval(timer)
   }, [])
 
   // Nama ruangan untuk judul. Baris papan sudah membawa `room_name`, jadi lookup
@@ -128,17 +130,17 @@ export default function MonitorRuanganPage() {
           setError(null)
         }
       } catch {
-        if (active) setError("Gagal memuat data monitoring.")
+        if (active) setError("monitorBoard.loadFailed")
       } finally {
         if (active) setLoaded(true)
       }
     }
 
     load()
-    const t = setInterval(load, REFRESH_MS)
+    const timer = setInterval(load, REFRESH_MS)
     return () => {
       active = false
-      clearInterval(t)
+      clearInterval(timer)
     }
   }, [token, roomId])
 
@@ -150,20 +152,20 @@ export default function MonitorRuanganPage() {
     const el = scrollRef.current
     if (!el) return
     let dir = 1
-    const t = setInterval(() => {
+    const timer = setInterval(() => {
       if (el.scrollHeight <= el.clientHeight) return
       el.scrollTop += dir
       if (el.scrollTop + el.clientHeight >= el.scrollHeight) dir = -1
       else if (el.scrollTop <= 0) dir = 1
     }, 40)
-    return () => clearInterval(t)
+    return () => clearInterval(timer)
   }, [orders])
 
   const jam = now
-    ? now.toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit", second: "2-digit" })
+    ? now.toLocaleTimeString(localeOf(lang), { hour: "2-digit", minute: "2-digit", second: "2-digit" })
     : ""
   const tanggal = now
-    ? now.toLocaleDateString("id-ID", { weekday: "long", day: "2-digit", month: "long", year: "numeric" })
+    ? now.toLocaleDateString(localeOf(lang), { weekday: "long", day: "2-digit", month: "long", year: "numeric" })
     : ""
 
   return (
@@ -172,10 +174,10 @@ export default function MonitorRuanganPage() {
       <div className="flex items-end justify-between border-b-2 border-white/30 pb-3">
         <div className="min-w-0">
           <h1 className="truncate text-4xl font-extrabold tracking-tight drop-shadow">
-            {displayRoom ? `CSSD MONITOR — ${displayRoom}` : "CSSD MONITOR"}
+            {displayRoom ? `${t("monitorBoard.titleRoom")} — ${displayRoom}` : t("monitorBoard.titleRoom")}
           </h1>
           <Link href="/monitor" className="mt-1 inline-block text-sm text-white/80 underline hover:text-white">
-            ← Pilih ruangan lain
+            {t("monitorBoard.pickOtherRoom")}
           </Link>
         </div>
         <div className="text-right leading-tight">
@@ -186,29 +188,29 @@ export default function MonitorRuanganPage() {
 
       {/* Kolom header */}
       <div className={`${GRID} border-b border-white/25 py-2 text-sm font-bold uppercase tracking-wide text-white/80`}>
-        <div>Date | Time</div>
-        <div>Reservation</div>
-        <div>Peminjam</div>
-        <div>Status</div>
-        <div>Jenis</div>
-        <div>Instrument</div>
-        <div className="text-right">Qty</div>
+        <div>{t("monitorBoard.colDateTime")}</div>
+        <div>{t("monitorBoard.colReservation")}</div>
+        <div>{t("monitorBoard.colBorrower")}</div>
+        <div>{t("common.status")}</div>
+        <div>{t("monitorBoard.colType")}</div>
+        <div>{t("monitorBoard.colInstrument")}</div>
+        <div className="text-right">{t("monitorBoard.colQty")}</div>
       </div>
 
       {/* Baris data */}
       <div ref={scrollRef} className="flex-1 overflow-hidden">
         {!loaded ? (
-          <div className="flex h-full items-center justify-center text-2xl text-white/70">Memuat data…</div>
+          <div className="flex h-full items-center justify-center text-2xl text-white/70">{t("common.loading")}</div>
         ) : !token ? (
           <div className="flex h-full flex-col items-center justify-center gap-2 text-white/80">
-            <p className="text-2xl font-semibold">Belum login pada perangkat ini</p>
-            <p className="text-sm">Login dulu di aplikasi pada browser TV ini, lalu buka kembali halaman ini.</p>
+            <p className="text-2xl font-semibold">{t("monitorBoard.notLoggedIn")}</p>
+            <p className="text-sm">{t("monitorBoard.notLoggedInHint")}</p>
           </div>
         ) : error ? (
-          <div className="flex h-full items-center justify-center text-2xl text-red-100">{error}</div>
+          <div className="flex h-full items-center justify-center text-2xl text-red-100">{t(error)}</div>
         ) : orders.length === 0 ? (
           <div className="flex h-full items-center justify-center text-2xl text-white/70">
-            Tidak ada order aktif untuk ruangan ini.
+            {t("monitorBoard.emptyRoom")}
           </div>
         ) : (
           orders.map((g, gi) => (
@@ -222,7 +224,7 @@ export default function MonitorRuanganPage() {
                     <div className="font-mono tabular-nums text-white/95">
                       {li === 0 ? (
                         <>
-                          {formatDate(g.order_date)} <span className="text-white/60">|</span>{" "}
+                          {formatDate(g.order_date, lang)} <span className="text-white/60">|</span>{" "}
                           {g.order_time ?? "—"}
                         </>
                       ) : null}
@@ -239,13 +241,13 @@ export default function MonitorRuanganPage() {
                             (STATUS_COLOR[g.status] ?? "bg-white/20 text-white")
                           }
                         >
-                          {STATUS_LABEL[g.status] ?? g.status}
+                          {STATUS_LABEL_KEY[g.status] ? t(STATUS_LABEL_KEY[g.status]) : g.status}
                         </span>
                       ) : null}
                     </div>
                     <div>
                       <span className="rounded bg-white/15 px-1.5 py-0.5 text-xs font-bold uppercase">
-                        {ln.jenis}
+                        {ln.jenis === "Paket" ? t("monitorBoard.typePackage") : t("monitorBoard.typeSingle")}
                       </span>
                     </div>
                     <div className="truncate font-semibold uppercase">{ln.name}</div>
@@ -253,7 +255,7 @@ export default function MonitorRuanganPage() {
                     <div className="text-right text-lg font-bold tabular-nums">
                       {ln.qty}
                       <span className="ml-1 text-sm font-normal text-white/70">
-                        {ln.jenis === "Paket" ? "set" : "unit"}
+                        {ln.jenis === "Paket" ? t("common.set") : t("common.unit")}
                       </span>
                     </div>
                   </div>

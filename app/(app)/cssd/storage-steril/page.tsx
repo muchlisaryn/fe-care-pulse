@@ -37,7 +37,7 @@ import {
   type StorageIncomingUnit,
   type StorageInventoryRow,
 } from "@/lib/store/slices/storageSlice"
-import { useLanguage } from "@/lib/i18n"
+import { useLanguage, localeOf, type Lang } from "@/lib/i18n"
 import api from "@/lib/axios"
 
 type StorageTab = "simpan" | "inventaris"
@@ -68,11 +68,11 @@ function groupTitle(
     : `${names[0]} ${t("common.andMore", { n: names.length - 1 })}`
 }
 
-function formatDate(value: string | null, lang: string) {
+function formatDate(value: string | null, lang: Lang) {
   if (!value) return "—"
   const d = new Date(value)
   if (Number.isNaN(d.getTime())) return value
-  return d.toLocaleDateString(lang === "id" ? "id-ID" : "en-GB", { day: "2-digit", month: "short", year: "numeric" })
+  return d.toLocaleDateString(localeOf(lang), { day: "2-digit", month: "short", year: "numeric" })
 }
 
 // Alasan sebuah baris tidak bisa dipesan — dikirim server dalam bahasa Indonesia.
@@ -1218,7 +1218,7 @@ function StorageSterilPage() {
             type="button"
             onClick={() => setZoom(null)}
             className="absolute right-4 top-4 rounded-full bg-white/10 p-2 text-white hover:bg-white/20"
-            title="Close"
+            title={t("common.close")}
           >
             <X className="h-5 w-5" />
           </button>

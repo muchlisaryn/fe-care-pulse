@@ -17,12 +17,14 @@ import {
   fetchSterileExpirySummary,
   type SterileExpiryBatch,
 } from "@/lib/store/slices/sterileExpirySlice"
+import { useT } from "@/lib/i18n"
 
 const ITEMS_PER_PAGE = 20
 
 export default function KedaluwarsaPage() {
   const dispatch = useAppDispatch()
   const { items, page, lastPage, total, loading, summary } = useAppSelector((s) => s.sterileExpiry)
+  const t = useT()
 
   // Ambang hari & kata kunci yang SUDAH dikirim ke server; `*Input` adalah draft
   // di kotak isian (baru dipakai saat tombol ditekan / form disubmit).
@@ -54,7 +56,7 @@ export default function KedaluwarsaPage() {
 
   const columns: Column<SterileExpiryBatch>[] = [
     {
-      header: "Batch Code",
+      header: t("expiry.colBatchCode"),
       cell: (b) =>
         b.code ? (
           <span className="font-mono text-xs font-semibold text-[#075489] bg-[#075489]/8 px-2 py-1 rounded">
@@ -66,7 +68,7 @@ export default function KedaluwarsaPage() {
       className: "w-28",
     },
     {
-      header: "Machine",
+      header: t("expiry.colMachine"),
       cell: (b) =>
         b.machine ? (
           <span className="text-gray-700">{b.machine}</span>
@@ -75,7 +77,7 @@ export default function KedaluwarsaPage() {
         ),
     },
     {
-      header: "Rack",
+      header: t("expiry.colRack"),
       cell: (b) =>
         b.racks.length ? (
           <span className="flex flex-wrap gap-1">
@@ -99,14 +101,17 @@ export default function KedaluwarsaPage() {
        * 1 (bukan per instrumen di dalamnya) dan satu instrumen satuan dihitung 1.
        * Rinciannya ("2 set · 3 satuan") ditulis di bawah angkanya.
        */
-      header: "Unit Count",
+      header: t("expiry.colUnitCount"),
       cell: (b) => (
         <div className="leading-tight">
           <span className="font-semibold text-gray-900">
-            {b.item_count} <span className="text-xs font-normal text-gray-400">units</span>
+            {b.item_count} <span className="text-xs font-normal text-gray-400">{t("common.units")}</span>
           </span>
           <div className="mt-0.5 text-xs text-gray-400">
-            {[b.set_count > 0 ? `${b.set_count} sets` : null, b.unit_count > 0 ? `${b.unit_count} singles` : null]
+            {[
+              b.set_count > 0 ? t("expiry.setsSuffix", { n: b.set_count }) : null,
+              b.unit_count > 0 ? t("expiry.singlesSuffix", { n: b.unit_count }) : null,
+            ]
               .filter(Boolean)
               .join(" · ") || "—"}
           </div>
@@ -115,7 +120,7 @@ export default function KedaluwarsaPage() {
       className: "w-32",
     },
     {
-      header: "Expiry",
+      header: t("expiry.colExpiry"),
       cell: (b) => (
         <ExpiryCard
           date={b.expiry_date}
@@ -127,15 +132,15 @@ export default function KedaluwarsaPage() {
       ),
     },
     {
-      header: "Remaining",
+      header: t("expiry.colRemaining"),
       cell: (b) => {
         if (b.days_to_expiry === null) return <span className="text-gray-400 text-xs">—</span>
         return b.days_to_expiry < 0 ? (
-          <Badge variant="danger">{Math.abs(b.days_to_expiry)} days overdue</Badge>
+          <Badge variant="danger">{t("expiry.daysOverdue", { n: Math.abs(b.days_to_expiry) })}</Badge>
         ) : b.days_to_expiry === 0 ? (
-          <Badge variant="danger">Today</Badge>
+          <Badge variant="danger">{t("expiry.today")}</Badge>
         ) : (
-          <Badge variant="warning">{b.days_to_expiry} days left</Badge>
+          <Badge variant="warning">{t("expiry.daysLeft", { n: b.days_to_expiry })}</Badge>
         )
       },
       className: "w-32",
@@ -145,17 +150,17 @@ export default function KedaluwarsaPage() {
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Sterile Expiry"
-        subtitle="Sterile batches in storage whose sterile period has expired or is about to"
+        title={t("expiry.title")}
+        subtitle={t("expiry.subtitle")}
       />
 
       {/* Angka dari server (seluruh data), bukan dari baris halaman yang sedang tampil.
           Instrumen dihitung dengan aturan set = 1 & satuan = 1, sama dengan Storage Steril. */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <StatCard title="Total Batches" value={`${summary.batches}`} icon={Boxes} />
-        <StatCard title="Total Units" value={`${summary.items}`} icon={CalendarClock} />
-        <StatCard title="Already Expired" value={`${summary.expired}`} icon={AlertTriangle} positive={false} />
-        <StatCard title="Expiring Soon" value={`${summary.alert}`} icon={Clock} positive={false} />
+        <StatCard title={t("expiry.statBatches")} value={`${summary.batches}`} icon={Boxes} />
+        <StatCard title={t("expiry.statUnits")} value={`${summary.items}`} icon={CalendarClock} />
+        <StatCard title={t("expiry.statExpired")} value={`${summary.expired}`} icon={AlertTriangle} positive={false} />
+        <StatCard title={t("expiry.statAlert")} value={`${summary.alert}`} icon={Clock} positive={false} />
       </div>
 
       <Card className="p-0">
@@ -164,20 +169,20 @@ export default function KedaluwarsaPage() {
             <div className="relative flex-1">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 pointer-events-none" />
               <Input
-                placeholder="Search batch code, machine, instrument, rack, or label number..."
+                placeholder={t("expiry.searchPlaceholder")}
                 value={searchInput}
                 onChange={(e) => setSearchInput(e.target.value)}
                 className="pl-9"
               />
             </div>
             <Button type="submit" className="bg-[#075489] hover:bg-[#075489]/90 text-white shrink-0">
-              Search
+              {t("common.search")}
             </Button>
           </form>
 
           <form onSubmit={applyDays} className="space-y-1.5">
             <label className="block text-xs font-semibold uppercase tracking-wide text-gray-400">
-              Threshold (days ahead)
+              {t("expiry.thresholdLabel")}
             </label>
             <div className="flex items-center gap-2">
               <Input
@@ -188,23 +193,23 @@ export default function KedaluwarsaPage() {
                 className="w-28"
               />
               <Button type="submit" className="bg-[#075489] hover:bg-[#075489]/90 text-white">
-                Apply
+                {t("expiry.apply")}
               </Button>
             </div>
             <p className="flex items-center gap-1.5 text-xs text-gray-400">
               <Clock className="h-3.5 w-3.5 shrink-0" />
-              Showing batches expiring within {days} days (including those already past).
+              {t("expiry.thresholdHint", { days })}
             </p>
           </form>
         </div>
 
         {loading ? (
-          <div className="py-16 text-center text-sm text-gray-400">Loading data...</div>
+          <div className="py-16 text-center text-sm text-gray-400">{t("common.loading")}</div>
         ) : (
           <DataTable
             columns={columns}
             data={items}
-            emptyMessage="No batch is approaching expiry."
+            emptyMessage={t("expiry.empty")}
             rowNumberOffset={(page - 1) * ITEMS_PER_PAGE}
           />
         )}
@@ -215,7 +220,6 @@ export default function KedaluwarsaPage() {
           totalItems={total}
           itemsPerPage={ITEMS_PER_PAGE}
           onPageChange={changePage}
-          labels={{ showing: "Showing", of: "of", items: "items" }}
         />
       </Card>
     </div>

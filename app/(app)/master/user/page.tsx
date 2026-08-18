@@ -27,6 +27,7 @@ import {
   fetchAuthorities,
 } from "@/lib/store/slices/authoritySlice"
 import api from "@/lib/axios"
+import { useT } from "@/lib/i18n"
 
 type UserForm = {
   name: string
@@ -257,6 +258,7 @@ function suggestAuthority(input: string, names: string[]): string | null {
 function preflightRows(
   rows: ImportRow[],
   authorityNames: string[],
+  t: (key: string, vars?: Record<string, string | number>) => string,
 ): { accepted: ImportRow[]; rejected: ImportError[] } {
   const firstSeenAt = new Map<string, number>()
   const validAuthorities = new Set(authorityNames.map(normalize))
@@ -270,7 +272,7 @@ function preflightRows(
         rejected.push({
           row: row.row,
           username: row.username,
-          message: "Kolom authority wajib diisi.",
+          message: t("masterUser.errAuthorityRequired"),
         })
         continue
       }
@@ -280,8 +282,8 @@ function preflightRows(
           row: row.row,
           username: row.username,
           message: suggestion
-            ? `Otoritas "${row.authority}" tidak dikenal. Maksudnya "${suggestion}"?`
-            : `Otoritas "${row.authority}" tidak dikenal. Lihat sheet "Daftar Otoritas" pada template.`,
+            ? t("masterUser.errAuthorityUnknownSuggest", { name: row.authority, suggestion })
+            : t("masterUser.errAuthorityUnknown", { name: row.authority }),
         })
         continue
       }
@@ -299,7 +301,7 @@ function preflightRows(
       rejected.push({
         row: row.row,
         username: row.username,
-        message: `Username "${row.username}" sudah dipakai baris ${firstRow} pada berkas ini.`,
+        message: t("masterUser.errDuplicateUsername", { name: row.username, row: firstRow }),
       })
       continue
     }
@@ -317,6 +319,8 @@ export default function MasterUserPage() {
     useAppSelector((s) => s.users)
   const { items: authorities, loaded: authoritiesLoaded } =
     useAppSelector((s) => s.authorities)
+
+  const t = useT()
 
   const [searchInput, setSearchInput] = useState(search)
   const [modal, setModal] = useState<"tambah" | "edit" | null>(null)
@@ -386,8 +390,8 @@ export default function MasterUserPage() {
     )
 
     const wb = XLSX.utils.book_new()
-    XLSX.utils.book_append_sheet(wb, sheet, "Template")
-    XLSX.utils.book_append_sheet(wb, authoritySheet, "Daftar Otoritas")
+    XLSX.utils.book_append_sheet(wb, sheet, t("masterUser.sheetTemplate"))
+    XLSX.utils.book_append_sheet(wb, authoritySheet, t("masterUser.sheetAuthorities"))
     XLSX.writeFile(wb, "template-import-user.xlsx")
   }
 
@@ -414,7 +418,7 @@ export default function MasterUserPage() {
 
     const sheet = buildStyledSheet([...IMPORT_COLUMNS, "keterangan"], rows)
     const wb = XLSX.utils.book_new()
-    XLSX.utils.book_append_sheet(wb, sheet, "Gagal")
+    XLSX.utils.book_append_sheet(wb, sheet, t("masterUser.sheetFailed"))
     const base = importFileName.replace(/\.[^.]+$/, "") || "import-user"
     XLSX.writeFile(wb, `gagal-${base}.xlsx`)
   }
@@ -452,15 +456,14 @@ export default function MasterUserPage() {
       const parsed = parseSheetRows(raw)
 
       if (parsed.length === 0) {
-        setImportError(
-          "Berkas tidak berisi data user yang bisa dibaca. Pastikan barisan header-nya sama dengan template.",
-        )
+        setImportError(t("masterUser.errUnreadable"))
         return
       }
 
       const { accepted, rejected } = preflightRows(
         parsed,
         authorities.map((a) => a.name),
+        t,
       )
 
       setImportFileName(file.name)
@@ -477,7 +480,7 @@ export default function MasterUserPage() {
 
       setImportRows(accepted)
     } catch {
-      setImportError("Gagal membaca berkas. Pastikan formatnya Excel (.xlsx/.xls) atau CSV.")
+      setImportError(t("masterUser.errReadFile"))
     }
   }
 
@@ -490,7 +493,7 @@ export default function MasterUserPage() {
     if (!importRows || importing) return
     // Tombolnya sudah mati saat syarat ini tak terpenuhi; ini jaring pengaman saja.
     if (!defaultPasswordValid) {
-      setImportError("Password default wajib diisi, minimal 8 karakter.")
+      setImportError(t("masterUser.errDefaultPassword"))
       return
     }
 
@@ -523,7 +526,7 @@ export default function MasterUserPage() {
       dispatch(invalidateUsers())
     } catch (err) {
       const x = err as { response?: { data?: { message?: string } } }
-      setImportError(x.response?.data?.message ?? "Gagal mengimpor berkas.")
+      setImportError(x.response?.data?.message ?? t("masterUser.errImport"))
     } finally {
       setImporting(false)
     }
@@ -622,11 +625,11 @@ export default function MasterUserPage() {
 
   const columns: Column<User>[] = [
     {
-      header: "Nama",
+      header: t("profile.fullName"),
       cell: (row) => <span className="font-medium text-gray-900">{row.name}</span>,
     },
     {
-      header: "Username",
+      header: t("profile.username"),
       cell: (row) => (
         <span className="font-mono text-xs font-semibold text-[#075489] bg-[#075489]/8 px-2 py-1 rounded">
           {row.username}
@@ -635,7 +638,7 @@ export default function MasterUserPage() {
       className: "w-36",
     },
     {
-      header: "Email",
+      header: t("profile.email"),
       cell: (row) =>
         row.email ? (
           <span className="text-sm text-gray-500">{row.email}</span>
@@ -644,7 +647,7 @@ export default function MasterUserPage() {
         ),
     },
     {
-      header: "Otoritas",
+      header: t("masterUser.colAuthority"),
       cell: (row) =>
         row.authority ? (
           <span className="text-sm text-gray-700">{row.authority.name}</span>
@@ -658,7 +661,7 @@ export default function MasterUserPage() {
   return (
     <div className="space-y-6">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <PageHeader title="Master User" subtitle="Kelola data pengguna sistem" />
+        <PageHeader title={t("masterUser.title")} subtitle={t("masterUser.subtitle")} />
         <div className="flex flex-col gap-2 sm:flex-row">
           <input
             ref={fileRef}
@@ -674,10 +677,10 @@ export default function MasterUserPage() {
             className="border-[#075489] text-[#075489] hover:bg-[#075489]/10"
           >
             <Upload className="h-4 w-4" />
-            Import Excel
+            {t("masterUser.importExcel")}
           </Button>
           <Button onClick={openTambah} className="bg-[#075489] hover:bg-[#075489]/90 text-white">
-            + Tambah User
+            {t("masterUser.addUser")}
           </Button>
         </div>
       </div>
@@ -688,20 +691,20 @@ export default function MasterUserPage() {
             <div className="relative flex-1">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 pointer-events-none" />
               <Input
-                placeholder="Cari nama, username, atau email..."
+                placeholder={t("masterUser.searchPlaceholder")}
                 value={searchInput}
                 onChange={(e) => setSearchInput(e.target.value)}
                 className="pl-9"
               />
             </div>
             <Button type="submit" className="bg-[#075489] hover:bg-[#075489]/90 text-white shrink-0">
-              Cari
+              {t("common.search")}
             </Button>
           </form>
         </div>
 
         {loading ? (
-          <div className="py-16 text-center text-sm text-gray-400">Memuat data...</div>
+          <div className="py-16 text-center text-sm text-gray-400">{t("common.loading")}</div>
         ) : (
           <DataTable
             rowNumberOffset={(page - 1) * PER_PAGE}
@@ -710,7 +713,7 @@ export default function MasterUserPage() {
             onEdit={openEdit}
             onDelete={(row) => setDeleteTarget(row)}
             isRowLoading={(row) => deletingId === row.id}
-            emptyMessage="Belum ada data user."
+            emptyMessage={t("masterUser.empty")}
           />
         )}
 
@@ -727,21 +730,21 @@ export default function MasterUserPage() {
       <Modal
         open={importOpen}
         onClose={() => !importing && setImportOpen(false)}
-        title="Import User"
+        title={t("masterUser.importTitle")}
         size="md"
         footer={
           <>
             <Button variant="outline" onClick={() => setImportOpen(false)} disabled={importing}>
-              {importResult ? "Tutup" : "Batal"}
+              {importResult ? t("common.close") : t("common.cancel")}
             </Button>
             {importRows && (
               <Button
                 onClick={handleConfirmImport}
                 disabled={importing || !defaultPasswordValid}
-                title={defaultPasswordValid ? undefined : "Isi password default minimal 8 karakter"}
+                title={defaultPasswordValid ? undefined : t("masterUser.defaultPasswordTitle")}
                 className="bg-[#075489] hover:bg-[#075489]/90 text-white"
               >
-                {importing ? "Mengimpor..." : `Import ${importRows.length} baris`}
+                {importing ? t("masterUser.importing") : t("masterUser.importRows", { n: importRows.length })}
               </Button>
             )}
           </>
@@ -749,15 +752,15 @@ export default function MasterUserPage() {
       >
         <div className="space-y-4">
           <div className="rounded-lg bg-gray-50 px-4 py-3 text-sm text-gray-600">
-            <p className="font-medium text-gray-700">Format berkas</p>
+            <p className="font-medium text-gray-700">{t("masterUser.formatTitle")}</p>
             <p className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1">
               <span className="inline-flex items-center gap-1.5">
                 <span className="inline-block h-3 w-3 rounded-sm border border-[#bf9000] bg-[#FFE699]" />
-                Kolom wajib diisi
+                {t("masterUser.requiredColumn")}
               </span>
               <span className="inline-flex items-center gap-1.5">
                 <span className="inline-block h-3 w-3 rounded-sm border border-gray-300 bg-[#F2F2F2]" />
-                Kolom opsional
+                {t("masterUser.optionalColumn")}
               </span>
             </p>
             <button
@@ -765,13 +768,13 @@ export default function MasterUserPage() {
               onClick={handleDownloadTemplate}
               className="mt-2 inline-flex items-center gap-1 text-xs font-medium text-[#075489] hover:underline"
             >
-              <Download className="h-3.5 w-3.5" /> Unduh template
+              <Download className="h-3.5 w-3.5" /> {t("masterUser.downloadTemplate")}
             </button>
           </div>
 
           <div className="space-y-1.5">
             <Label htmlFor="import-default-password">
-              Password default <span className="text-red-500">*</span>
+              {t("masterUser.defaultPassword")} <span className="text-red-500">*</span>
             </Label>
             <Input
               id="import-default-password"
@@ -784,17 +787,17 @@ export default function MasterUserPage() {
               autoComplete="new-password"
               value={defaultPassword}
               onChange={(e) => setDefaultPassword(e.target.value)}
-              placeholder="Minimal 8 karakter"
+              placeholder={t("masterUser.defaultPasswordPlaceholder")}
               disabled={importing}
               error={defaultPassword.length > 0 && !defaultPasswordValid}
             />
             {defaultPassword.length > 0 && !defaultPasswordValid ? (
               <p className="text-xs text-red-500">
-                Password default minimal 8 karakter — baru {defaultPassword.trim().length} karakter.
+                {t("masterUser.defaultPasswordTooShort", { n: defaultPassword.trim().length })}
               </p>
             ) : (
               <p className="text-xs text-gray-400">
-                Dipakai untuk baris yang kolom <span className="font-mono">password</span>-nya kosong.
+                {t("masterUser.defaultPasswordHint")}
               </p>
             )}
           </div>
@@ -807,19 +810,18 @@ export default function MasterUserPage() {
               className="w-full border-dashed border-gray-300 text-gray-600 hover:bg-gray-50"
             >
               <Upload className="h-4 w-4" />
-              {importFileName || "Pilih berkas Excel / CSV"}
+              {importFileName || t("masterUser.pickFile")}
             </Button>
             {importRows && !importing && (
               <p className="mt-2 text-sm text-gray-600">
-                <span className="font-semibold text-gray-800">{importRows.length}</span> baris siap
-                diimport, dikirim {IMPORT_CHUNK} baris per batch.
+                <span className="font-semibold text-gray-800">{importRows.length}</span>{" "}
+                {t("masterUser.rowsReady", { chunk: IMPORT_CHUNK })}
               </p>
             )}
             {preflightErrors.length > 0 && !importResult && !importing && (
               <p className="mt-2 text-sm text-amber-700">
-                <span className="font-semibold">{preflightErrors.length}</span> baris dilewati karena
-                username-nya kembar di berkas ini atau otoritasnya tidak dikenal. Baris tersebut akan
-                muncul di daftar gagal setelah import selesai.
+                <span className="font-semibold">{preflightErrors.length}</span>{" "}
+                {t("masterUser.preflightSkipped")}
               </p>
             )}
           </div>
@@ -828,7 +830,7 @@ export default function MasterUserPage() {
           {importing && importRows && (
             <div className="space-y-1.5">
               <div className="flex justify-between text-xs text-gray-500">
-                <span>Mengimpor…</span>
+                <span>{t("masterUser.importingProgress")}</span>
                 <span>
                   {importDone} / {importRows.length}
                 </span>
@@ -857,26 +859,29 @@ export default function MasterUserPage() {
                     : "rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700"
                 }
               >
-                Berhasil menambahkan <span className="font-semibold">{importResult.created}</span> user.
+                {t("masterUser.createdUsers")}{" "}
+                <span className="font-semibold">{importResult.created}</span>{" "}
+                {t("masterUser.createdUsersSuffix")}
                 {importResult.failed > 0 && (
                   <>
                     {" "}
-                    <span className="font-semibold text-red-600">{importResult.failed}</span> baris
-                    gagal.
+                    <span className="font-semibold text-red-600">{importResult.failed}</span>{" "}
+                    {t("masterUser.failedRowsSuffix")}
                   </>
                 )}
               </div>
               {importErrors.length > 0 && (
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <p className="text-xs text-gray-500">
-                    Perbaiki berkas baris gagal, lalu unggah ulang berkas itu langsung.
+                    {t("masterUser.fixHint")}
                   </p>
                   <button
                     type="button"
                     onClick={handleDownloadFailed}
                     className="inline-flex items-center gap-1 rounded-lg border border-[#075489] px-3 py-1.5 text-xs font-medium text-[#075489] hover:bg-[#075489]/10"
                   >
-                    <Download className="h-3.5 w-3.5" /> Unduh {importErrors.length} baris gagal
+                    <Download className="h-3.5 w-3.5" />{" "}
+                    {t("masterUser.downloadFailed", { n: importErrors.length })}
                   </button>
                 </div>
               )}
@@ -885,9 +890,9 @@ export default function MasterUserPage() {
                   <table className="w-full border-collapse text-left text-sm">
                     <thead className="bg-gray-50">
                       <tr className="text-[11px] font-semibold uppercase tracking-wide text-gray-400">
-                        <th className="px-3 py-2">Baris</th>
-                        <th className="px-3 py-2">Username</th>
-                        <th className="px-3 py-2">Alasan</th>
+                        <th className="px-3 py-2">{t("masterUser.colRow")}</th>
+                        <th className="px-3 py-2">{t("profile.username")}</th>
+                        <th className="px-3 py-2">{t("masterUser.colReason")}</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -920,13 +925,13 @@ export default function MasterUserPage() {
       <Modal
         open={modal === "tambah"}
         onClose={() => setModal(null)}
-        title="Tambah User"
+        title={t("masterUser.modalAdd")}
         size="md"
         footer={
           <>
-            <Button variant="outline" onClick={() => setModal(null)}>Batal</Button>
+            <Button variant="outline" onClick={() => setModal(null)}>{t("common.cancel")}</Button>
             <Button onClick={handleRegister} disabled={saving} className="bg-[#075489] hover:bg-[#075489]/90 text-white">
-              {saving ? "Menyimpan..." : "Simpan"}
+              {saving ? t("common.saving") : t("common.save")}
             </Button>
           </>
         }
@@ -938,7 +943,7 @@ export default function MasterUserPage() {
             </div>
           )}
           <div className="space-y-1.5">
-            <Label htmlFor="u-name">Nama Lengkap</Label>
+            <Label htmlFor="u-name">{t("profile.fullName")}</Label>
             <Input
               id="u-name"
               placeholder="John Doe"
@@ -949,7 +954,7 @@ export default function MasterUserPage() {
           </div>
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div className="space-y-1.5">
-              <Label htmlFor="u-username">Username</Label>
+              <Label htmlFor="u-username">{t("profile.username")}</Label>
               <Input
                 id="u-username"
                 placeholder="johndoe"
@@ -959,7 +964,7 @@ export default function MasterUserPage() {
               {errors.username && <p className="text-xs text-red-500">{errors.username}</p>}
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="u-email">Email</Label>
+              <Label htmlFor="u-email">{t("profile.email")}</Label>
               <Input
                 id="u-email"
                 type="email"
@@ -972,14 +977,14 @@ export default function MasterUserPage() {
           </div>
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div className="space-y-1.5">
-              <Label htmlFor="u-authority">Otoritas</Label>
+              <Label htmlFor="u-authority">{t("masterUser.colAuthority")}</Label>
               <Select
                 id="u-authority"
                 value={form.authority_id}
                 onChange={(e) => setForm((p) => ({ ...p, authority_id: e.target.value ? Number(e.target.value) : "" }))}
                 error={!!errors.authority_id}
               >
-                <option value="">Pilih otoritas...</option>
+                <option value="">{t("masterUser.pickAuthority")}</option>
                 {authorities.map((a) => (
                   <option key={a.id} value={a.id}>{a.name}</option>
                 ))}
@@ -987,7 +992,7 @@ export default function MasterUserPage() {
               {errors.authority_id && <p className="text-xs text-red-500">{errors.authority_id}</p>}
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="u-telephone">No. Telepon</Label>
+              <Label htmlFor="u-telephone">{t("masterUser.phone")}</Label>
               <Input
                 id="u-telephone"
                 placeholder="081234567890"
@@ -1000,25 +1005,25 @@ export default function MasterUserPage() {
           <div className="border-t border-gray-100 pt-3">
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <div className="space-y-1.5">
-                <Label htmlFor="u-password">Password</Label>
+                <Label htmlFor="u-password">{t("masterUser.password")}</Label>
                 <Input
                   id="u-password"
                   type="password"
                   // Cegah browser mengisi field ini dengan password admin yang login.
                   autoComplete="new-password"
-                  placeholder="Min. 8 karakter"
+                  placeholder={t("masterUser.passwordPlaceholder")}
                   value={form.password}
                   onChange={(e) => setForm((p) => ({ ...p, password: e.target.value }))}
                 />
                 {errors.password && <p className="text-xs text-red-500">{errors.password}</p>}
               </div>
               <div className="space-y-1.5">
-                <Label htmlFor="u-confirm">Konfirmasi Password</Label>
+                <Label htmlFor="u-confirm">{t("masterUser.confirmPassword")}</Label>
                 <Input
                   id="u-confirm"
                   type="password"
                   autoComplete="new-password"
-                  placeholder="Ulangi password"
+                  placeholder={t("masterUser.repeatPassword")}
                   value={form.password_confirmation}
                   onChange={(e) => setForm((p) => ({ ...p, password_confirmation: e.target.value }))}
                 />
@@ -1032,13 +1037,13 @@ export default function MasterUserPage() {
       <Modal
         open={modal === "edit"}
         onClose={() => setModal(null)}
-        title="Edit User"
+        title={t("masterUser.modalEdit")}
         size="md"
         footer={
           <>
-            <Button variant="outline" onClick={() => setModal(null)}>Batal</Button>
+            <Button variant="outline" onClick={() => setModal(null)}>{t("common.cancel")}</Button>
             <Button onClick={handleEdit} disabled={saving} className="bg-[#075489] hover:bg-[#075489]/90 text-white">
-              {saving ? "Menyimpan..." : "Simpan"}
+              {saving ? t("common.saving") : t("common.save")}
             </Button>
           </>
         }
@@ -1050,7 +1055,7 @@ export default function MasterUserPage() {
             </div>
           )}
           <div className="space-y-1.5">
-            <Label htmlFor="e-name">Nama Lengkap</Label>
+            <Label htmlFor="e-name">{t("profile.fullName")}</Label>
             <Input
               id="e-name"
               placeholder="John Doe"
@@ -1061,7 +1066,7 @@ export default function MasterUserPage() {
           </div>
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div className="space-y-1.5">
-              <Label htmlFor="e-username">Username</Label>
+              <Label htmlFor="e-username">{t("profile.username")}</Label>
               <Input
                 id="e-username"
                 placeholder="johndoe"
@@ -1071,7 +1076,7 @@ export default function MasterUserPage() {
               {errors.username && <p className="text-xs text-red-500">{errors.username}</p>}
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="e-email">Email</Label>
+              <Label htmlFor="e-email">{t("profile.email")}</Label>
               <Input
                 id="e-email"
                 type="email"
@@ -1084,14 +1089,14 @@ export default function MasterUserPage() {
           </div>
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div className="space-y-1.5">
-              <Label htmlFor="e-authority">Otoritas</Label>
+              <Label htmlFor="e-authority">{t("masterUser.colAuthority")}</Label>
               <Select
                 id="e-authority"
                 value={editForm.authority_id}
                 onChange={(e) => setEditForm((p) => ({ ...p, authority_id: e.target.value ? Number(e.target.value) : "" }))}
                 error={!!errors.authority_id}
               >
-                <option value="">Pilih otoritas...</option>
+                <option value="">{t("masterUser.pickAuthority")}</option>
                 {authorities.map((a) => (
                   <option key={a.id} value={a.id}>{a.name}</option>
                 ))}
@@ -1099,7 +1104,7 @@ export default function MasterUserPage() {
               {errors.authority_id && <p className="text-xs text-red-500">{errors.authority_id}</p>}
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="e-telephone">No. Telepon</Label>
+              <Label htmlFor="e-telephone">{t("masterUser.phone")}</Label>
               <Input
                 id="e-telephone"
                 placeholder="081234567890"
@@ -1110,27 +1115,27 @@ export default function MasterUserPage() {
             </div>
           </div>
           <div className="border-t border-gray-100 pt-3">
-            <p className="text-xs text-gray-400 mb-3">Kosongkan jika tidak ingin mengubah password</p>
+            <p className="text-xs text-gray-400 mb-3">{t("masterUser.leaveBlankPassword")}</p>
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <div className="space-y-1.5">
-                <Label htmlFor="e-password">Password Baru</Label>
+                <Label htmlFor="e-password">{t("masterUser.newPassword")}</Label>
                 <Input
                   id="e-password"
                   type="password"
                   autoComplete="new-password"
-                  placeholder="Min. 8 karakter"
+                  placeholder={t("masterUser.passwordPlaceholder")}
                   value={editForm.password}
                   onChange={(e) => setEditForm((p) => ({ ...p, password: e.target.value }))}
                 />
                 {errors.password && <p className="text-xs text-red-500">{errors.password}</p>}
               </div>
               <div className="space-y-1.5">
-                <Label htmlFor="e-confirm">Konfirmasi Password</Label>
+                <Label htmlFor="e-confirm">{t("masterUser.confirmPassword")}</Label>
                 <Input
                   id="e-confirm"
                   type="password"
                   autoComplete="new-password"
-                  placeholder="Ulangi password"
+                  placeholder={t("masterUser.repeatPassword")}
                   value={editForm.password_confirmation}
                   onChange={(e) => setEditForm((p) => ({ ...p, password_confirmation: e.target.value }))}
                 />

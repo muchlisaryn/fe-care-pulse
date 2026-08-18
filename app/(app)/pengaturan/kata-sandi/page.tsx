@@ -11,6 +11,7 @@ import { useAppDispatch } from "@/lib/store/hooks"
 import { updateToken } from "@/lib/store/slices/authSlice"
 import { saveAuth, loadAuth } from "@/lib/auth"
 import api from "@/lib/axios"
+import { useT } from "@/lib/i18n"
 
 type PasswordForm = {
   current_password: string
@@ -32,26 +33,30 @@ const MIN_LENGTH = 8
  * Periksa di sisi klien SEBELUM request dikirim. Aturannya sengaja disamakan dengan
  * validasi AuthController::changePassword — supaya pesan yang muncul saat mengetik
  * tidak berbeda dari yang nanti dikembalikan server.
+ *
+ * Yang dikembalikan KUNCI kamus, bukan kalimatnya, supaya pesannya ikut bahasa
+ * aktif. Pesan mentah dari server dilewatkan ke `t()` juga — kunci yang tak dikenal
+ * dikembalikan apa adanya, jadi kalimat server tetap tampil utuh.
  */
 function validate(form: PasswordForm): FieldErrors {
   const errors: FieldErrors = {}
 
   if (!form.current_password) {
-    errors.current_password = "Kata sandi saat ini wajib diisi."
+    errors.current_password = "changePassword.errCurrentRequired"
   }
 
   if (!form.password) {
-    errors.password = "Kata sandi baru wajib diisi."
+    errors.password = "changePassword.errNewRequired"
   } else if (form.password.length < MIN_LENGTH) {
-    errors.password = `Kata sandi baru minimal ${MIN_LENGTH} karakter (sekarang ${form.password.length}).`
+    errors.password = "changePassword.errNewTooShort"
   } else if (form.current_password && form.password === form.current_password) {
-    errors.password = "Kata sandi baru harus berbeda dari kata sandi saat ini."
+    errors.password = "changePassword.errNewSame"
   }
 
   if (!form.password_confirmation) {
-    errors.password_confirmation = "Konfirmasi kata sandi wajib diisi."
+    errors.password_confirmation = "changePassword.errConfirmRequired"
   } else if (form.password && form.password !== form.password_confirmation) {
-    errors.password_confirmation = "Konfirmasi tidak sama dengan kata sandi baru."
+    errors.password_confirmation = "changePassword.errConfirmMismatch"
   }
 
   return errors
@@ -59,6 +64,7 @@ function validate(form: PasswordForm): FieldErrors {
 
 export default function UbahKataSandiPage() {
   const dispatch = useAppDispatch()
+  const t = useT()
 
   const [form, setForm] = useState<PasswordForm>(emptyPassword)
   const [errors, setErrors] = useState<FieldErrors>({})
@@ -103,10 +109,7 @@ export default function UbahKataSandiPage() {
       if (stored) saveAuth(stored.username, newToken, stored.menus, stored.name, stored.email)
       setForm(emptyPassword)
       setTouched({})
-      setBanner({
-        type: "success",
-        text: "Kata sandi berhasil diubah. Sesi di perangkat lain telah dikeluarkan.",
-      })
+      setBanner({ type: "success", text: t("changePassword.success") })
     } catch (err: unknown) {
       const res = (err as {
         response?: { status?: number; data?: { message?: string; errors?: Record<string, string[]> } }
@@ -130,8 +133,8 @@ export default function UbahKataSandiPage() {
         text:
           res?.data?.message ??
           (res?.status
-            ? `Gagal mengubah kata sandi (kode ${res.status}).`
-            : "Gagal terhubung ke server. Periksa koneksi lalu coba lagi."),
+            ? t("changePassword.failCode", { code: res.status })
+            : t("changePassword.failNetwork")),
       })
     } finally {
       setSaving(false)
@@ -139,14 +142,18 @@ export default function UbahKataSandiPage() {
   }
 
   const fields: { key: keyof PasswordForm; label: string; hint?: string }[] = [
-    { key: "current_password", label: "Kata Sandi Saat Ini" },
-    { key: "password", label: "Kata Sandi Baru", hint: `Minimal ${MIN_LENGTH} karakter, berbeda dari kata sandi saat ini.` },
-    { key: "password_confirmation", label: "Konfirmasi Kata Sandi" },
+    { key: "current_password", label: t("changePassword.currentLabel") },
+    {
+      key: "password",
+      label: t("changePassword.newLabel"),
+      hint: t("changePassword.newHint", { min: MIN_LENGTH }),
+    },
+    { key: "password_confirmation", label: t("changePassword.confirmLabel") },
   ]
 
   return (
     <div className="space-y-6">
-      <PageHeader title="Ubah Kata Sandi" subtitle="Ganti kata sandi akun Anda" />
+      <PageHeader title={t("changePassword.title")} subtitle={t("changePassword.subtitle")} />
 
       <Card className="max-w-xl">
         {banner && (
@@ -184,7 +191,7 @@ export default function UbahKataSandiPage() {
                 </div>
                 {error ? (
                   <p id={`${key}-error`} className="text-xs font-medium text-red-600">
-                    {error}
+                    {t(error, { min: MIN_LENGTH, len: form.password.length })}
                   </p>
                 ) : hint ? (
                   <p className="text-xs text-gray-400">{hint}</p>
@@ -199,7 +206,7 @@ export default function UbahKataSandiPage() {
             className="inline-flex items-center gap-1.5 text-xs font-medium text-gray-500 transition-colors hover:text-gray-700"
           >
             {show ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
-            {show ? "Sembunyikan kata sandi" : "Tampilkan kata sandi"}
+            {show ? t("changePassword.hidePassword") : t("changePassword.showPassword")}
           </button>
 
           <div className="flex justify-end gap-3 border-t border-gray-100 pt-4">
@@ -214,14 +221,14 @@ export default function UbahKataSandiPage() {
               }}
               disabled={saving}
             >
-              Reset
+              {t("common.reset")}
             </Button>
             <Button
               type="submit"
               disabled={saving}
               className="bg-[#075489] hover:bg-[#075489]/90 text-white"
             >
-              {saving ? "Menyimpan..." : "Ubah Kata Sandi"}
+              {saving ? t("common.saving") : t("changePassword.title")}
             </Button>
           </div>
         </form>

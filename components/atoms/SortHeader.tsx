@@ -2,6 +2,7 @@
 
 import { ArrowDown, ArrowUp } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { useT } from "@/lib/i18n"
 
 export type SortDirection = "asc" | "desc" | null
 
@@ -27,6 +28,7 @@ const nextDirection: Record<string, SortDirection> = {
  * dipekatkan, sisanya dibuat samar.
  */
 export function SortHeader({ label, direction, onChange, className }: SortHeaderProps) {
+  const t = useT()
   const active = direction !== null
 
   return (
@@ -35,10 +37,10 @@ export function SortHeader({ label, direction, onChange, className }: SortHeader
       onClick={() => onChange(nextDirection[String(direction)])}
       title={
         direction === "asc"
-          ? `${label}: terkecil dulu — klik untuk terbesar dulu`
+          ? t("common.sortAsc", { label })
           : direction === "desc"
-            ? `${label}: terbesar dulu — klik untuk hapus urutan`
-            : `Urutkan berdasarkan ${label}`
+            ? t("common.sortDesc", { label })
+            : t("common.sortBy", { label })
       }
       className={cn(
         "group inline-flex items-center gap-1 uppercase tracking-wide transition-colors",

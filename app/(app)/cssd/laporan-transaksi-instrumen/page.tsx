@@ -16,6 +16,7 @@ import api from "@/lib/axios"
 import { downloadXlsx, downloadXlsxReport, type XlsxGroup } from "@/lib/excel"
 import { useAppDispatch, useAppSelector } from "@/lib/store/hooks"
 import { fetchRoomOptions } from "@/lib/store/slices/roomSlice"
+import { useLanguage, useT, localeOf, type Lang } from "@/lib/i18n"
 
 // Satu baris = satu label kemasan (barcode_no) pada satu transaksi. Unit-unit dalam
 // satu set berbagi satu label sehingga tampil sebagai satu baris bernama nama setnya.
@@ -54,33 +55,33 @@ const PER_PAGE = 20
 // Urutan kolom ini adalah SATU-SATUNYA acuan: tabel desktop, kartu mobile, dan
 // export Excel/CSV harus mengikuti urutan yang sama supaya hasil unduhan bisa
 // dibaca sejajar dengan yang tampil di layar.
-const EXPORT_HEADERS = [
-  "Tgl Transaksi",
-  "No Invoice",
-  "No. RM Pasien",
-  "Nama Pasien",
-  "Ruangan",
-  "Jenis",
-  "Nama Instrumen / Set",
-  "Barcode",
-  "Peminjam",
-  "Tgl Peminjaman",
-  "Petugas Distribusi",
-  "Diterima Oleh",
-  "Distribusi Tanggal",
-  "Dikembalikan Oleh",
-  "Petugas Penerima",
-  "Tanggal Kembali",
+const EXPORT_HEADER_KEYS = [
+  "txReport.colTxDate",
+  "txReport.colInvoice",
+  "txReport.colMrNo",
+  "txReport.colPatient",
+  "txReport.colRoom",
+  "txReport.colType",
+  "txReport.colName",
+  "txReport.colBarcode",
+  "txReport.colBorrower",
+  "txReport.colBorrowDate",
+  "txReport.colDistributedBy",
+  "txReport.colReceivedBy",
+  "txReport.colDistributedAt",
+  "txReport.colReturnedBy",
+  "txReport.colReturnReceivedBy",
+  "txReport.colReturnDate",
 ] as const
 
 // Rekapan per ruangan: nama ruangan jadi judul kelompok, isinya nomor urut, nama
 // barang, dan qty-nya (satu SET dihitung 1, bukan per instrumen di dalamnya).
-const EXPORT_ROOM_HEADERS = ["No", "Nama Barang", "QTY"] as const
+const EXPORT_ROOM_HEADER_KEYS = ["txReport.colNo", "txReport.colItemName", "txReport.colQty"] as const
 
 const TYPE_OPTIONS = [
-  { value: "", label: "Semua Jenis" },
-  { value: "satuan", label: "Satuan" },
-  { value: "paket", label: "Set" },
+  { value: "", labelKey: "txReport.allTypes" },
+  { value: "satuan", labelKey: "txReport.typeSingle" },
+  { value: "paket", labelKey: "txReport.typeSet" },
 ]
 
 /**
@@ -121,18 +122,18 @@ function parseApiDate(value: string): Date {
   return new Date(value.includes("T") ? value : value.replace(" ", "T"))
 }
 
-function formatDate(value: string | null): string {
+function formatDate(value: string | null, lang: Lang): string {
   if (!value) return "—"
   const d = parseApiDate(value)
   if (Number.isNaN(d.getTime())) return value
-  return d.toLocaleDateString("id-ID", { day: "2-digit", month: "short", year: "numeric" })
+  return d.toLocaleDateString(localeOf(lang), { day: "2-digit", month: "short", year: "numeric" })
 }
 
-function formatDateTime(value: string | null): string {
+function formatDateTime(value: string | null, lang: Lang): string {
   if (!value) return "—"
   const d = parseApiDate(value)
   if (Number.isNaN(d.getTime())) return value
-  return d.toLocaleString("id-ID", {
+  return d.toLocaleString(localeOf(lang), {
     day: "2-digit",
     month: "short",
     year: "numeric",
@@ -146,9 +147,9 @@ function formatDateTime(value: string | null): string {
  * kalau tidak jatuh ke tanggalnya saja (`return_actual_date` memang hanya DATE,
  * dan order lama belum tentu punya event). "—" bila keduanya kosong.
  */
-function returnedAtLabel(row: LaporanRow): string {
-  if (row.returned_at) return formatDateTime(row.returned_at)
-  return formatDate(row.return_date)
+function returnedAtLabel(row: LaporanRow, lang: Lang): string {
+  if (row.returned_at) return formatDateTime(row.returned_at, lang)
+  return formatDate(row.return_date, lang)
 }
 
 /** Apakah baris ini punya informasi waktu pengembalian sama sekali. */
@@ -178,6 +179,7 @@ function patientName(value: string | null): string | null {
 
 export default function LaporanTransaksiInstrumenPage() {
   const dispatch = useAppDispatch()
+  const { t, lang } = useLanguage()
   const { options: rooms, optionsLoaded } = useAppSelector((s) => s.rooms)
 
   const [rows, setRows] = useState<LaporanRow[]>([])
@@ -265,28 +267,28 @@ export default function LaporanTransaksiInstrumenPage() {
       const data = await fetchAllRows()
 
       const exportRows = data.map((r) => [
-        r.transaction_date ? formatDate(r.transaction_date) : "",
+        r.transaction_date ? formatDate(r.transaction_date, lang) : "",
         r.invoice_no ?? "",
         r.medical_record_no ?? "",
         patientName(r.patient_name) ?? "",
         r.room ?? "",
-        r.type === "paket" ? "Set" : "Satuan",
+        r.type === "paket" ? t("txReport.typeSet") : t("txReport.typeSingle"),
         r.name ?? "",
         r.barcode_no ?? "",
         r.borrowed_by ?? "",
-        r.borrowed_date ? formatDateTime(r.borrowed_date) : "",
+        r.borrowed_date ? formatDateTime(r.borrowed_date, lang) : "",
         r.distributed_by ?? "",
         r.received_by ?? "",
-        r.distributed_at ? formatDateTime(r.distributed_at) : "",
+        r.distributed_at ? formatDateTime(r.distributed_at, lang) : "",
         r.returned_by ?? "",
         r.return_received_by ?? "",
-        hasReturnedAt(r) ? returnedAtLabel(r) : "",
+        hasReturnedAt(r) ? returnedAtLabel(r, lang) : "",
       ])
 
       downloadXlsx(
-        `laporan-transaksi-instrumen-${dateInput()}.xlsx`,
-        "Laporan Transaksi",
-        EXPORT_HEADERS,
+        `${t("txReport.fileTransactions")}-${dateInput()}.xlsx`,
+        t("txReport.sheetTransactions"),
+        EXPORT_HEADER_KEYS.map((k) => t(k)),
         exportRows,
       )
     } finally {
@@ -312,8 +314,8 @@ export default function LaporanTransaksiInstrumenPage() {
       // laporannya hanya menampilkan nama barang, tanpa kolom jenis.
       const byRoom = new Map<string, Map<string, number>>()
       for (const r of data) {
-        const room = r.room?.trim() || "Tanpa Ruangan"
-        const name = r.name?.trim() || "Tanpa Nama"
+        const room = r.room?.trim() || t("txReport.noRoom")
+        const name = r.name?.trim() || t("txReport.noName")
         const items = byRoom.get(room) ?? new Map<string, number>()
         items.set(name, (items.get(name) ?? 0) + 1)
         byRoom.set(room, items)
@@ -330,14 +332,17 @@ export default function LaporanTransaksiInstrumenPage() {
         }))
 
       downloadXlsxReport(
-        `rekapan-transaksi-per-ruangan-${dateInput()}.xlsx`,
-        "Rekap Per Ruangan",
+        `${t("txReport.filePerRoom")}-${dateInput()}.xlsx`,
+        t("txReport.sheetPerRoom"),
         [
-          "REKAPAN TRANSAKSI UNIT STERILISASI",
+          t("txReport.recapTitle"),
           "RS ISLAM JAKARTA PONDOK KOPI",
-          `TANGGAL ${formatDate(filters.dateFrom)} SAMPAI ${formatDate(filters.dateTo)}`,
+          t("txReport.recapRange", {
+            from: formatDate(filters.dateFrom, lang),
+            to: formatDate(filters.dateTo, lang),
+          }),
         ],
-        EXPORT_ROOM_HEADERS,
+        EXPORT_ROOM_HEADER_KEYS.map((k) => t(k)),
         groups,
         // Kolom "No" ditengahkan.
         [0],
@@ -357,8 +362,8 @@ export default function LaporanTransaksiInstrumenPage() {
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Laporan Transaksi Instrumen"
-        subtitle="Rekap peminjaman instrumen & set — satu baris per label kemasan (barcode)"
+        title={t("txReport.title")}
+        subtitle={t("txReport.subtitle")}
       />
 
       <Card className="p-0">
@@ -370,24 +375,24 @@ export default function LaporanTransaksiInstrumenPage() {
               supaya barisnya habis rata tanpa sel kosong. */}
           <div className="grid grid-cols-1 items-end gap-4 sm:grid-cols-2 lg:grid-cols-4">
             <div className="space-y-1">
-              <label className="text-xs font-semibold uppercase tracking-wide text-gray-400">Ruangan</label>
+              <label className="text-xs font-semibold uppercase tracking-wide text-gray-400">{t("txReport.colRoom")}</label>
               <SelectSearch
                 options={roomOptions}
                 value={form.roomId}
                 onChange={(v) => setForm((f) => ({ ...f, roomId: v }))}
-                placeholder="Semua Ruangan"
-                searchPlaceholder="Cari ruangan..."
+                placeholder={t("txReport.allRooms")}
+                searchPlaceholder={t("txReport.searchRoom")}
                 loading={!optionsLoaded}
                 triggerClassName="py-2"
               />
             </div>
 
             <div className="space-y-1">
-              <label className="text-xs font-semibold uppercase tracking-wide text-gray-400">Jenis</label>
+              <label className="text-xs font-semibold uppercase tracking-wide text-gray-400">{t("txReport.colType")}</label>
               <Select value={form.type} onChange={(e) => setForm((f) => ({ ...f, type: e.target.value }))}>
                 {TYPE_OPTIONS.map((o) => (
                   <option key={o.value} value={o.value}>
-                    {o.label}
+                    {t(o.labelKey)}
                   </option>
                 ))}
               </Select>
@@ -398,14 +403,14 @@ export default function LaporanTransaksiInstrumenPage() {
               to={form.dateTo}
               onFromChange={(v) => setForm((f) => ({ ...f, dateFrom: v }))}
               onToChange={(v) => setForm((f) => ({ ...f, dateTo: v }))}
-              fromLabel="Tgl Transaksi Awal"
-              toLabel="Tgl Transaksi Akhir"
+              fromLabel={t("txReport.dateFrom")}
+              toLabel={t("txReport.dateTo")}
             />
           </div>
 
           <div className="mt-4 space-y-1">
             <label className="text-xs font-semibold uppercase tracking-wide text-gray-400">
-              Barcode / Nama Instrumen
+              {t("txReport.searchLabel")}
             </label>
             {/* Tombol Cari menyatu dengan kotak pencariannya, bukan di baris aksi
                 bawah — supaya jelas tombol ini menjalankan pencarian, bukan export. */}
@@ -413,7 +418,7 @@ export default function LaporanTransaksiInstrumenPage() {
               <div className="relative flex-1">
                 <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
                 <Input
-                  placeholder="Masukkan barcode atau nama instrumen / set..."
+                  placeholder={t("txReport.searchPlaceholder")}
                   value={form.search}
                   onChange={(e) => setForm((f) => ({ ...f, search: e.target.value }))}
                   className="pl-9"
@@ -421,7 +426,7 @@ export default function LaporanTransaksiInstrumenPage() {
               </div>
               <Button type="submit" className="shrink-0 bg-[#075489] hover:bg-[#075489]/90 text-white">
                 <Search className="h-4 w-4" />
-                Cari
+                {t("common.search")}
               </Button>
             </div>
           </div>
@@ -430,18 +435,18 @@ export default function LaporanTransaksiInstrumenPage() {
             {/* Satu tombol untuk semua bentuk unduhan: rinci per label kemasan, atau
                 rekap per ruangan. Keduanya memakai filter yang sedang aktif. */}
             <DropdownMenu
-              label={exporting ? "Mengekspor..." : "Export Laporan"}
+              label={exporting ? t("txReport.exporting") : t("txReport.exportReport")}
               icon={Download}
               disabled={exporting}
               className="w-full sm:w-auto"
               items={[
                 {
-                  label: "Export Transaksi (Excel)",
+                  label: t("txReport.exportTransactions"),
                   icon: Sheet,
                   onClick: handleExport,
                 },
                 {
-                  label: "Export Transaksi Per Ruangan",
+                  label: t("txReport.exportPerRoom"),
                   icon: Building2,
                   onClick: handleExportPerRoom,
                 },
@@ -451,16 +456,16 @@ export default function LaporanTransaksiInstrumenPage() {
             {hasActiveFilter && (
               <Button type="button" variant="outline" onClick={handleReset} className="w-full justify-center sm:w-auto">
                 <RotateCcw className="h-4 w-4" />
-                Reset
+                {t("common.reset")}
               </Button>
             )}
           </div>
         </form>
 
         {loading ? (
-          <div className="py-16 text-center text-sm text-gray-400">Memuat data...</div>
+          <div className="py-16 text-center text-sm text-gray-400">{t("common.loading")}</div>
         ) : rows.length === 0 ? (
-          <div className="py-16 text-center text-sm text-gray-400">Tidak ada data.</div>
+          <div className="py-16 text-center text-sm text-gray-400">{t("txReport.noData")}</div>
         ) : (
           <>
             {/* Mobile: tiap baris jadi kartu (label : nilai) agar tak terpotong. */}
@@ -479,23 +484,23 @@ export default function LaporanTransaksiInstrumenPage() {
               <table className="w-full min-w-[1740px] text-sm">
                 <thead>
                   <tr className="border-b border-gray-100 bg-gray-50 text-xs font-semibold uppercase tracking-wide text-gray-400">
-                    <th className="w-32 whitespace-nowrap py-2.5 px-4 text-left">Tgl Transaksi</th>
-                    <th className="whitespace-nowrap py-2.5 px-4 text-left">No Invoice</th>
-                    <th className="whitespace-nowrap py-2.5 px-4 text-left">No. RM Pasien</th>
-                    <th className="whitespace-nowrap py-2.5 px-4 text-left">Nama Pasien</th>
-                    <th className="whitespace-nowrap py-2.5 px-4 text-left">Ruangan</th>
-                    <th className="w-24 whitespace-nowrap py-2.5 px-4 text-left">Jenis</th>
+                    <th className="w-32 whitespace-nowrap py-2.5 px-4 text-left">{t("txReport.colTxDate")}</th>
+                    <th className="whitespace-nowrap py-2.5 px-4 text-left">{t("txReport.colInvoice")}</th>
+                    <th className="whitespace-nowrap py-2.5 px-4 text-left">{t("txReport.colMrNo")}</th>
+                    <th className="whitespace-nowrap py-2.5 px-4 text-left">{t("txReport.colPatient")}</th>
+                    <th className="whitespace-nowrap py-2.5 px-4 text-left">{t("txReport.colRoom")}</th>
+                    <th className="w-24 whitespace-nowrap py-2.5 px-4 text-left">{t("txReport.colType")}</th>
                     {/* Kolom utama laporan — diberi porsi lebar paling besar. */}
-                    <th className="min-w-[260px] py-2.5 px-4 text-left">Nama Instrumen / Set</th>
-                    <th className="whitespace-nowrap py-2.5 px-4 text-left">Barcode</th>
-                    <th className="whitespace-nowrap py-2.5 px-4 text-left">Peminjam</th>
-                    <th className="whitespace-nowrap py-2.5 px-4 text-left">Tgl Peminjaman</th>
-                    <th className="whitespace-nowrap py-2.5 px-4 text-left">Petugas Distribusi</th>
-                    <th className="whitespace-nowrap py-2.5 px-4 text-left">Diterima Oleh</th>
-                    <th className="whitespace-nowrap py-2.5 px-4 text-left">Distribusi Tanggal</th>
-                    <th className="whitespace-nowrap py-2.5 px-4 text-left">Dikembalikan Oleh</th>
-                    <th className="whitespace-nowrap py-2.5 px-4 text-left">Petugas Penerima</th>
-                    <th className="whitespace-nowrap py-2.5 px-4 text-left">Tanggal Kembali</th>
+                    <th className="min-w-[260px] py-2.5 px-4 text-left">{t("txReport.colName")}</th>
+                    <th className="whitespace-nowrap py-2.5 px-4 text-left">{t("txReport.colBarcode")}</th>
+                    <th className="whitespace-nowrap py-2.5 px-4 text-left">{t("txReport.colBorrower")}</th>
+                    <th className="whitespace-nowrap py-2.5 px-4 text-left">{t("txReport.colBorrowDate")}</th>
+                    <th className="whitespace-nowrap py-2.5 px-4 text-left">{t("txReport.colDistributedBy")}</th>
+                    <th className="whitespace-nowrap py-2.5 px-4 text-left">{t("txReport.colReceivedBy")}</th>
+                    <th className="whitespace-nowrap py-2.5 px-4 text-left">{t("txReport.colDistributedAt")}</th>
+                    <th className="whitespace-nowrap py-2.5 px-4 text-left">{t("txReport.colReturnedBy")}</th>
+                    <th className="whitespace-nowrap py-2.5 px-4 text-left">{t("txReport.colReturnReceivedBy")}</th>
+                    <th className="whitespace-nowrap py-2.5 px-4 text-left">{t("txReport.colReturnDate")}</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-50">
@@ -522,8 +527,13 @@ export default function LaporanTransaksiInstrumenPage() {
 
 /** Badge jenis: set (banyak instrumen dalam satu bungkus) vs satuan. */
 function JenisBadge({ type }: { type: LaporanRow["type"] }) {
+  const t = useT()
   const isPaket = type === "paket"
-  return <Badge variant={isPaket ? "info" : "default"}>{isPaket ? "Set" : "Satuan"}</Badge>
+  return (
+    <Badge variant={isPaket ? "info" : "default"}>
+      {isPaket ? t("txReport.typeSet") : t("txReport.typeSingle")}
+    </Badge>
+  )
 }
 
 function BarcodeCell({ value }: { value: string | null }) {
@@ -534,9 +544,10 @@ function BarcodeCell({ value }: { value: string | null }) {
 }
 
 function LaporanRowView({ row }: { row: LaporanRow }) {
+  const { lang } = useLanguage()
   return (
     <tr>
-      <td className="whitespace-nowrap py-2.5 px-4 text-gray-600">{formatDate(row.transaction_date)}</td>
+      <td className="whitespace-nowrap py-2.5 px-4 text-gray-600">{formatDate(row.transaction_date, lang)}</td>
       <td className="whitespace-nowrap py-2.5 px-4 font-mono text-gray-700">
         <Text value={row.invoice_no} />
       </td>
@@ -563,7 +574,7 @@ function LaporanRowView({ row }: { row: LaporanRow }) {
       <td className="whitespace-nowrap py-2.5 px-4 text-gray-700">
         <Text value={row.borrowed_by} />
       </td>
-      <td className="whitespace-nowrap py-2.5 px-4 text-gray-600">{formatDateTime(row.borrowed_date)}</td>
+      <td className="whitespace-nowrap py-2.5 px-4 text-gray-600">{formatDateTime(row.borrowed_date, lang)}</td>
       <td className="whitespace-nowrap py-2.5 px-4 text-gray-700">
         <Text value={row.distributed_by} />
       </td>
@@ -571,7 +582,7 @@ function LaporanRowView({ row }: { row: LaporanRow }) {
         <Text value={row.received_by} />
       </td>
       <td className="whitespace-nowrap py-2.5 px-4 text-gray-600">
-        {formatDateTime(row.distributed_at)}
+        {formatDateTime(row.distributed_at, lang)}
       </td>
       <td className="whitespace-nowrap py-2.5 px-4 text-gray-700">
         <Text value={row.returned_by} />
@@ -580,13 +591,14 @@ function LaporanRowView({ row }: { row: LaporanRow }) {
         <Text value={row.return_received_by} />
       </td>
       <td className="whitespace-nowrap py-2.5 px-4 text-gray-600">
-        {hasReturnedAt(row) ? returnedAtLabel(row) : <Empty />}
+        {hasReturnedAt(row) ? returnedAtLabel(row, lang) : <Empty />}
       </td>
     </tr>
   )
 }
 
 function LaporanCard({ row }: { row: LaporanRow }) {
+  const { t, lang } = useLanguage()
   return (
     <div className="overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm">
       <div className="flex items-start gap-2 px-4 py-3">
@@ -600,38 +612,38 @@ function LaporanCard({ row }: { row: LaporanRow }) {
       </div>
 
       <dl className="divide-y divide-gray-50 border-t border-gray-100">
-        <Field label="Tgl Transaksi">{formatDate(row.transaction_date)}</Field>
-        <Field label="No Invoice">
+        <Field label={t("txReport.colTxDate")}>{formatDate(row.transaction_date, lang)}</Field>
+        <Field label={t("txReport.colInvoice")}>
           <Text value={row.invoice_no} />
         </Field>
-        <Field label="No. RM Pasien">
+        <Field label={t("txReport.colMrNo")}>
           <Text value={row.medical_record_no} />
         </Field>
-        <Field label="Nama Pasien">
+        <Field label={t("txReport.colPatient")}>
           <Text value={patientName(row.patient_name)} />
         </Field>
-        <Field label="Ruangan">
+        <Field label={t("txReport.colRoom")}>
           <Text value={row.room} />
         </Field>
-        <Field label="Peminjam">
+        <Field label={t("txReport.colBorrower")}>
           <Text value={row.borrowed_by} />
         </Field>
-        <Field label="Tgl Peminjaman">{formatDateTime(row.borrowed_date)}</Field>
-        <Field label="Petugas Distribusi">
+        <Field label={t("txReport.colBorrowDate")}>{formatDateTime(row.borrowed_date, lang)}</Field>
+        <Field label={t("txReport.colDistributedBy")}>
           <Text value={row.distributed_by} />
         </Field>
-        <Field label="Diterima Oleh">
+        <Field label={t("txReport.colReceivedBy")}>
           <Text value={row.received_by} />
         </Field>
-        <Field label="Distribusi Tanggal">{formatDateTime(row.distributed_at)}</Field>
-        <Field label="Dikembalikan Oleh">
+        <Field label={t("txReport.colDistributedAt")}>{formatDateTime(row.distributed_at, lang)}</Field>
+        <Field label={t("txReport.colReturnedBy")}>
           <Text value={row.returned_by} />
         </Field>
-        <Field label="Petugas Penerima">
+        <Field label={t("txReport.colReturnReceivedBy")}>
           <Text value={row.return_received_by} />
         </Field>
-        <Field label="Tanggal Kembali">
-          {hasReturnedAt(row) ? returnedAtLabel(row) : <Empty />}
+        <Field label={t("txReport.colReturnDate")}>
+          {hasReturnedAt(row) ? returnedAtLabel(row, lang) : <Empty />}
         </Field>
       </dl>
     </div>

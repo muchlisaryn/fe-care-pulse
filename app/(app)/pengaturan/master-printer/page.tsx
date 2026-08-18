@@ -23,6 +23,7 @@ import {
   type Printer as PrinterType,
 } from "@/lib/store/slices/printerSlice"
 import api from "@/lib/axios"
+import { useT } from "@/lib/i18n"
 
 const emptyForm = {
   name: "",
@@ -109,61 +110,64 @@ function InfoHint({
   )
 }
 
+// Kode code page + kunci kamus penjelasannya — penjelasannya ikut bahasa aktif.
 const CODE_PAGES = [
-  { code: "CP437", desc: "IBM PC — default, aman untuk umum" },
-  { code: "CP850", desc: "Latin-1, Eropa Barat" },
-  { code: "CP858", desc: "seperti CP850 + simbol €" },
-  { code: "CP1252", desc: "Windows Latin-1" },
-  { code: "CP852", desc: "Eropa Tengah (Latin-2)" },
-  { code: "CP866", desc: "Cyrillic (Rusia)" },
+  { code: "CP437", descKey: "printer.cp437" },
+  { code: "CP850", descKey: "printer.cp850" },
+  { code: "CP858", descKey: "printer.cp858" },
+  { code: "CP1252", descKey: "printer.cp1252" },
+  { code: "CP852", descKey: "printer.cp852" },
+  { code: "CP866", descKey: "printer.cp866" },
 ]
 
-const DevicePathHint = (
-  <>
-    <p className="mb-1.5 text-sm font-semibold text-white">Device Path</p>
-    <p>Alamat/port printer untuk koneksi non-network (USB / Serial / Bluetooth).</p>
-    <div className="mt-2 space-y-0.5">
-      <p>
-        <span className="font-mono text-white">COM3</span> — port USB/Serial di Windows
-      </p>
-      <p>
-        <span className="font-mono text-white">LPT1</span> — port paralel
-      </p>
-      <p>
-        <span className="font-mono text-white">/dev/usb/lp0</span> — USB di Linux
-      </p>
-      <p>
-        <span className="font-mono text-white">NamaShare</span> — nama share printer Windows
-      </p>
-    </div>
-    <p className="mt-2 text-gray-400">
-      Untuk USB, bila port langsung tidak bisa, share printer di Windows lalu isi nama share-nya.
-    </p>
-  </>
-)
+function DevicePathHint() {
+  const t = useT()
+  return (
+    <>
+      <p className="mb-1.5 text-sm font-semibold text-white">{t("printer.devicePathTitle")}</p>
+      <p>{t("printer.devicePathDesc")}</p>
+      <div className="mt-2 space-y-0.5">
+        <p>
+          <span className="font-mono text-white">COM3</span> — {t("printer.devicePathCom")}
+        </p>
+        <p>
+          <span className="font-mono text-white">LPT1</span> — {t("printer.devicePathLpt")}
+        </p>
+        <p>
+          <span className="font-mono text-white">/dev/usb/lp0</span> — {t("printer.devicePathLinux")}
+        </p>
+        <p>
+          <span className="font-mono text-white">{t("printer.devicePathShareName")}</span> —{" "}
+          {t("printer.devicePathShare")}
+        </p>
+      </div>
+      <p className="mt-2 text-gray-400">{t("printer.devicePathNote")}</p>
+    </>
+  )
+}
 
-const CodePageHint = (
-  <>
-    <p className="mb-1.5 text-sm font-semibold text-white">Code Page</p>
-    <p>
-      Tabel encoding karakter printer — penting untuk karakter non-ASCII (huruf beraksen, simbol,
-      mata uang). Bila tidak cocok dengan printer, karakter khusus bisa tercetak berantakan.
-    </p>
-    <div className="mt-2.5 border-t border-white/10 pt-2">
-      <p className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-gray-400">
-        Pilihan code page
-      </p>
-      <ul className="space-y-0.5">
-        {CODE_PAGES.map((cp) => (
-          <li key={cp.code} className="flex gap-2">
-            <span className="w-14 shrink-0 font-mono font-semibold text-white">{cp.code}</span>
-            <span className="text-gray-300">{cp.desc}</span>
-          </li>
-        ))}
-      </ul>
-    </div>
-  </>
-)
+function CodePageHint() {
+  const t = useT()
+  return (
+    <>
+      <p className="mb-1.5 text-sm font-semibold text-white">{t("printer.codePageTitle")}</p>
+      <p>{t("printer.codePageDesc")}</p>
+      <div className="mt-2.5 border-t border-white/10 pt-2">
+        <p className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-gray-400">
+          {t("printer.codePageOptions")}
+        </p>
+        <ul className="space-y-0.5">
+          {CODE_PAGES.map((cp) => (
+            <li key={cp.code} className="flex gap-2">
+              <span className="w-14 shrink-0 font-mono font-semibold text-white">{cp.code}</span>
+              <span className="text-gray-300">{t(cp.descKey)}</span>
+            </li>
+          ))}
+        </ul>
+      </div>
+    </>
+  )
+}
 
 export default function MasterPrinterPage() {
   const dispatch = useAppDispatch()
@@ -171,6 +175,8 @@ export default function MasterPrinterPage() {
   const { items, totalItems, totalPages, page, search, loading, loaded, dirty } = useAppSelector(
     (s) => s.printers,
   )
+
+  const t = useT()
 
   const [searchInput, setSearchInput] = useState(search)
   const [modal, setModal] = useState<"tambah" | "edit" | null>(null)
@@ -286,7 +292,7 @@ export default function MasterPrinterPage() {
       setModal(null)
     } catch (e) {
       const x = e as { response?: { data?: { message?: string } } }
-      setError(x.response?.data?.message ?? "Gagal menyimpan printer.")
+      setError(x.response?.data?.message ?? t("printer.errSave"))
     } finally {
       setSaving(false)
     }
@@ -311,7 +317,7 @@ export default function MasterPrinterPage() {
     try {
       toast.success(await testPrintPrinter(row))
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Gagal melakukan test print.")
+      toast.error(e instanceof Error ? e.message : t("printer.errTestPrint"))
     } finally {
       setTestingId(null)
     }
@@ -319,23 +325,23 @@ export default function MasterPrinterPage() {
 
   const columns: Column<PrinterType>[] = [
     {
-      header: "Nama Printer",
+      header: t("printer.colName"),
       cell: (row) => <span className="font-medium text-gray-900">{row.name}</span>,
     },
     {
-      header: "Jenis Dokumen",
+      header: t("printer.colDocType"),
       cell: (row) => (
         <Badge variant={row.document_type === "struk" ? "info" : "default"}>
-          {row.document_type === "struk" ? "Struk" : "Label"}
+          {row.document_type === "struk" ? t("printer.docReceipt") : t("printer.docLabel")}
         </Badge>
       ),
     },
     {
-      header: "Bahasa",
+      header: t("printer.colLanguage"),
       cell: (row) => <span className="uppercase text-gray-700">{row.printer_language}</span>,
     },
     {
-      header: "Koneksi",
+      header: t("printer.colConnection"),
       cell: (row) => (
         <div className="flex flex-col">
           <span className="capitalize text-gray-700">{row.connection_type}</span>
@@ -351,20 +357,24 @@ export default function MasterPrinterPage() {
       ),
     },
     {
-      header: "Status",
+      header: t("common.status"),
       cell: (row) =>
-        row.is_active ? <Badge variant="success">Aktif</Badge> : <Badge variant="default">Nonaktif</Badge>,
+        row.is_active ? (
+          <Badge variant="success">{t("common.active")}</Badge>
+        ) : (
+          <Badge variant="default">{t("common.inactive")}</Badge>
+        ),
       className: "w-24",
     },
     {
-      header: "Default",
+      header: t("printer.colDefault"),
       cell: (row) => {
         const isDef = defaultId === row.id
         return (
           <button
             type="button"
             onClick={() => toggleDefault(row.id)}
-            title={isDef ? "Printer default komputer ini (klik untuk lepas)" : "Jadikan printer default komputer ini"}
+            title={isDef ? t("printer.defaultOnTitle") : t("printer.defaultOffTitle")}
             className={
               "inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs font-medium transition-colors " +
               (isDef
@@ -373,7 +383,7 @@ export default function MasterPrinterPage() {
             }
           >
             <Check className={"h-3.5 w-3.5 " + (isDef ? "text-amber-600" : "text-gray-300")} />
-            {isDef ? "Default" : "Set default"}
+            {isDef ? t("printer.colDefault") : t("printer.setDefault")}
           </button>
         )
       },
@@ -389,14 +399,14 @@ export default function MasterPrinterPage() {
             <Printer className="h-6 w-6" />
           </div>
           <div>
-            <h1 className="text-2xl font-bold text-gray-900">Master Printer</h1>
+            <h1 className="text-2xl font-bold text-gray-900">{t("printer.title")}</h1>
             <p className="text-sm text-gray-500 mt-0.5">
-              Kelola konfigurasi printer struk &amp; label untuk pencetakan dokumen CSSD
+              {t("printer.subtitle")}
             </p>
           </div>
         </div>
         <Button onClick={openTambah} className="bg-[#075489] hover:bg-[#075489]/90 text-white">
-          + Tambah Printer
+          {t("printer.addPrinter")}
         </Button>
       </div>
 
@@ -406,20 +416,20 @@ export default function MasterPrinterPage() {
             <div className="relative flex-1">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 pointer-events-none" />
               <Input
-                placeholder="Cari nama printer / IP / device path..."
+                placeholder={t("printer.searchPlaceholder")}
                 value={searchInput}
                 onChange={(e) => setSearchInput(e.target.value)}
                 className="pl-9"
               />
             </div>
             <Button type="submit" className="bg-[#075489] hover:bg-[#075489]/90 text-white shrink-0">
-              Cari
+              {t("common.search")}
             </Button>
           </form>
         </div>
 
         {loading ? (
-          <div className="py-16 text-center text-sm text-gray-400">Memuat data...</div>
+          <div className="py-16 text-center text-sm text-gray-400">{t("common.loading")}</div>
         ) : (
           <DataTable
             rowNumberOffset={(page - 1) * 20}
@@ -427,7 +437,7 @@ export default function MasterPrinterPage() {
             data={items}
             extraActions={[
               {
-                label: (row) => (testingId === row.id ? "Mencetak..." : "Test Print"),
+                label: (row) => (testingId === row.id ? t("printer.printing") : t("printer.testPrint")),
                 onClick: handleTestPrint,
                 disabled: (row) => testingId !== null && testingId !== row.id,
                 className: "border-[#4ba69d] text-[#4ba69d] hover:bg-[#4ba69d]/5",
@@ -436,7 +446,7 @@ export default function MasterPrinterPage() {
             onEdit={openEdit}
             onDelete={(row) => setDeleteTarget(row)}
             isRowLoading={(row) => deletingId === row.id}
-            emptyMessage="Belum ada printer."
+            emptyMessage={t("printer.empty")}
           />
         )}
 
@@ -459,21 +469,21 @@ export default function MasterPrinterPage() {
       <Modal
         open={modal !== null}
         onClose={() => setModal(null)}
-        title={modal === "tambah" ? "Tambah Printer" : "Edit Printer"}
+        title={modal === "tambah" ? t("printer.modalAdd") : t("printer.modalEdit")}
         size="lg"
         footer={
           <div className="flex w-full items-center justify-between gap-3">
             {error ? <p className="text-sm text-red-600">{error}</p> : <span />}
             <div className="flex shrink-0 gap-2">
               <Button variant="outline" onClick={() => setModal(null)}>
-                Batal
+                {t("common.cancel")}
               </Button>
               <Button
                 onClick={handleSave}
                 disabled={saving || !canSave}
                 className="bg-[#075489] hover:bg-[#075489]/90 text-white"
               >
-                {saving ? "Menyimpan..." : "Simpan"}
+                {saving ? t("common.saving") : t("common.save")}
               </Button>
             </div>
           </div>
@@ -483,27 +493,27 @@ export default function MasterPrinterPage() {
           {/* Umum */}
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div className="space-y-1.5 sm:col-span-2">
-              <Label htmlFor="pr-nama">Nama Printer</Label>
+              <Label htmlFor="pr-nama">{t("printer.colName")}</Label>
               <Input
                 id="pr-nama"
-                placeholder="Contoh: Printer Kasir 1"
+                placeholder={t("printer.namePlaceholder")}
                 value={form.name}
                 onChange={(e) => set("name", e.target.value)}
               />
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="pr-jenis">Jenis Dokumen</Label>
+              <Label htmlFor="pr-jenis">{t("printer.colDocType")}</Label>
               <Select
                 id="pr-jenis"
                 value={form.document_type}
                 onChange={(e) => set("document_type", e.target.value)}
               >
-                <option value="struk">Struk</option>
-                <option value="label">Label</option>
+                <option value="struk">{t("printer.docReceipt")}</option>
+                <option value="label">{t("printer.docLabel")}</option>
               </Select>
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="pr-bahasa">Bahasa Printer</Label>
+              <Label htmlFor="pr-bahasa">{t("printer.printerLanguage")}</Label>
               <Select
                 id="pr-bahasa"
                 value={form.printer_language}
@@ -519,10 +529,10 @@ export default function MasterPrinterPage() {
 
           {/* Koneksi */}
           <div className="space-y-4 rounded-lg border border-gray-200 bg-gray-50 px-4 py-3">
-            <p className="text-xs font-semibold uppercase tracking-wide text-gray-400">Koneksi</p>
+            <p className="text-xs font-semibold uppercase tracking-wide text-gray-400">{t("printer.colConnection")}</p>
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <div className="space-y-1.5">
-                <Label htmlFor="pr-koneksi">Tipe Koneksi</Label>
+                <Label htmlFor="pr-koneksi">{t("printer.connectionType")}</Label>
                 <Select
                   id="pr-koneksi"
                   value={form.connection_type}
@@ -540,7 +550,7 @@ export default function MasterPrinterPage() {
                     <Label htmlFor="pr-ip">IP Address</Label>
                     <Input
                       id="pr-ip"
-                      placeholder="mis. 192.168.1.50"
+                      placeholder={t("printer.ipPlaceholder")}
                       value={form.ip_address}
                       onChange={(e) => set("ip_address", e.target.value)}
                     />
@@ -560,11 +570,13 @@ export default function MasterPrinterPage() {
                 <div className="space-y-1.5 sm:col-span-1">
                   <div className="flex items-center gap-1.5">
                     <Label htmlFor="pr-device">Device Path</Label>
-                    <InfoHint align="right">{DevicePathHint}</InfoHint>
+                    <InfoHint align="right">
+                      <DevicePathHint />
+                    </InfoHint>
                   </div>
                   <Input
                     id="pr-device"
-                    placeholder="mis. /dev/usb/lp0 atau COM3"
+                    placeholder={t("printer.devicePathPlaceholder")}
                     value={form.device_path}
                     onChange={(e) => set("device_path", e.target.value)}
                   />
@@ -577,11 +589,11 @@ export default function MasterPrinterPage() {
           {isStruk ? (
             <div className="space-y-4 rounded-lg border border-gray-200 px-4 py-3">
               <p className="text-xs font-semibold uppercase tracking-wide text-gray-400">
-                Pengaturan Struk
+                {t("printer.receiptSettings")}
               </p>
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                 <div className="space-y-1.5">
-                  <Label htmlFor="pr-kertas">Ukuran Kertas</Label>
+                  <Label htmlFor="pr-kertas">{t("printer.paperSize")}</Label>
                   <Select
                     id="pr-kertas"
                     value={form.paper_size}
@@ -592,11 +604,11 @@ export default function MasterPrinterPage() {
                   </Select>
                 </div>
                 <div className="space-y-1.5">
-                  <Label htmlFor="pr-karakter">Jumlah Karakter</Label>
+                  <Label htmlFor="pr-karakter">{t("printer.charPerLine")}</Label>
                   <Input
                     id="pr-karakter"
                     type="number"
-                    placeholder="mis. 32"
+                    placeholder={t("printer.charPlaceholder")}
                     value={form.char_per_line}
                     onChange={(e) => set("char_per_line", e.target.value)}
                   />
@@ -605,7 +617,7 @@ export default function MasterPrinterPage() {
               <div className="flex flex-wrap gap-6">
                 <CheckField
                   id="pr-autocut"
-                  label="Auto Cut"
+                  label={t("printer.autoCut")}
                   checked={form.auto_cut}
                   onChange={(v) => set("auto_cut", v)}
                 />
@@ -614,36 +626,36 @@ export default function MasterPrinterPage() {
           ) : (
             <div className="space-y-4 rounded-lg border border-gray-200 px-4 py-3">
               <p className="text-xs font-semibold uppercase tracking-wide text-gray-400">
-                Pengaturan Label
+                {t("printer.labelSettings")}
               </p>
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
                 <div className="space-y-1.5">
-                  <Label htmlFor="pr-lebar">Lebar Label (mm)</Label>
+                  <Label htmlFor="pr-lebar">{t("printer.labelWidth")}</Label>
                   <Input
                     id="pr-lebar"
                     type="number"
-                    placeholder="mis. 40"
+                    placeholder={t("printer.labelWidthPlaceholder")}
                     value={form.label_width_mm}
                     onChange={(e) => set("label_width_mm", e.target.value)}
                   />
                 </div>
                 <div className="space-y-1.5">
-                  <Label htmlFor="pr-tinggi">Tinggi Label (mm)</Label>
+                  <Label htmlFor="pr-tinggi">{t("printer.labelHeight")}</Label>
                   <Input
                     id="pr-tinggi"
                     type="number"
-                    placeholder="mis. 30"
+                    placeholder={t("printer.labelHeightPlaceholder")}
                     value={form.label_height_mm}
                     onChange={(e) => set("label_height_mm", e.target.value)}
                   />
                 </div>
                 <div className="space-y-1.5">
-                  <Label htmlFor="pr-gap">Gap Label (mm)</Label>
+                  <Label htmlFor="pr-gap">{t("printer.labelGap")}</Label>
                   <Input
                     id="pr-gap"
                     type="number"
                     step="0.1"
-                    placeholder="mis. 2"
+                    placeholder={t("printer.labelGapPlaceholder")}
                     value={form.label_gap_mm}
                     onChange={(e) => set("label_gap_mm", e.target.value)}
                   />
@@ -656,8 +668,10 @@ export default function MasterPrinterPage() {
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 sm:items-end">
             <div className="space-y-1.5">
               <div className="flex items-center gap-1.5">
-                <Label htmlFor="pr-codepage">Code Page</Label>
-                <InfoHint>{CodePageHint}</InfoHint>
+                <Label htmlFor="pr-codepage">{t("printer.codePageTitle")}</Label>
+                <InfoHint>
+                  <CodePageHint />
+                </InfoHint>
               </div>
               <Input
                 id="pr-codepage"
@@ -669,7 +683,7 @@ export default function MasterPrinterPage() {
             <div className="pb-2">
               <CheckField
                 id="pr-aktif"
-                label="Printer Aktif"
+                label={t("printer.printerActive")}
                 checked={form.is_active}
                 onChange={(v) => set("is_active", v)}
               />

@@ -16,15 +16,16 @@ import { useAppDispatch, useAppSelector } from "@/lib/store/hooks"
 import { fetchRooms, setRoomSearch, setRoomPage, invalidateRooms, type Room } from "@/lib/store/slices/roomSlice"
 import { ConfirmDialog } from "@/components/molecules/ConfirmDialog"
 import api from "@/lib/axios"
+import { useT } from "@/lib/i18n"
 
-// Pilihan layanan ruangan.
+// Pilihan layanan ruangan — labelnya dibaca lewat t() agar ikut bahasa aktif.
 const LAYANAN_OPTIONS = [
-  { value: "igd", label: "IGD" },
-  { value: "rawat_jalan", label: "Rawat Jalan" },
-  { value: "rawat_inap", label: "Rawat Inap" },
+  { value: "igd", labelKey: "masterRoom.serviceEr" },
+  { value: "rawat_jalan", labelKey: "masterRoom.serviceOutpatient" },
+  { value: "rawat_inap", labelKey: "masterRoom.serviceInpatient" },
 ] as const
-const layananLabel = (v: string | null) =>
-  LAYANAN_OPTIONS.find((o) => o.value === v)?.label ?? null
+const layananLabelKey = (v: string | null) =>
+  LAYANAN_OPTIONS.find((o) => o.value === v)?.labelKey ?? null
 
 const emptyForm = { name: "", layanan: "igd" }
 
@@ -32,6 +33,7 @@ export default function MasterRuanganPage() {
   const dispatch = useAppDispatch()
   const { items, totalItems, totalPages, page, search, loading, loaded, dirty } = useAppSelector((s) => s.rooms)
 
+  const t = useT()
   const [searchInput, setSearchInput] = useState(search)
   const [modal, setModal] = useState<"tambah" | "edit" | null>(null)
   const [form, setForm] = useState(emptyForm)
@@ -96,7 +98,7 @@ export default function MasterRuanganPage() {
 
   const columns: Column<Room>[] = [
     {
-      header: "Kode",
+      header: t("common.code"),
       cell: (row) => (
         <span className="font-mono text-xs font-semibold text-[#075489] bg-[#075489]/8 px-2 py-1 rounded">
           {row.code}
@@ -105,14 +107,14 @@ export default function MasterRuanganPage() {
       className: "w-32",
     },
     {
-      header: "Nama Ruangan",
+      header: t("masterRoom.colName"),
       cell: (row) => <span className="font-medium text-gray-900">{row.name}</span>,
     },
     {
-      header: "Layanan",
+      header: t("masterRoom.colService"),
       cell: (row) =>
-        layananLabel(row.layanan) ? (
-          <Badge variant="info">{layananLabel(row.layanan)}</Badge>
+        layananLabelKey(row.layanan) ? (
+          <Badge variant="info">{t(layananLabelKey(row.layanan) as string)}</Badge>
         ) : (
           <span className="text-gray-400 text-xs">—</span>
         ),
@@ -128,17 +130,17 @@ export default function MasterRuanganPage() {
             <DoorOpen className="h-6 w-6" />
           </div>
           <div>
-            <h1 className="text-2xl font-bold text-gray-900">Master Ruangan</h1>
-            <p className="text-sm text-gray-500 mt-0.5">Kelola data ruangan rumah sakit</p>
+            <h1 className="text-2xl font-bold text-gray-900">{t("masterRoom.title")}</h1>
+            <p className="text-sm text-gray-500 mt-0.5">{t("masterRoom.subtitle")}</p>
           </div>
         </div>
         <Button onClick={openTambah} className="bg-[#075489] hover:bg-[#075489]/90 text-white">
-          + Tambah Ruangan
+          {t("masterRoom.addRoom")}
         </Button>
       </div>
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-        <StatCard title="Total Ruangan" value={String(totalItems)} icon={DoorOpen} />
+        <StatCard title={t("masterRoom.statTotal")} value={String(totalItems)} icon={DoorOpen} />
       </div>
 
       <Card className="p-0">
@@ -147,20 +149,20 @@ export default function MasterRuanganPage() {
             <div className="relative flex-1">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 pointer-events-none" />
               <Input
-                placeholder="Cari nama ruangan..."
+                placeholder={t("masterRoom.searchPlaceholder")}
                 value={searchInput}
                 onChange={(e) => setSearchInput(e.target.value)}
                 className="pl-9"
               />
             </div>
             <Button type="submit" className="bg-[#075489] hover:bg-[#075489]/90 text-white shrink-0">
-              Cari
+              {t("common.search")}
             </Button>
           </form>
         </div>
 
         {loading ? (
-          <div className="py-16 text-center text-sm text-gray-400">Memuat data...</div>
+          <div className="py-16 text-center text-sm text-gray-400">{t("common.loading")}</div>
         ) : (
           <DataTable
             rowNumberOffset={(page - 1) * 20}
@@ -191,36 +193,36 @@ export default function MasterRuanganPage() {
       <Modal
         open={modal !== null}
         onClose={() => setModal(null)}
-        title={modal === "tambah" ? "Tambah Ruangan" : "Edit Ruangan"}
+        title={modal === "tambah" ? t("masterRoom.modalAdd") : t("masterRoom.modalEdit")}
         size="sm"
         footer={
           <>
-            <Button variant="outline" onClick={() => setModal(null)}>Batal</Button>
+            <Button variant="outline" onClick={() => setModal(null)}>{t("common.cancel")}</Button>
             <Button
               onClick={handleSave}
               disabled={saving}
               className="bg-[#075489] hover:bg-[#075489]/90 text-white"
             >
-              {saving ? "Menyimpan..." : "Simpan"}
+              {saving ? t("common.saving") : t("common.save")}
             </Button>
           </>
         }
       >
         <div className="space-y-4">
           {modal === "tambah" && (
-            <p className="text-xs text-gray-400">Kode ruangan akan dibuat otomatis oleh sistem.</p>
+            <p className="text-xs text-gray-400">{t("masterRoom.autoCodeHint")}</p>
           )}
           <div className="space-y-1.5">
-            <Label htmlFor="r-nama">Nama Ruangan</Label>
+            <Label htmlFor="r-nama">{t("masterRoom.colName")}</Label>
             <Input
               id="r-nama"
-              placeholder="Contoh: Poli Umum"
+              placeholder={t("masterRoom.namePlaceholder")}
               value={form.name}
               onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
             />
           </div>
           <div className="space-y-1.5">
-            <Label htmlFor="r-layanan">Layanan</Label>
+            <Label htmlFor="r-layanan">{t("masterRoom.colService")}</Label>
             <Select
               id="r-layanan"
               value={form.layanan}
@@ -228,7 +230,7 @@ export default function MasterRuanganPage() {
             >
               {LAYANAN_OPTIONS.map((o) => (
                 <option key={o.value} value={o.value}>
-                  {o.label}
+                  {t(o.labelKey)}
                 </option>
               ))}
             </Select>

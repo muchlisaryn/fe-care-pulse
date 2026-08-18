@@ -276,6 +276,53 @@ function handleSearch(e: React.FormEvent) {
 - Untuk halaman dengan data lokal (bukan Redux), gunakan state `searchQuery` terpisah yang di-set saat submit, lalu filter `data` dengan `.filter()`.
 - Selalu reset ke halaman 1 saat search dijalankan.
 
+# Bahasa (i18n)
+
+Seluruh teks yang dilihat pengguna **wajib** lewat kamus di `lib/i18n/`. Jangan pernah
+menulis kalimat langsung di JSX — kalau di-hardcode, teksnya tidak ikut berganti saat
+tombol bahasa di header ditekan.
+
+## Cara pakai
+
+```tsx
+import { useT } from "@/lib/i18n"          // hanya butuh t()
+import { useLanguage } from "@/lib/i18n"   // butuh lang / tn() juga
+
+const t = useT()
+<Button>{t("common.save")}</Button>
+<p>{t("orderCreate.summary", { orders: 3, units: 12 })}</p>
+```
+
+- `t(key, vars?)` — teks antarmuka tetap; `{nama}` di kamus diganti isi `vars`.
+- `tn(text)` — nama dari DATABASE (menu, judul seksi) lewat `glossary.ts`, bukan kamus.
+- `lang` + `localeOf(lang)` — untuk `toLocaleDateString`/`toLocaleTimeString`, supaya
+  nama hari & bulan ikut bahasa aktif. Jangan hardcode `"id-ID"` / `"en-GB"`.
+
+## Aturan
+
+- `lib/i18n/dictionary.ts` berisi dua blok, `en` dan `id`. **Kunci di keduanya harus
+  persis sama** — termasuk placeholder `{nama}`-nya. Tambahkan kunci baru ke kedua blok
+  sekaligus, di section yang sama.
+- Satu section per halaman/komponen (`masterUser`, `tracking`, …); `common` hanya untuk
+  teks yang benar-benar dipakai lintas halaman.
+- Pesan galat yang disimpan di state sebaiknya menyimpan **kunci** kamusnya, bukan
+  kalimat jadi, lalu dirender `{t(error)}` — pesannya ikut berganti saat bahasa diubah.
+  `t()` mengembalikan input apa adanya bila bukan kunci yang dikenal, jadi pesan mentah
+  dari server tetap tampil utuh.
+- Label yang dipetakan dari nilai DB (status, metode, peran) disimpan sebagai
+  `Record<string, string>` berisi KUNCI kamus, lalu diterjemahkan saat render.
+- Nilai bawaan komponen bersama (mis. `placeholder`) jangan ditulis literal; pakai
+  `placeholder ?? t("common.selectPlaceholder")`.
+- Bahasa aktif tersimpan di `localStorage` (`care-pulse-lang`). Render pertama selalu
+  memakai `DEFAULT_LANG` agar HTML server & klien cocok, baru disesuaikan setelah mount.
+
+## Ejaan Indonesia
+
+Ikuti KBBI dan istilah yang sudah dipakai: **kedaluwarsa** (bukan kadaluwarsa),
+**nonaktif** (bukan non-aktif), **dicentang** (bukan diceklis), **diimpor** (bukan
+diimport), **No.** untuk singkatan nomor (No. RM, No. Pegawai), sapaan **Anda**
+(bukan kamu).
+
 # Brand Colors
 
 - Primary dark: `#075489`

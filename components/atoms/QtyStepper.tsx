@@ -1,6 +1,7 @@
 "use client"
 
 import { Minus, Plus } from "lucide-react"
+import { useT } from "@/lib/i18n"
 
 /**
  * Stepper jumlah: tombol −/+ dengan kotak isian yang BOLEH dikosongkan sementara
@@ -16,6 +17,7 @@ export function QtyStepper({
   onChange: (value: string) => void
   min?: number
 }) {
+  const t = useT()
   const num = Number(value)
   const current = Number.isFinite(num) && value !== "" ? num : min
 
@@ -25,7 +27,7 @@ export function QtyStepper({
         type="button"
         onClick={() => onChange(String(Math.max(min, current - 1)))}
         className="px-2.5 text-gray-500 transition-colors hover:bg-gray-50 hover:text-gray-800"
-        aria-label="Decrease"
+        aria-label={t("common.decrease")}
       >
         <Minus className="h-4 w-4" />
       </button>
@@ -43,7 +45,7 @@ export function QtyStepper({
         type="button"
         onClick={() => onChange(String((value === "" ? min - 1 : current) + 1))}
         className="px-2.5 text-gray-500 transition-colors hover:bg-gray-50 hover:text-gray-800"
-        aria-label="Increase"
+        aria-label={t("common.increase")}
       >
         <Plus className="h-4 w-4" />
       </button>

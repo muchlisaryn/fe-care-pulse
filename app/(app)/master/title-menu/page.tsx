@@ -20,6 +20,7 @@ import {
   type TitleMenu,
 } from "@/lib/store/slices/titleMenuSlice"
 import api from "@/lib/axios"
+import { useT } from "@/lib/i18n"
 
 type TitleMenuForm = {
   title: string
@@ -38,6 +39,7 @@ export default function MasterTitleMenuPage() {
   const { items, totalItems, totalPages, page, search, loading, loaded, dirty } =
     useAppSelector((s) => s.titleMenus)
 
+  const t = useT()
   const [searchInput, setSearchInput] = useState(search)
   const [modal, setModal] = useState<"tambah" | "edit" | null>(null)
   const [form, setForm] = useState<TitleMenuForm>(emptyForm)
@@ -109,20 +111,20 @@ export default function MasterTitleMenuPage() {
 
   const columns: Column<TitleMenu>[] = [
     {
-      header: "Judul",
+      header: t("masterTitleMenu.colTitle"),
       cell: (row) => <span className="font-semibold text-gray-900">{row.title}</span>,
     },
     {
-      header: "Urutan",
+      header: t("masterTitleMenu.colOrder"),
       cell: (row) => <span className="text-sm text-gray-600">{row.sort_order}</span>,
       className: "w-24",
     },
     {
-      header: "Menu",
+      header: t("masterTitleMenu.colMenu"),
       cell: (row) =>
         row.menus.length > 0 ? (
           <span className="inline-flex items-center rounded-full bg-[#075489]/10 px-2.5 py-0.5 text-xs font-medium text-[#075489]">
-            {row.menus.length} menu
+            {t("masterTitleMenu.menuCount", { n: row.menus.length })}
           </span>
         ) : (
           <span className="text-gray-400 text-xs">—</span>
@@ -134,9 +136,9 @@ export default function MasterTitleMenuPage() {
   return (
     <div className="space-y-6">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <PageHeader title="Master Title Menu" subtitle="Kelola grup navigasi sidebar" />
+        <PageHeader title={t("masterTitleMenu.title")} subtitle={t("masterTitleMenu.subtitle")} />
         <Button onClick={openTambah} className="bg-[#075489] hover:bg-[#075489]/90 text-white">
-          + Tambah Title Menu
+          {t("masterTitleMenu.addTitle")}
         </Button>
       </div>
 
@@ -146,20 +148,20 @@ export default function MasterTitleMenuPage() {
             <div className="relative flex-1">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 pointer-events-none" />
               <Input
-                placeholder="Cari judul..."
+                placeholder={t("masterTitleMenu.searchPlaceholder")}
                 value={searchInput}
                 onChange={(e) => setSearchInput(e.target.value)}
                 className="pl-9"
               />
             </div>
             <Button type="submit" className="bg-[#075489] hover:bg-[#075489]/90 text-white shrink-0">
-              Cari
+              {t("common.search")}
             </Button>
           </form>
         </div>
 
         {loading ? (
-          <div className="py-16 text-center text-sm text-gray-400">Memuat data...</div>
+          <div className="py-16 text-center text-sm text-gray-400">{t("common.loading")}</div>
         ) : (
           <DataTable
             rowNumberOffset={(page - 1) * PER_PAGE}
@@ -168,7 +170,7 @@ export default function MasterTitleMenuPage() {
             onEdit={openEdit}
             onDelete={(row) => setDeleteTarget(row)}
             isRowLoading={(row) => deletingId === row.id}
-            emptyMessage="Belum ada data title menu."
+            emptyMessage={t("masterTitleMenu.empty")}
           />
         )}
 
@@ -191,35 +193,35 @@ export default function MasterTitleMenuPage() {
       <Modal
         open={modal !== null}
         onClose={() => setModal(null)}
-        title={modal === "tambah" ? "Tambah Title Menu" : "Edit Title Menu"}
+        title={modal === "tambah" ? t("masterTitleMenu.modalAdd") : t("masterTitleMenu.modalEdit")}
         size="sm"
         footer={
           <>
             <Button variant="outline" onClick={() => setModal(null)}>
-              Batal
+              {t("common.cancel")}
             </Button>
             <Button
               onClick={handleSave}
               disabled={saving}
               className="bg-[#075489] hover:bg-[#075489]/90 text-white"
             >
-              {saving ? "Menyimpan..." : "Simpan"}
+              {saving ? t("common.saving") : t("common.save")}
             </Button>
           </>
         }
       >
         <div className="space-y-4">
           <div className="space-y-1.5">
-            <Label htmlFor="tm-title">Judul</Label>
+            <Label htmlFor="tm-title">{t("masterTitleMenu.colTitle")}</Label>
             <Input
               id="tm-title"
-              placeholder="Contoh: Master Data"
+              placeholder={t("masterTitleMenu.titlePlaceholder")}
               value={form.title}
               onChange={(e) => setForm((p) => ({ ...p, title: e.target.value }))}
             />
           </div>
           <div className="space-y-1.5">
-            <Label htmlFor="tm-sort">Urutan (Sort Order)</Label>
+            <Label htmlFor="tm-sort">{t("masterTitleMenu.sortLabel")}</Label>
             <Input
               id="tm-sort"
               type="number"
