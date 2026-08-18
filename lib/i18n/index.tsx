@@ -22,9 +22,9 @@ export function localeOf(lang: Lang): string {
   return lang === "id" ? "id-ID" : "en-GB"
 }
 
-export const LANGUAGES: { value: Lang; label: string; short: string; flag: string }[] = [
-  { value: "en", label: "English", short: "EN", flag: "🇬🇧" },
-  { value: "id", label: "Indonesia", short: "ID", flag: "🇮🇩" },
+export const LANGUAGES: { value: Lang; label: string; short: string }[] = [
+  { value: "en", label: "English", short: "EN" },
+  { value: "id", label: "Indonesia", short: "ID" },
 ]
 
 type LanguageContextValue = {

@@ -1,8 +1,9 @@
 "use client"
 
 import { useEffect, useRef, useState } from "react"
-import { Check, Globe } from "lucide-react"
+import { Check } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { FlagIcon } from "@/components/atoms/FlagIcon"
 import { LANGUAGES, useLanguage } from "@/lib/i18n"
 
 /**
@@ -48,7 +49,7 @@ export function LanguageSwitch({ className }: { className?: string }) {
           open && "bg-gray-100 text-gray-800",
         )}
       >
-        <Globe className="h-4 w-4 shrink-0" />
+        <FlagIcon lang={active.value} className="h-4 w-[18px]" />
         <span className="font-semibold">{active.short}</span>
       </button>
 
@@ -79,9 +80,7 @@ export function LanguageSwitch({ className }: { className?: string }) {
                     : "text-gray-700 hover:bg-gray-50",
                 )}
               >
-                <span aria-hidden className="text-base leading-none">
-                  {l.flag}
-                </span>
+                <FlagIcon lang={l.value} className="h-4 w-[18px]" />
                 <span className="flex-1 text-left">{l.label}</span>
                 {selected && <Check className="h-4 w-4 shrink-0" />}
               </button>
