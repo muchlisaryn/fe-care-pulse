@@ -278,7 +278,7 @@ export function ProductionSterilizationTab({
       setSelected(new Set())
       onScanClear?.()
       onChanged()
-      toast.success(res.data?.message ?? t("prodSter.batchCreated"))
+      toast.success(t("prodSter.batchCreated"))
     } catch (e) {
       const msg = errMsg(e, t("common.somethingWrong"))
       setError(msg)
@@ -349,7 +349,7 @@ export function ProductionSterilizationTab({
     setVError(null)
     try {
       const failed_stock_ids = unitStockIds(validating).filter((id) => !passed.has(id))
-      const res = await api.post(`/master/sterilization-pipeline/${validating.id}/validate`, {
+      await api.post(`/master/sterilization-pipeline/${validating.id}/validate`, {
         failed_stock_ids,
         chemical_indicator: vForm.chemical_indicator.trim() || null,
         bio_indicator_control: vForm.bio_indicator_control || null,
@@ -359,7 +359,7 @@ export function ProductionSterilizationTab({
       setConfirmValidate(false)
       setValidating(null)
       onChanged()
-      toast.success(res.data?.message ?? t("prodSter.validationSaved"))
+      toast.success(t("prodSter.validationSaved"))
     } catch (e) {
       const msg = errMsg(e, t("common.somethingWrong"))
       setConfirmValidate(false)

@@ -616,14 +616,14 @@ function ProduksiCssdPage() {
     setSaving(true)
     setFormError(null)
     try {
-      const res = await api.post("/master/production", { items, note: note.trim() || null })
+      await api.post("/master/production", { items, note: note.trim() || null })
       setLines([])
       setNote("")
       // Batch baru langsung berstatus pencucian → tandai data cleaning perlu di-refresh,
       // lalu alihkan ke tab Cleaning (efek lazy-load akan memuat ulang datanya).
       dispatch(invalidateCleaning())
       changeTab("cleaning")
-      toast.success(res.data?.message ?? t("production.successProduction"))
+      toast.success(t("production.successProduction"))
     } catch (e) {
       const msg = errMsg(e, t("common.somethingWrong"))
       setFormError(msg)

@@ -59,6 +59,8 @@ export function Header({ className, onToggleSidebar, onOpenMobileSidebar }: Head
       <div className="flex items-center gap-2">
         <button
           onClick={onToggleSidebar}
+          aria-label={t("sidebar.toggle")}
+          title={t("sidebar.toggle")}
           className="hidden lg:flex h-9 w-9 items-center justify-center rounded-lg text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-700"
         >
           <Menu className="h-5 w-5" />
@@ -66,6 +68,8 @@ export function Header({ className, onToggleSidebar, onOpenMobileSidebar }: Head
 
         <button
           onClick={onOpenMobileSidebar}
+          aria-label={t("sidebar.toggle")}
+          title={t("sidebar.toggle")}
           className="flex lg:hidden h-9 w-9 items-center justify-center rounded-lg text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-700"
         >
           <Menu className="h-5 w-5" />

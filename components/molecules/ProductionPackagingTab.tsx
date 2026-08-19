@@ -441,7 +441,7 @@ export function ProductionPackagingTab({
       setLabel(res.data?.data?.label as ProdSterilLabel)
       setActive(null)
       // Refetch DITUNDA sampai modal label ditutup agar komponen tidak unmount.
-      toast.success(res.data?.message ?? t("prodPkg.packagingCompleted"))
+      toast.success(t("prodPkg.packagingCompleted"))
     } catch (e) {
       const msg = errMsg(e, t("common.somethingWrong"))
       setError(msg)

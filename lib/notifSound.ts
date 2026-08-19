@@ -1,6 +1,7 @@
 // Notifikasi order masuk: diucapkan lewat Web Speech API ("Ada order masuk, dari
-// ruangan, ...") dengan SUARA PEREMPUAN dan tempo PELAN agar petugas tahu asal
-// ordernya tanpa melihat layar. Browser yang tidak mendukung sintesis suara tidak
+// ruangan, ..." / "New order received, from room, ...") dengan SUARA PEREMPUAN dan
+// tempo PELAN agar petugas tahu asal ordernya tanpa melihat layar. Kalimat, bahasa
+// pengucapan, dan pemilihan suaranya mengikuti bahasa yang dipilih di header. Browser yang tidak mendukung sintesis suara tidak
 // berbunyi apa pun — badge di sidebar tetap menjadi penanda visualnya.
 //
 // Tiga hal yang menentukan pengumumannya terdengar perempuan & tidak buru-buru:
@@ -29,6 +30,29 @@ function getSynth(): SpeechSynthesis | null {
 // jadi tidak ada aset yang bisa gagal dimuat) — petugas tetap mendengar sesuatu
 // walau kalimatnya tidak sempat terucap.
 // ---------------------------------------------------------------------------
+
+import { dictionary } from "@/lib/i18n/dictionary"
+import { DEFAULT_LANG, localeOf, type Lang } from "@/lib/i18n"
+
+/**
+ * Bahasa aktif dibaca langsung dari localStorage, bukan lewat context React: modul ini
+ * dipanggil dari listener Pusher di luar pohon komponen, jadi tidak bisa memakai hook.
+ * Kuncinya sama dengan yang dipakai LanguageProvider.
+ */
+function currentLang(): Lang {
+  if (typeof localStorage === "undefined") return DEFAULT_LANG
+  const saved = localStorage.getItem("care-pulse-lang")
+  return saved === "id" || saved === "en" ? saved : DEFAULT_LANG
+}
+
+/** Kalimat pengumuman dari kamus, variabelnya diisi seperti `t()`. */
+function speechText(key: string, lang: Lang, vars?: Record<string, string>): string {
+  const [section, name] = key.split(".")
+  const table = dictionary[lang] as Record<string, Record<string, string>>
+  const raw =
+    table[section]?.[name] ?? (dictionary[DEFAULT_LANG] as Record<string, Record<string, string>>)[section][name]
+  return vars ? raw.replace(/\{(\w+)\}/g, (m, k) => vars[k] ?? m) : raw
+}
 
 let audioCtx: AudioContext | null = null
 
@@ -130,19 +154,21 @@ type PickedVoice = { voice: SpeechSynthesisVoice | null; female: boolean }
  * Daftar suara dimuat asinkron oleh browser, jadi bisa saja masih kosong saat
  * dipanggil pertama kali; itu ditangani `voiceschanged` di bawah.
  */
-function pickVoice(synth: SpeechSynthesis): PickedVoice {
+function pickVoice(synth: SpeechSynthesis, lang: Lang): PickedVoice {
   const all = synth.getVoices()
-  const id = all.filter((v) => v.lang?.toLowerCase().startsWith("id"))
+  // Suara sebahasa dengan kalimat yang diucapkan — kalau kalimatnya Inggris, suara
+  // Indonesia melafalkannya kacau, begitu pula sebaliknya.
+  const same = all.filter((v) => v.lang?.toLowerCase().startsWith(lang))
 
-  const idFemale = id.find((v) => FEMALE_VOICE.test(v.name))
+  const idFemale = same.find((v) => FEMALE_VOICE.test(v.name))
   if (idFemale) return { voice: idFemale, female: true }
 
-  const idNeutral = id.find((v) => !MALE_VOICE.test(v.name))
+  const idNeutral = same.find((v) => !MALE_VOICE.test(v.name))
   if (idNeutral) return { voice: idNeutral, female: true }
 
-  // Suara perempuan bahasa lain — utamakan yang vokalnya paling dekat dengan
-  // bahasa Indonesia (Melayu, lalu Inggris sebagai yang paling pasti ada).
-  const preferred = ["ms", "en"]
+  // Suara perempuan bahasa lain — untuk kalimat Indonesia, Melayu paling dekat
+  // vokalnya, lalu Inggris sebagai yang paling pasti ada di tiap perangkat.
+  const preferred = lang === "id" ? ["ms", "en"] : ["en", "ms"]
   for (const prefix of preferred) {
     const hit = all.find(
       (v) => v.lang?.toLowerCase().startsWith(prefix) && FEMALE_VOICE.test(v.name),
@@ -152,12 +178,12 @@ function pickVoice(synth: SpeechSynthesis): PickedVoice {
   const anyFemale = all.find((v) => FEMALE_VOICE.test(v.name))
   if (anyFemale) return { voice: anyFemale, female: true }
 
-  // Menyerah: suara Indonesia apa adanya (kemungkinan laki-laki).
-  return { voice: id[0] ?? null, female: false }
+  // Menyerah: suara sebahasa apa adanya (kemungkinan laki-laki).
+  return { voice: same[0] ?? null, female: false }
 }
 
 /** Ucapkan teks. Mengembalikan false bila browser tidak mendukung sintesis suara. */
-function speak(text: string): boolean {
+function speak(text: string, lang: Lang): boolean {
   const synth = getSynth()
   if (!synth || typeof SpeechSynthesisUtterance === "undefined") return false
 
@@ -167,13 +193,13 @@ function speak(text: string): boolean {
     if (synth.paused) synth.resume()
 
     const utterance = new SpeechSynthesisUtterance(text)
-    utterance.lang = "id-ID"
+    utterance.lang = localeOf(lang)
     // PELAN. Ruang CSSD berisik dan petugas sering tidak menghadap layar, jadi
     // kalimatnya harus sempat dicerna sekali dengar tanpa perlu diulang. 0.8 masih
     // terasa buru-buru; 0.7 memberi jeda antar suku kata tanpa terdengar melambat
     // seperti baterai habis. Jangan naikkan mendekati 1.
     utterance.rate = 0.7
-    const { voice, female } = pickVoice(synth)
+    const { voice, female } = pickVoice(synth, lang)
     if (voice) {
       utterance.voice = voice
       // Samakan `lang` dengan suara yang benar-benar dipakai. Bila terpaksa memakai
@@ -231,7 +257,7 @@ export function primeNotifSound(): void {
     // punya teks — utterance kosong diabaikan begitu saja. Volume 0 → tak terdengar.
     const warmup = new SpeechSynthesisUtterance("­")
     warmup.volume = 0
-    warmup.lang = "id-ID"
+    warmup.lang = localeOf(currentLang())
     synth.speak(warmup)
     unlocked = true
   } catch {
@@ -296,11 +322,15 @@ export function announceIncomingOrder(room?: string | null, orderId?: number | n
   beep()
 
   const name = room?.trim()
-  // Koma bukan hiasan: mesin TTS berhenti sejenak di situ, jadi nama ruangan tidak
-  // menempel pada kalimat pembuka dan lebih mudah ditangkap sekali dengar.
-  const text = name ? `Ada order masuk, dari ruangan, ${name}` : "Ada order masuk"
+  const lang = currentLang()
+  // Koma di dalam kalimatnya bukan hiasan: mesin TTS berhenti sejenak di situ, jadi
+  // nama ruangan tidak menempel pada kalimat pembuka dan lebih mudah ditangkap
+  // sekali dengar.
+  const text = name
+    ? speechText("notif.incomingOrderFromRoom", lang, { room: name })
+    : speechText("notif.incomingOrder", lang)
 
   // Beri jeda sampai nada pendeknya selesai (dua nada, ±0,35 detik) sebelum mulai
   // bicara. Tanpa jeda, kata pertama tertimpa bunyi "ding" dan sering tidak terdengar.
-  setTimeout(() => speak(text), BEEP_DURATION_MS)
+  setTimeout(() => speak(text, lang), BEEP_DURATION_MS)
 }
