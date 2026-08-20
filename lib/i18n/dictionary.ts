@@ -1901,6 +1901,7 @@ export const dictionary = {
     nafsulImport: {
       titleMember: "Import Members from Excel",
       titleLeader: "Import Group Leaders from Excel",
+      titleCity: "Import Cities from Excel",
       batchNote: "Sent {size} rows per batch, not all at once.",
       dropHere: "Drag an Excel file here, or",
       pickFile: "Choose File",
@@ -3820,6 +3821,7 @@ export const dictionary = {
     nafsulImport: {
       titleMember: "Impor Anggota dari Excel",
       titleLeader: "Impor Ketua Kelompok dari Excel",
+      titleCity: "Impor Kota dari Excel",
       batchNote: "Dikirim {size} baris per batch, bukan seluruhnya sekaligus.",
       dropHere: "Tarik berkas Excel ke sini, atau",
       pickFile: "Pilih Berkas",

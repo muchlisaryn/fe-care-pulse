@@ -1,6 +1,7 @@
 "use client";
 
 import MasterCrud from "@/components/nafsul/MasterCrud";
+import ImportKotaModal from "@/components/nafsul/ImportKotaModal";
 import { useT } from "@/lib/i18n";
 
 export default function KotaPage() {
@@ -9,6 +10,7 @@ export default function KotaPage() {
   return (
     <MasterCrud
       endpoint="kota"
+      renderImport={(p) => <ImportKotaModal {...p} />}
       title={t("nafsulMaster.cityTitle")}
       subtitle={t("nafsulMaster.citySubtitle")}
       pkField="kode"
