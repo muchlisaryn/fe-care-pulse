@@ -145,6 +145,9 @@ export default function ImportExcelModal({
   const masterDiminta = useRef(false);
 
   const templateColumns = columns.filter((c) => c.diTemplate !== false);
+  // Kolom bertanda `wajib` — sumber yang sama dengan sorotan kuning di file
+  // Excel, jadi daftar di modal tidak bisa melenceng dari templatnya.
+  const kolomWajib = templateColumns.filter((c) => c.wajib);
   const namaDari = (row: ParsedRow) => String(row[barisWajib.field] ?? "").trim();
 
   // Master ditarik sekali saat modal dibuka, dipakai sebagai sheet referensi
@@ -431,6 +434,33 @@ export default function ImportExcelModal({
         <p className="text-sm text-slate-500">
           {t("nafsulImport.batchNote", { size: BATCH_SIZE })}
         </p>
+
+        {/*
+          Kolom wajib disebutkan di modal, bukan hanya disorot kuning di file
+          Excel: pengguna yang menyusun filenya sendiri (tanpa mengunduh
+          templat) tidak akan pernah melihat sorotan itu.
+        */}
+        {kolomWajib.length > 0 && (
+          <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+            <div className="text-xs font-medium uppercase tracking-wide text-slate-500">
+              {t("nafsulImport.requiredColumns")}
+            </div>
+            <div className="mt-2 flex flex-wrap gap-2">
+              {kolomWajib.map((c) => (
+                <span
+                  key={c.header}
+                  className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-sm text-slate-700"
+                >
+                  {c.header}
+                  <span className="ml-0.5 text-red-500">*</span>
+                </span>
+              ))}
+            </div>
+            <p className="mt-2 text-xs text-slate-500">
+              {t("nafsulImport.requiredHint")}
+            </p>
+          </div>
+        )}
 
         {!namaFile ? (
             <div

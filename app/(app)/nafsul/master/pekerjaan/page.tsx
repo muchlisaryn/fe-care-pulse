@@ -1,6 +1,7 @@
 "use client";
 
 import MasterCrud from "@/components/nafsul/MasterCrud";
+import ImportPekerjaanModal from "@/components/nafsul/ImportPekerjaanModal";
 import { useT } from "@/lib/i18n";
 
 export default function PekerjaanPage() {
@@ -9,6 +10,7 @@ export default function PekerjaanPage() {
   return (
     <MasterCrud
       endpoint="pekerjaan"
+      renderImport={(p) => <ImportPekerjaanModal {...p} />}
       title={t("nafsulMaster.occupationTitle")}
       subtitle={t("nafsulMaster.occupationSubtitle")}
       pkField="id"

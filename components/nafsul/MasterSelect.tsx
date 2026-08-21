@@ -29,11 +29,17 @@ export default function MasterSelect<T>({
   placeholder,
   searchPlaceholder,
   labelTerpilih,
+  params,
 }: {
   /** Endpoint master, mis. "/wilayah". */
   endpoint: string;
   value: string;
-  onChange: (value: string) => void;
+  /**
+   * `row` adalah baris master yang dipilih, bila masih ada di daftar yang
+   * sedang dimuat. Berguna untuk memakai field lain dari baris itu (mis.
+   * mengisi nominal dari harga tarif) tanpa permintaan tambahan.
+   */
+  onChange: (value: string, row?: T) => void;
   /** Ubah satu baris master jadi opsi dropdown. */
   toOption: (row: T) => SelectSearchOption;
   placeholder?: string;
@@ -41,9 +47,21 @@ export default function MasterSelect<T>({
   searchPlaceholder?: string;
   /** Label nilai terpilih saat opsinya belum dimuat (form edit). */
   labelTerpilih?: string;
+  /**
+   * Parameter penyaring tambahan, mis. `{ noketua: "KKL2601001" }`.
+   *
+   * Opsi dimuat sekali lalu ditahan, jadi mengubah isi `params` TIDAK memicu
+   * pemuatan ulang. Pemanggil yang menyaring secara dinamis perlu memberi
+   * `key` yang ikut berubah supaya komponennya dipasang ulang — kalau tidak,
+   * daftarnya masih menampilkan hasil saringan yang lama.
+   */
+  params?: Record<string, string | number | undefined>;
 }) {
   const t = useT();
   const [options, setOptions] = useState<SelectSearchOption[]>([]);
+  // Baris mentah disimpan berdampingan dengan opsinya: `toOption` hanya
+  // menyisakan value & label, sedangkan pemanggil kadang butuh field lain.
+  const [rows, setRows] = useState<T[]>([]);
   const [loading, setLoading] = useState(false);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Menandai permintaan terakhir; balasan yang datang telat diabaikan supaya
@@ -78,11 +96,17 @@ export default function MasterSelect<T>({
 
     try {
       const res = await api<Paginated<T>>(endpoint, {
-        params: { search, per_page: PER_PAGE },
+        params: { ...params, search, per_page: PER_PAGE },
       });
-      if (nomor === permintaan.current) setOptions(res.data.map(toOption));
+      if (nomor === permintaan.current) {
+        setOptions(res.data.map(toOption));
+        setRows(res.data);
+      }
     } catch {
-      if (nomor === permintaan.current) setOptions([]);
+      if (nomor === permintaan.current) {
+        setOptions([]);
+        setRows([]);
+      }
     } finally {
       if (nomor === permintaan.current) setLoading(false);
     }
@@ -111,7 +135,7 @@ export default function MasterSelect<T>({
     <SelectSearch
       options={options}
       value={value}
-      onChange={onChange}
+      onChange={(v) => onChange(v, rows.find((row) => toOption(row).value === v))}
       loading={loading}
       placeholder={placeholder}
       searchPlaceholder={searchPlaceholder ?? t("common.searchPlaceholder")}

@@ -37,7 +37,10 @@ import ImportExcelModal, {
 const COLUMNS: ImportColumn[] = [
   { header: "ID", field: "id", contoh: "", diTemplate: false },
   { header: "Nama Lengkap", field: "nama", contoh: "Ahmad Fauzi", wajib: true },
-  { header: "No. Anggota", field: "no_anggota", contoh: "2608001", wajib: true },
+  // Sengaja tidak `wajib`: baris tanpa kolom wajib ditolak di klien sebelum
+  // dikirim, sedangkan No. Anggota yang dikosongkan justru dibuatkan otomatis
+  // oleh server dengan format YYMMDD + urut harian.
+  { header: "No. Anggota", field: "no_anggota", contoh: "26082101" },
   { header: "Jenis Kelamin", field: "jenis_kelamin", contoh: "L" },
   { header: "No. KTP", field: "noktp", contoh: "3578010101900001" },
   { header: "No. KK", field: "nokk", contoh: "3578010101900002" },

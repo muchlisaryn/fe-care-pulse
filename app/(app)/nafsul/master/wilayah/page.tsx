@@ -1,6 +1,7 @@
 "use client";
 
 import MasterCrud from "@/components/nafsul/MasterCrud";
+import ImportWilayahModal from "@/components/nafsul/ImportWilayahModal";
 import { useT } from "@/lib/i18n";
 
 export default function WilayahPage() {
@@ -9,6 +10,7 @@ export default function WilayahPage() {
   return (
     <MasterCrud
       endpoint="wilayah"
+      renderImport={(p) => <ImportWilayahModal {...p} />}
       title={t("nafsulMaster.regionTitle")}
       subtitle={t("nafsulMaster.regionSubtitle")}
       pkField="kode"
