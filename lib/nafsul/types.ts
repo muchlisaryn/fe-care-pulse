@@ -1,3 +1,5 @@
+import type { FeeType } from "./feeType";
+
 export interface User {
   id: number;
   name: string;
@@ -39,6 +41,12 @@ export interface Tarif {
   kode: string;
   nama: string;
   harga: string | number;
+  /**
+   * Sifat tarif: "recurring" (berulang tiap periode) atau "one_time" (sekali
+   * bayar). `null` = tarif lama yang belum diklasifikasi, diperlakukan sebagai
+   * berulang — sama seperti di backend.
+   */
+  fee_type: FeeType | null;
 }
 
 export interface KetuaKelompok {

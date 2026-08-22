@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react"
 import Link from "next/link"
-import { Search, Wallet } from "lucide-react"
+import { Search, Upload, Wallet } from "lucide-react"
 import { Button } from "@/components/atoms/Button"
 import { Input } from "@/components/atoms/Input"
 import { Select } from "@/components/atoms/Select"
@@ -11,6 +11,7 @@ import { DataTable, type Column } from "@/components/molecules/DataTable"
 import { Modal } from "@/components/molecules/Modal"
 import { ConfirmDialog } from "@/components/molecules/ConfirmDialog"
 import { ResultDialog } from "@/components/molecules/ResultDialog"
+import ImportTransaksiModal from "@/components/nafsul/ImportTransaksiModal"
 import { Pagination } from "@/components/molecules/Pagination"
 import { useAppDispatch, useAppSelector } from "@/lib/store/hooks"
 import {
@@ -51,12 +52,17 @@ export default function NafsulTransaksiPage() {
   const [metodeInput, setMetodeInput] = useState(paymentMethod)
 
   const [galat, setGalat] = useState<string | null>(null)
+  const [imporTerbuka, setImporTerbuka] = useState(false)
 
   const [detail, setDetail] = useState<TransaksiHeader | null>(null)
   const [detailLoading, setDetailLoading] = useState(false)
 
   const [deleteTarget, setDeleteTarget] = useState<TransaksiHeader | null>(null)
   const [deletingUuid, setDeletingUuid] = useState<string | null>(null)
+
+  const [resetTarget, setResetTarget] = useState<TransaksiHeader | null>(null)
+  const [resettingUuid, setResettingUuid] = useState<string | null>(null)
+  const [pesanSukses, setPesanSukses] = useState<string | null>(null)
 
   useEffect(() => {
     if (loaded && !dirty) return
@@ -95,6 +101,30 @@ export default function NafsulTransaksiPage() {
       setGalat((e as ApiError).message ?? t("nafsulTransaksi.saveFailed"))
     } finally {
       setDeletingUuid(null)
+    }
+  }
+
+  /**
+   * Kembalikan kuitansi ke keadaan belum dibayar.
+   *
+   * Rinciannya dilepas jadi tagihan lagi dan kuitansinya dihapus — perhitungan
+   * lengkapnya di server, di sini cukup menyegarkan daftarnya.
+   */
+  async function handleReset() {
+    if (!resetTarget || resettingUuid !== null) return
+    setResettingUuid(resetTarget.uuid)
+    try {
+      const hasil = await api<{ message: string }>(
+        `/transaksi/header/${resetTarget.uuid}/reset`,
+        { method: "POST" }
+      )
+      dispatch(invalidateTransaksi())
+      setResetTarget(null)
+      setPesanSukses(hasil.message)
+    } catch (e) {
+      setGalat((e as ApiError).message ?? t("nafsulTransaksi.saveFailed"))
+    } finally {
+      setResettingUuid(null)
     }
   }
 
@@ -199,12 +229,26 @@ export default function NafsulTransaksiPage() {
             </p>
           </div>
         </div>
-        <Link href="/nafsul/transaksi/baru">
-          <Button className="bg-[#075489] hover:bg-[#075489]/90 text-white">
-            {t("nafsulTransaksi.add")}
+        <div className="flex flex-wrap gap-2">
+          <Button variant="outline" onClick={() => setImporTerbuka(true)}>
+            <Upload className="mr-2 h-4 w-4" />
+            {t("nafsulMaster.importExcel")}
           </Button>
-        </Link>
+          <Link href="/nafsul/transaksi/baru">
+            <Button className="bg-[#075489] hover:bg-[#075489]/90 text-white">
+              {t("nafsulTransaksi.add")}
+            </Button>
+          </Link>
+        </div>
       </div>
+
+      <ImportTransaksiModal
+        open={imporTerbuka}
+        onClose={() => setImporTerbuka(false)}
+        // Daftar di-cache Redux; tanpa ini kuitansi hasil impor tidak muncul
+        // sampai halaman dibuka ulang.
+        onSelesai={() => dispatch(invalidateTransaksi())}
+      />
 
       <Card className="p-0">
         <div className="border-b border-gray-100 px-5 py-4">
@@ -248,9 +292,16 @@ export default function NafsulTransaksiPage() {
             data={items}
             extraActions={[
               { label: t("nafsulTransaksi.view"), onClick: openDetail },
+              {
+                label: t("nafsulTransaksi.reset"),
+                onClick: (row) => setResetTarget(row),
+                className: "text-amber-700 hover:bg-amber-50",
+              },
             ]}
             onDelete={(row) => setDeleteTarget(row)}
-            isRowLoading={(row) => deletingUuid === row.uuid}
+            isRowLoading={(row) =>
+              deletingUuid === row.uuid || resettingUuid === row.uuid
+            }
             emptyMessage={t("nafsulTransaksi.empty")}
           />
         )}
@@ -269,6 +320,29 @@ export default function NafsulTransaksiPage() {
         onClose={() => setDeleteTarget(null)}
         onConfirm={handleDelete}
         loading={deletingUuid !== null}
+      />
+
+      {/*
+        Akibat reset dijabarkan apa adanya di dialognya: tindakan ini melepas
+        rincian DAN menghapus kuitansinya, dan tidak ada tombol urung.
+      */}
+      <ConfirmDialog
+        open={resetTarget !== null}
+        onClose={() => setResetTarget(null)}
+        onConfirm={handleReset}
+        loading={resettingUuid !== null}
+        title={t("nafsulTransaksi.resetTitle")}
+        description={t("nafsulTransaksi.resetConfirm", {
+          number: resetTarget?.transaction_number ?? "",
+          lines: resetTarget?.transactions_count ?? 0,
+        })}
+      />
+
+      <ResultDialog
+        open={pesanSukses !== null}
+        onClose={() => setPesanSukses(null)}
+        variant="success"
+        description={pesanSukses ?? ""}
       />
 
       <ResultDialog
