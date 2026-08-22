@@ -37,6 +37,10 @@ export type TransaksiHeader = {
   transaction_type: "kelompok" | "pribadi"
   total: string
   member_deduction: string
+  /** "amount" = rupiah, "percent" = persen dari total rincian. */
+  member_deduction_type: "amount" | "percent"
+  /** Angka yang diketik petugas apa adanya (5 untuk "5%"). */
+  member_deduction_input: string
   group_leader_deduction: string
   group_leader_fee: string
   payment: string

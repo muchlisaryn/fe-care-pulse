@@ -5,6 +5,7 @@ import Link from "next/link"
 import { useRouter, useSearchParams } from "next/navigation"
 import {
   ChevronLeft,
+  RotateCcw,
   ChevronDown,
   ChevronRight,
   Trash2,
@@ -18,6 +19,7 @@ import { Label } from "@/components/atoms/Label"
 import { Select } from "@/components/atoms/Select"
 import { PageHeader } from "@/components/molecules/PageHeader"
 import { ResultDialog } from "@/components/molecules/ResultDialog"
+import { ConfirmDialog } from "@/components/molecules/ConfirmDialog"
 import MasterSelect from "@/components/nafsul/MasterSelect"
 import { useAppDispatch } from "@/lib/store/hooks"
 import { invalidateTransaksi } from "@/lib/store/slices/nafsulTransaksiSlice"
@@ -125,7 +127,10 @@ const entriKosong: Entri = {
 }
 
 const headerKosong = {
-  member_deduction: "",
+  // Potongan anggota: nilai yang diketik + satuannya. Nominal rupiahnya
+  // dihitung server dari kedua nilai ini.
+  member_deduction_input: "",
+  member_deduction_type: "amount" as "amount" | "percent",
   /**
    * Potongan ketua kelompok, dalam PERSEN (mis. "10" = 10%).
    *
@@ -196,6 +201,7 @@ function TransaksiBaruForm() {
   const [header, setHeader] = useState(headerKosong)
   const [saving, setSaving] = useState(false)
   const [galat, setGalat] = useState<string | null>(null)
+  const [resetOpen, setResetOpen] = useState(false)
 
   const idBerikutnya = useRef(1)
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -342,6 +348,31 @@ function TransaksiBaruForm() {
     batalkanEntri()
   }
 
+  /**
+   * Kosongkan SELURUH isian form ke keadaan awal.
+   *
+   * Hanya menyentuh state di browser — tidak ada satu pun permintaan ke server,
+   * karena sampai tombol Simpan ditekan memang belum ada apa pun yang tersimpan.
+   *
+   * Tab dikembalikan ke pilihan yang tercatat di URL, bukan dipaksa ke
+   * "kelompok": pengguna yang membuka `?tab=pribadi` mengharapkan reset
+   * mengembalikannya ke halaman pribadi yang kosong, bukan berpindah tab.
+   */
+  function resetForm() {
+    if (timer.current) clearTimeout(timer.current)
+    permintaan.current++
+
+    setTipe(tipeDariUrl(searchParams.get("tab")))
+    setKetua({ kode: "", nama: "" })
+    setEntri(entriKosong)
+    setEditId(null)
+    setDaftar([])
+    setTerbuka([])
+    setHeader(headerKosong)
+    setGalat(null)
+    setResetOpen(false)
+  }
+
   /** Kosongkan baris isian dan keluar dari mode ubah. */
   function batalkanEntri() {
     if (timer.current) clearTimeout(timer.current)
@@ -385,7 +416,6 @@ function TransaksiBaruForm() {
   // dihitung ulang di sini.
   const semuaPeriode = daftar.flatMap((d) => d.rencana.transactions)
   const totalRincian = semuaPeriode.reduce((j, p) => j + angka(p.total), 0)
-  const totalGratis = daftar.reduce((j, d) => j + d.rencana.free_months, 0)
 
   /**
    * Komisi ketua kelompok — muncul dua kali dengan nominal yang sama.
@@ -401,8 +431,46 @@ function TransaksiBaruForm() {
       ? Math.round(totalRincian * angka(header.group_leader_fee_percent)) / 100
       : 0
 
-  const potongan = angka(header.member_deduction) + jasaKetua
-  const harusDibayar = totalRincian - potongan + jasaKetua
+  // Rumusnya sama persis dengan terapkanPotonganAnggota() di server, supaya
+  // angka di layar tidak pernah berbeda dari yang tersimpan.
+  const potonganAnggota =
+    header.member_deduction_type === "percent"
+      ? Math.round(totalRincian * angka(header.member_deduction_input)) / 100
+      : angka(header.member_deduction_input)
+
+  // Nilai kotor sebelum bulan gratis dipotong. `totalRincian` sudah bersih
+  // (tiap periode gratis nilainya 0), jadi tanpa angka ini rincian di bawah
+  // tidak punya titik awal untuk dikurangi.
+  const bruto = semuaPeriode.reduce((j, p) => j + angka(p.amount), 0)
+
+  // Transaksi & diskon sama-sama dirinci per anggota: kuitansi satu kelompok
+  // bisa memuat belasan anggota, dan angka gabungan tidak bisa dicocokkan
+  // dengan siapa pun saat petugas memeriksa ulang.
+  const transaksiPerAnggota = daftar.map((d) => ({
+    id: d.id,
+    member_number: d.member_number,
+    member_name: d.member_name,
+    bulan: d.rencana.months,
+    nilai: d.rencana.transactions.reduce((j, p) => j + angka(p.amount), 0),
+  }))
+
+  const diskonPerAnggota = daftar
+    .map((d) => ({
+      id: d.id,
+      member_number: d.member_number,
+      member_name: d.member_name,
+      bulan: d.rencana.free_months,
+      nilai: d.rencana.transactions.reduce((j, p) => j + angka(p.discount), 0),
+    }))
+    .filter((d) => d.nilai > 0)
+
+  const totalDiskon = diskonPerAnggota.reduce((j, d) => j + d.nilai, 0)
+
+  const potongan = potonganAnggota + jasaKetua
+  // Sama dengan TransactionHeader::getBalanceAttribute(): komisi ketua kelompok
+  // ditahan dari setoran, jadi ikut mengurangi. `group_leader_fee` di server
+  // hanya catatan hak ketua dan tidak menambah kembali.
+  const harusDibayar = totalRincian - potongan
   const sisa = harusDibayar - angka(header.payment)
 
   /**
@@ -431,6 +499,16 @@ function TransaksiBaruForm() {
    */
   const entriSekaliBayar = isSekaliBayar(entri.rate_fee_type)
 
+  // Form dianggap terisi bila ada rincian, ada isian yang sedang diketik, atau
+  // ada angka pembayaran — ketiganya yang hilang saat direset.
+  const adaIsian =
+    daftar.length > 0 ||
+    entri.member_id !== "" ||
+    entri.rate_id !== "" ||
+    entri.months !== "" ||
+    header.payment !== "" ||
+    header.member_deduction_input !== ""
+
   const siapTambah = entri.rencana !== null && !entri.memuat
   const siapSimpan =
     daftar.length > 0 &&
@@ -447,7 +525,8 @@ function TransaksiBaruForm() {
       await api("/transaksi/header", {
         method: "POST",
         body: {
-          member_deduction: angka(header.member_deduction),
+          member_deduction_type: header.member_deduction_type,
+          member_deduction_input: angka(header.member_deduction_input),
           // Hanya persentasenya yang dikirim; nominal potongan & jasa ketua
           // dihitung server dari total rincian yang juga dihitungnya sendiri.
           group_leader_fee_percent: angka(header.group_leader_fee_percent),
@@ -986,15 +1065,61 @@ function TransaksiBaruForm() {
                 <Label htmlFor="hd-potongan-anggota">
                   {t("nafsulTransaksi.memberDeduction")}
                 </Label>
-                <NumberInput
-                  id="hd-potongan-anggota"
-                  prefix="Rp"
-                  placeholder="0"
-                  value={header.member_deduction}
-                  onValueChange={(v) =>
-                    setHeader((h) => ({ ...h, member_deduction: v }))
-                  }
-                />
+                <div className="flex gap-2">
+                  <div className="min-w-0 flex-1">
+                    <NumberInput
+                      id="hd-potongan-anggota"
+                      prefix={header.member_deduction_type === "percent" ? "%" : "Rp"}
+                      placeholder="0"
+                      value={header.member_deduction_input}
+                      onValueChange={(v) =>
+                        setHeader((h) => ({ ...h, member_deduction_input: v }))
+                      }
+                    />
+                  </div>
+                  {/*
+                    Satuannya dipilih di sebelah angkanya, bukan lewat dua field
+                    terpisah: petugas hanya punya SATU potongan anggota, jadi dua
+                    kotak isian akan mengundang keduanya terisi sekaligus.
+                  */}
+                  <div className="flex shrink-0 rounded-lg border border-slate-200 p-0.5">
+                    {(["amount", "percent"] as const).map((satuan) => (
+                      <button
+                        key={satuan}
+                        type="button"
+                        onClick={() =>
+                          setHeader((h) =>
+                            h.member_deduction_type === satuan
+                              ? h
+                              : // Nilainya dikosongkan saat satuan berganti: "25000"
+                                // yang tadinya rupiah menjadi 25000% kalau dibiarkan,
+                                // dan itu langsung ditolak server.
+                                { ...h, member_deduction_type: satuan, member_deduction_input: "" }
+                          )
+                        }
+                        aria-pressed={header.member_deduction_type === satuan}
+                        className={`rounded-md px-3 text-sm font-medium transition-colors ${
+                          header.member_deduction_type === satuan
+                            ? "bg-[#075489] text-white"
+                            : "text-slate-500 hover:bg-slate-50"
+                        }`}
+                      >
+                        {satuan === "amount" ? "Rp" : "%"}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                {/* Hasil hitungnya ditampilkan supaya persen tidak perlu dikira-kira. */}
+                {header.member_deduction_type === "percent" &&
+                  angka(header.member_deduction_input) > 0 && (
+                    <p className="text-xs text-slate-500">
+                      {t("nafsulTransaksi.percentOf", {
+                        percent: header.member_deduction_input,
+                        base: rupiah(totalRincian),
+                        result: rupiah(potonganAnggota),
+                      })}
+                    </p>
+                  )}
               </div>
 
               {/* Hanya berlaku pada setoran kelompok. */}
@@ -1103,39 +1228,154 @@ function TransaksiBaruForm() {
                   {t("nafsulTransaksi.fillExact", { amount: rupiah(harusDibayar) })}
                 </button>
               )}
+
+              {/*
+                Penanda kecukupan, menempel di bawah kotak isiannya sendiri —
+                bukan hanya di ringkasan sebelah. Petugas mengetik angkanya di
+                sini, jadi di sini pula kabar "cukup / belum" paling berguna.
+
+                Merah selama masih di bawah total, hijau begitu menutupi atau
+                melebihi. Ambangnya `sisa <= 0`, bukan `< 0`, supaya pembayaran
+                yang PAS ikut terhitung hijau.
+              */}
+              {header.payment !== "" && (
+                <p
+                  className={`text-xs font-medium ${
+                    sisa > 0 ? "text-red-600" : "text-emerald-700"
+                  }`}
+                >
+                  {sisa > 0
+                    ? t("nafsulTransaksi.payShort", { amount: rupiah(sisa) })
+                    : sisa === 0
+                      ? t("nafsulTransaksi.payEnough")
+                      : t("nafsulTransaksi.payExtra", { amount: rupiah(-sisa) })}
+                </p>
+              )}
             </div>
           </div>
 
           <dl className="h-fit space-y-2 rounded-xl border border-slate-200 bg-slate-50 px-4 py-4 text-sm lg:col-span-2">
-            <div className="flex justify-between gap-3">
-              <dt className="text-slate-600">
-                {t("nafsulTransaksi.periodsCount", { count: semuaPeriode.length })}
-              </dt>
-              <dd className="tabular-nums text-slate-900">{rupiah(totalRincian)}</dd>
-            </div>
-            {totalGratis > 0 && (
-              <div className="flex justify-between gap-3 text-emerald-700">
-                <dt>{t("nafsulTransaksi.freeMonths", { count: totalGratis })}</dt>
-                <dd className="tabular-nums">—</dd>
+            {/*
+              Tiap kelompok berbentuk blok bertajuk: judul, baris per anggota,
+              lalu totalnya di kaki. Angka gabungan tanpa rinciannya tidak bisa
+              dicocokkan dengan siapa pun saat petugas memeriksa ulang kuitansi.
+
+              Warna mengikuti arah angkanya — hijau menambah, merah mengurangi —
+              supaya sekali lihat sudah ketahuan mana yang memotong.
+
+              Blok hanya dipakai bila anggotanya lebih dari satu; untuk satu
+              anggota, rinciannya cuma mengulang angka di judulnya sendiri.
+            */}
+            {transaksiPerAnggota.length > 1 ? (
+              <div className="overflow-hidden rounded-lg border border-emerald-200">
+                <div className="border-b border-emerald-200 bg-emerald-50 px-3 py-1.5 text-center text-xs font-semibold uppercase tracking-wide text-emerald-700">
+                  {t("nafsulTransaksi.memberTransactions")}
+                </div>
+                <ul className="divide-y divide-slate-100">
+                  {transaksiPerAnggota.map((d) => (
+                    <li
+                      key={d.id}
+                      className="flex items-baseline justify-between gap-3 px-3 py-1.5 text-[13px] text-slate-600"
+                    >
+                      <span className="min-w-0 truncate">
+                        <span className="tabular-nums text-slate-500">
+                          {d.member_number}
+                        </span>{" "}
+                        {d.member_name}
+                        <span className="text-slate-400">
+                          {" · "}
+                          {t("nafsulTransaksi.monthsCount", { count: d.bulan })}
+                        </span>
+                      </span>
+                      <span className="shrink-0 tabular-nums">{rupiah(d.nilai)}</span>
+                    </li>
+                  ))}
+                </ul>
+                <div className="flex justify-between gap-3 border-t border-emerald-200 bg-emerald-50/60 px-3 py-1.5 font-semibold text-emerald-700">
+                  <span>{t("nafsulTransaksi.colTotal")}</span>
+                  <span className="tabular-nums">+ {rupiah(bruto)}</span>
+                </div>
+              </div>
+            ) : (
+              <div className="flex justify-between gap-3">
+                <dt className="text-emerald-700">
+                  <span className="mr-1 text-emerald-600/60">(+)</span>
+                  {t("nafsulTransaksi.memberTransactions")}
+                </dt>
+                <dd className="tabular-nums text-emerald-700">+ {rupiah(bruto)}</dd>
               </div>
             )}
-            {jasaKetua > 0 && (
-              <>
-                <div className="flex justify-between gap-3 text-slate-600">
-                  <dt>
-                    {t("nafsulTransaksi.leaderDeduction")}{" "}
-                    <span className="tabular-nums">
-                      ({header.group_leader_fee_percent}%)
-                    </span>
+
+            {diskonPerAnggota.length > 1 ? (
+              <div className="overflow-hidden rounded-lg border border-red-200">
+                <div className="border-b border-red-200 bg-red-50 px-3 py-1.5 text-center text-xs font-semibold uppercase tracking-wide text-red-700">
+                  {t("nafsulTransaksi.discount")}
+                </div>
+                <ul className="divide-y divide-slate-100">
+                  {diskonPerAnggota.map((d) => (
+                    <li
+                      key={d.id}
+                      className="flex items-baseline justify-between gap-3 px-3 py-1.5 text-[13px] text-slate-600"
+                    >
+                      <span className="min-w-0 truncate">
+                        <span className="tabular-nums text-slate-500">
+                          {d.member_number}
+                        </span>{" "}
+                        {d.member_name}
+                        <span className="text-slate-400">
+                          {" · "}
+                          {t("nafsulTransaksi.freeInline", { count: d.bulan })}
+                        </span>
+                      </span>
+                      <span className="shrink-0 tabular-nums">{rupiah(d.nilai)}</span>
+                    </li>
+                  ))}
+                </ul>
+                <div className="flex justify-between gap-3 border-t border-red-200 bg-red-50/60 px-3 py-1.5 font-semibold text-red-700">
+                  <span>{t("nafsulTransaksi.totalDiscount")}</span>
+                  <span className="tabular-nums">− {rupiah(totalDiskon)}</span>
+                </div>
+              </div>
+            ) : (
+              diskonPerAnggota.length === 1 && (
+                <div className="flex justify-between gap-3">
+                  <dt className="text-red-700">
+                    <span className="mr-1 text-red-600/60">(−)</span>
+                    {t("nafsulTransaksi.discount")}
                   </dt>
-                  <dd className="tabular-nums">− {rupiah(jasaKetua)}</dd>
+                  <dd className="tabular-nums text-red-700">− {rupiah(totalDiskon)}</dd>
                 </div>
-                <div className="flex justify-between gap-3 text-slate-600">
-                  <dt>{t("nafsulTransaksi.leaderFee")}</dt>
-                  <dd className="tabular-nums">+ {rupiah(jasaKetua)}</dd>
-                </div>
-              </>
+              )
             )}
+
+            {potonganAnggota > 0 && (
+              <div className="flex justify-between gap-3 text-red-700">
+                <dt>
+                  <span className="mr-1 text-red-600/60">(−)</span>
+                  {t("nafsulTransaksi.memberDeduction")}{" "}
+                  {header.member_deduction_type === "percent" && (
+                    <span className="tabular-nums">
+                      ({header.member_deduction_input}%)
+                    </span>
+                  )}
+                </dt>
+                <dd className="tabular-nums">− {rupiah(potonganAnggota)}</dd>
+              </div>
+            )}
+
+            {jasaKetua > 0 && (
+              <div className="flex justify-between gap-3 text-red-700">
+                <dt>
+                  <span className="mr-1 text-red-600/60">(−)</span>
+                  {t("nafsulTransaksi.leaderDeduction")}{" "}
+                  <span className="tabular-nums">
+                    ({header.group_leader_fee_percent}%)
+                  </span>
+                </dt>
+                <dd className="tabular-nums">− {rupiah(jasaKetua)}</dd>
+              </div>
+            )}
+
             <div className="flex items-baseline justify-between gap-3 border-t border-slate-200 pt-2.5">
               <dt className="font-medium text-slate-700">{t("nafsulTransaksi.due")}</dt>
               <dd className="text-xl font-bold tabular-nums text-[#075489]">
@@ -1180,15 +1420,38 @@ function TransaksiBaruForm() {
         >
           {saving ? t("common.saving") : t("common.save")}
         </Button>
+        {/*
+          Menggantikan tombol Batal. Jalan kembali ke daftar tetap ada lewat
+          tautan "← Transaksi Nafsul" di kepala halaman, jadi tidak ada aksi
+          yang hilang.
+
+          Selalu terlihat (dinonaktifkan saat tidak ada isian), bukan
+          muncul-hilang: tombol yang berpindah tempat begitu form mulai diisi
+          membuat posisinya tidak bisa dihafal.
+
+          Dikonfirmasi dulu — rincian yang sudah dikumpulkan tidak ada di
+          database, jadi sekali hilang tidak bisa dipanggil kembali.
+        */}
         <Button
           type="button"
           variant="outline"
-          onClick={() => router.push("/nafsul/transaksi")}
-          disabled={saving}
+          onClick={() => setResetOpen(true)}
+          disabled={saving || !adaIsian}
+          className="text-red-600 hover:bg-red-50 hover:text-red-700 disabled:text-slate-400"
         >
-          {t("common.cancel")}
+          <RotateCcw className="mr-1.5 h-4 w-4" />
+          {t("nafsulTransaksi.resetForm")}
         </Button>
       </div>
+
+      <ConfirmDialog
+        open={resetOpen}
+        onClose={() => setResetOpen(false)}
+        onConfirm={resetForm}
+        title={t("nafsulTransaksi.resetFormTitle")}
+        description={t("nafsulTransaksi.resetFormConfirm", { count: daftar.length })}
+        confirmLabel={t("nafsulTransaksi.resetForm")}
+      />
 
       <ResultDialog
         open={galat !== null}
