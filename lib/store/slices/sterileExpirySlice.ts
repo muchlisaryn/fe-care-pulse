@@ -36,6 +36,64 @@ export type SterileExpiryBatch = {
   racks: string[]
 }
 
+/**
+ * Satu BUNGKUS di dalam sebuah batch — dasar pilihan aksi "Packaging Ulang".
+ *
+ * Sterilitas melekat pada bungkus, bukan pada instrumen, jadi petugas memilih per
+ * label. Instrumen satuan jadi barisnya sendiri. `storage_ids` adalah seluruh isi
+ * bungkus itu; itulah yang dikirim balik ke server.
+ */
+export type SterileExpiryLabel = {
+  key: string
+  barcode_no: string | null
+  type: "paket" | "satuan"
+  name: string
+  rack_code: string | null
+  expiry_date: string | null
+  days_to_expiry: number | null
+  /** Hanya yang sudah kedaluwarsa yang boleh dikemas ulang. */
+  expired: boolean
+  unit_count: number
+  storage_ids: number[]
+  units: { storage_id: number; stock_id: number; code: string | null; name: string }[]
+}
+
+/** Hasil aksi Packaging Ulang — kode RPK yang baru dibuat, untuk ditampilkan. */
+export type RepackageResult = {
+  labels: number
+  units: number
+  packagings: string[]
+}
+
+/**
+ * Isi satu batch per label. TIDAK disimpan di store: datanya hanya hidup selama
+ * dialog terbuka dan selalu diambil ulang saat dibuka, karena isi rak bisa berubah
+ * oleh petugas lain di antara dua kali buka.
+ */
+export async function fetchSterileExpiryLabels(
+  sterilizationId: number,
+  days?: number,
+): Promise<SterileExpiryLabel[]> {
+  const res = await api.get(`/master/sterile-expiry/${sterilizationId}/units`, { params: { days } })
+  return res.data.data.labels as SterileExpiryLabel[]
+}
+
+/**
+ * Tarik label kedaluwarsa dari rak → buka ronde pengemasan baru (RPK).
+ *
+ * Server MEMPERLUAS pilihan ke seluruh isi label yang tersentuh, jadi jumlah unit
+ * pada hasil bisa lebih besar daripada yang dicentang — itu memang disengaja.
+ */
+export async function repackageSterileExpiry(
+  sterilizationId: number,
+  storageIds: number[],
+): Promise<RepackageResult> {
+  const res = await api.post(`/master/sterile-expiry/${sterilizationId}/repackage`, {
+    storage_ids: storageIds,
+  })
+  return res.data.data as RepackageResult
+}
+
 /** Angka kartu statistik — dihitung server dengan aturan hitung yang sama. */
 export type SterileExpirySummary = {
   batches: number

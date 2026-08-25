@@ -14,6 +14,7 @@ import {
   X,
 } from "lucide-react"
 import { Button } from "@/components/atoms/Button"
+import { Input } from "@/components/atoms/Input"
 import { NumberInput } from "@/components/atoms/NumberInput"
 import { Label } from "@/components/atoms/Label"
 import { Select } from "@/components/atoms/Select"
@@ -140,7 +141,23 @@ const headerKosong = {
    */
   group_leader_fee_percent: "",
   payment: "",
-  payment_method: "cash" as "cash" | "transfer",
+  payment_method: "cash" as "cash" | "transfer" | "other",
+  /**
+   * Tanggal uang diterima — bawaannya HARI INI, karena itu yang benar untuk
+   * hampir semua setoran; yang mencatat kuitansi lama tinggal memundurkannya.
+   *
+   * Dihitung dari waktu LOKAL, bukan `toISOString()` yang memakai UTC: di WIB
+   * (UTC+7) setoran sebelum pukul 07.00 akan tercatat mundur satu hari.
+   */
+  date: hariIni(),
+}
+
+/** Tanggal hari ini dalam bentuk "YYYY-MM-DD" menurut zona waktu perangkat. */
+function hariIni(): string {
+  const d = new Date()
+  const bulan = String(d.getMonth() + 1).padStart(2, "0")
+  const tanggal = String(d.getDate()).padStart(2, "0")
+  return `${d.getFullYear()}-${bulan}-${tanggal}`
 }
 
 /** Jeda ketik sebelum jumlah bulan dikirim ke server. */
@@ -525,6 +542,7 @@ function TransaksiBaruForm() {
       await api("/transaksi/header", {
         method: "POST",
         body: {
+          date: header.date,
           member_deduction_type: header.member_deduction_type,
           member_deduction_input: angka(header.member_deduction_input),
           // Hanya persentasenya yang dikirim; nominal potongan & jasa ketua
@@ -616,9 +634,7 @@ function TransaksiBaruForm() {
         </div>
 
         {jenisTerkunci && (
-          <p className="mt-2 text-xs text-slate-500">
-            {t("nafsulTransaksi.typeLocked")}
-          </p>
+          <p className="mt-2 text-xs text-slate-500">{t("nafsulTransaksi.typeLocked")}</p>
         )}
       </div>
 
@@ -627,9 +643,25 @@ function TransaksiBaruForm() {
         <h2 className="mb-4 font-semibold">{t("nafsulTransaksi.lines")}</h2>
 
         {/* Baris isian: dikosongkan lagi setiap kali rinciannya masuk daftar. */}
-        <div className="grid gap-3 lg:grid-cols-[1fr_1fr_9rem_auto] lg:items-end">
+        {/*
+          Kolom "Jumlah Bulan" DIHILANGKAN pada tarif sekali bayar, bukan sekadar
+          dikosongkan: tarif itu tidak punya periode, jadi tidak ada yang bisa
+          dikalikan. Karena kolomnya benar-benar hilang, template grid-nya ikut
+          menyusut — kalau tidak, tombol Tambah jatuh ke petak selebar 9rem.
+        */}
+        <div
+          className={`grid gap-3 lg:items-end ${
+            entriSekaliBayar
+              ? "lg:grid-cols-[1fr_1fr_auto]"
+              : "lg:grid-cols-[1fr_1fr_9rem_auto]"
+          }`}
+        >
           {tipe === "kelompok" && (
-            <div className="space-y-1.5 lg:col-span-4">
+            <div
+              className={`space-y-1.5 ${
+                entriSekaliBayar ? "lg:col-span-3" : "lg:col-span-4"
+              }`}
+            >
               <Label>
                 {t("nafsulTransaksi.groupLeader")} <span className="text-red-500">*</span>
               </Label>
@@ -751,45 +783,31 @@ function TransaksiBaruForm() {
             />
           </div>
 
-          {/*
-            Tarif sekali bayar tidak punya periode, jadi tidak ada yang bisa
-            dikalikan — kolomnya diganti keterangan agar petak grid-nya tidak
-            melompat saat tarif berganti.
-          */}
-          <div className="space-y-1.5">
-            {entriSekaliBayar ? (
-              <>
-                <Label>{t("nafsulTransaksi.months")}</Label>
-                <p className="rounded-lg border border-dashed border-slate-300 bg-slate-50 px-3 py-2 text-center text-sm text-slate-400">
-                  {t("nafsulTransaksi.noPeriod")}
-                </p>
-              </>
-            ) : (
-              <>
-                <Label htmlFor="entri-bulan">
-                  {t("nafsulTransaksi.months")} <span className="text-red-500">*</span>
-                </Label>
-                <NumberInput
-                  id="entri-bulan"
-                  grouped={false}
-                  placeholder="12"
-                  value={entri.months}
-                  onValueChange={(v) => {
-                    setEntri((x) => ({ ...x, months: v, galat: null }))
-                    jadwalkan(
-                      {
-                        memberId: entri.member_id,
-                        rateId: entri.rate_id,
-                        months: v,
-                        sekaliBayar: false,
-                      },
-                      false
-                    )
-                  }}
-                />
-              </>
-            )}
-          </div>
+          {!entriSekaliBayar && (
+            <div className="space-y-1.5">
+              <Label htmlFor="entri-bulan">
+                {t("nafsulTransaksi.months")} <span className="text-red-500">*</span>
+              </Label>
+              <NumberInput
+                id="entri-bulan"
+                grouped={false}
+                placeholder="12"
+                value={entri.months}
+                onValueChange={(v) => {
+                  setEntri((x) => ({ ...x, months: v, galat: null }))
+                  jadwalkan(
+                    {
+                      memberId: entri.member_id,
+                      rateId: entri.rate_id,
+                      months: v,
+                      sekaliBayar: false,
+                    },
+                    false
+                  )
+                }}
+              />
+            </div>
+          )}
 
           <div className="flex gap-2">
             <Button
@@ -1058,6 +1076,24 @@ function TransaksiBaruForm() {
           yang dibayar berada jauh dari total yang harus dibayar — padahal
           justru dua angka itu yang dibandingkan petugas sebelum menyimpan.
         */}
+        {/*
+          Tanggal ditaruh PALING ATAS di kartu ini dan SELEBAR kartunya: ia
+          menerangkan kapan uangnya diterima, jadi berlaku untuk seluruh isi
+          kartu — bukan milik lajur kiri saja.
+        */}
+        <div className="space-y-1.5 border-b border-slate-200 px-5 py-4">
+          <Label htmlFor="hd-tanggal">
+            {t("nafsulTransaksi.colDate")} <span className="text-red-500">*</span>
+          </Label>
+          <Input
+            id="hd-tanggal"
+            type="date"
+            value={header.date}
+            onChange={(e) => setHeader((h) => ({ ...h, date: e.target.value }))}
+          />
+          <p className="text-xs text-slate-500">{t("nafsulTransaksi.dateHint")}</p>
+        </div>
+
         <div className="grid gap-5 p-5 lg:grid-cols-5">
           <div className="space-y-4 lg:col-span-3">
             <div className="grid gap-4 sm:grid-cols-2">
@@ -1185,7 +1221,7 @@ function TransaksiBaruForm() {
                   onChange={(e) =>
                     setHeader((h) => ({
                       ...h,
-                      payment_method: e.target.value as "cash" | "transfer",
+                      payment_method: e.target.value as "cash" | "transfer" | "other",
                     }))
                   }
                 >
@@ -1193,6 +1229,7 @@ function TransaksiBaruForm() {
                   <option value="transfer">
                     {t("nafsulTransaksi.method_transfer")}
                   </option>
+                  <option value="other">{t("nafsulTransaksi.method_other")}</option>
                 </Select>
               </div>
             </div>

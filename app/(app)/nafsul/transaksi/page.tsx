@@ -2,13 +2,13 @@
 
 import { useEffect, useState } from "react"
 import Link from "next/link"
-import { Search, Upload, Wallet } from "lucide-react"
+import { useRouter } from "next/navigation"
+import { BadgeCheck, Lock, LockOpen, Search, Upload, Wallet } from "lucide-react"
 import { Button } from "@/components/atoms/Button"
 import { Input } from "@/components/atoms/Input"
 import { Select } from "@/components/atoms/Select"
 import { Card } from "@/components/molecules/Card"
 import { DataTable, type Column } from "@/components/molecules/DataTable"
-import { Modal } from "@/components/molecules/Modal"
 import { ConfirmDialog } from "@/components/molecules/ConfirmDialog"
 import { ResultDialog } from "@/components/molecules/ResultDialog"
 import ImportTransaksiModal from "@/components/nafsul/ImportTransaksiModal"
@@ -36,6 +36,7 @@ function rupiah(nilai: string | number): string {
 export default function NafsulTransaksiPage() {
   const t = useT()
   const dispatch = useAppDispatch()
+  const router = useRouter()
   const {
     items,
     totalItems,
@@ -54,14 +55,11 @@ export default function NafsulTransaksiPage() {
   const [galat, setGalat] = useState<string | null>(null)
   const [imporTerbuka, setImporTerbuka] = useState(false)
 
-  const [detail, setDetail] = useState<TransaksiHeader | null>(null)
-  const [detailLoading, setDetailLoading] = useState(false)
-
   const [deleteTarget, setDeleteTarget] = useState<TransaksiHeader | null>(null)
   const [deletingUuid, setDeletingUuid] = useState<string | null>(null)
 
-  const [resetTarget, setResetTarget] = useState<TransaksiHeader | null>(null)
-  const [resettingUuid, setResettingUuid] = useState<string | null>(null)
+  const [validasiTarget, setValidasiTarget] = useState<TransaksiHeader | null>(null)
+  const [validatingUuid, setValidatingUuid] = useState<string | null>(null)
   const [pesanSukses, setPesanSukses] = useState<string | null>(null)
 
   useEffect(() => {
@@ -73,21 +71,6 @@ export default function NafsulTransaksiPage() {
     e.preventDefault()
     dispatch(setTransaksiSearch(searchInput))
     dispatch(setTransaksiPaymentMethod(metodeInput))
-  }
-
-  async function openDetail(row: TransaksiHeader) {
-    setDetail(row)
-    setDetailLoading(true)
-    try {
-      // Daftar tidak membawa rincian (hanya jumlahnya) — diambil saat dibuka.
-      const lengkap = await api<TransaksiHeader>(`/transaksi/header/${row.uuid}`)
-      setDetail(lengkap)
-    } catch (e) {
-      setGalat((e as ApiError).message ?? t("nafsulTransaksi.saveFailed"))
-      setDetail(null)
-    } finally {
-      setDetailLoading(false)
-    }
   }
 
   async function handleDelete() {
@@ -105,26 +88,31 @@ export default function NafsulTransaksiPage() {
   }
 
   /**
-   * Kembalikan kuitansi ke keadaan belum dibayar.
+   * Kunci / buka kunci kuitansi — satu tombol, dua arah, mengikuti keadaan
+   * barisnya. Endpointnya memang dua supaya membuka kunci jadi tindakan
+   * tersendiri, bukan efek samping yang bisa menumpang pada aksi lain.
    *
-   * Rinciannya dilepas jadi tagihan lagi dan kuitansinya dihapus — perhitungan
-   * lengkapnya di server, di sini cukup menyegarkan daftarnya.
+   * Nama pemeriksa & waktunya ditetapkan SERVER dari pengguna yang login, bukan
+   * dikirim dari sini — jejak pemeriksaan tidak boleh bisa disetel klien.
+   * Daftarnya di-invalidate supaya lencana & tombol Ubah/Hapus langsung ikut
+   * berubah.
    */
-  async function handleReset() {
-    if (!resetTarget || resettingUuid !== null) return
-    setResettingUuid(resetTarget.uuid)
+  async function handleValidasi() {
+    if (!validasiTarget || validatingUuid !== null) return
+    const membuka = validasiTarget.validation_at !== null
+    setValidatingUuid(validasiTarget.uuid)
     try {
       const hasil = await api<{ message: string }>(
-        `/transaksi/header/${resetTarget.uuid}/reset`,
+        `/transaksi/header/${validasiTarget.uuid}/${membuka ? "batal-validasi" : "validasi"}`,
         { method: "POST" }
       )
       dispatch(invalidateTransaksi())
-      setResetTarget(null)
+      setValidasiTarget(null)
       setPesanSukses(hasil.message)
     } catch (e) {
       setGalat((e as ApiError).message ?? t("nafsulTransaksi.saveFailed"))
     } finally {
-      setResettingUuid(null)
+      setValidatingUuid(null)
     }
   }
 
@@ -132,9 +120,21 @@ export default function NafsulTransaksiPage() {
     {
       header: t("nafsulTransaksi.colNumber"),
       cell: (row) => (
-        <span className="font-medium tabular-nums text-gray-900">
-          {row.transaction_number}
-        </span>
+        <div className="leading-tight">
+          <span className="font-medium tabular-nums text-gray-900">
+            {row.transaction_number}
+          </span>
+          {/* Penanda pemeriksaan menempel pada nomornya, bukan jadi kolom
+              sendiri — daftar ini sengaja dijaga tetap ringkas. */}
+          {row.validation_at ? (
+            <span className="mt-0.5 flex items-center gap-1 text-[11px] font-medium text-emerald-600">
+              <BadgeCheck className="h-3.5 w-3.5 shrink-0" />
+              {row.validation_by
+                ? t("nafsulTransaksi.validatedBy", { name: row.validation_by })
+                : t("nafsulTransaksi.validated")}
+            </span>
+          ) : null}
+        </div>
       ),
     },
     {
@@ -148,14 +148,6 @@ export default function NafsulTransaksiPage() {
           }`}
         >
           {t(`nafsulTransaksi.tab_${row.transaction_type}`)}
-        </span>
-      ),
-    },
-    {
-      header: t("nafsulTransaksi.colLines"),
-      cell: (row) => (
-        <span className="text-gray-700">
-          {t("nafsulTransaksi.linesCount", { count: row.transactions_count })}
         </span>
       ),
     },
@@ -180,36 +172,16 @@ export default function NafsulTransaksiPage() {
       cell: (row) => (
         <span
           className={`rounded-full px-2 py-0.5 text-xs font-medium ${
-            row.payment_method === "cash"
-              ? "bg-amber-50 text-amber-700"
-              : "bg-sky-50 text-sky-700"
+            {
+              cash: "bg-amber-50 text-amber-700",
+              transfer: "bg-sky-50 text-sky-700",
+              other: "bg-slate-100 text-slate-700",
+            }[row.payment_method]
           }`}
         >
           {t(`nafsulTransaksi.method_${row.payment_method}`)}
         </span>
       ),
-    },
-    {
-      header: t("nafsulTransaksi.colBalance"),
-      className: "text-right",
-      cell: (row) => {
-        const nilai = Number(row.balance)
-        if (nilai === 0) {
-          return <span className="text-xs text-gray-400">{t("nafsulTransaksi.settled")}</span>
-        }
-        return (
-          <span
-            className={`tabular-nums font-medium ${
-              nilai > 0 ? "text-red-600" : "text-emerald-600"
-            }`}
-          >
-            {rupiah(Math.abs(nilai))}
-            <span className="ml-1 text-[11px] font-normal">
-              {nilai > 0 ? t("nafsulTransaksi.under") : t("nafsulTransaksi.over")}
-            </span>
-          </span>
-        )
-      },
     },
   ]
 
@@ -271,6 +243,7 @@ export default function NafsulTransaksiPage() {
               <option value="">{t("nafsulTransaksi.allMethods")}</option>
               <option value="cash">{t("nafsulTransaksi.method_cash")}</option>
               <option value="transfer">{t("nafsulTransaksi.method_transfer")}</option>
+              <option value="other">{t("nafsulTransaksi.method_other")}</option>
             </Select>
             <Button
               type="submit"
@@ -291,16 +264,34 @@ export default function NafsulTransaksiPage() {
             columns={columns}
             data={items}
             extraActions={[
-              { label: t("nafsulTransaksi.view"), onClick: openDetail },
               {
-                label: t("nafsulTransaksi.reset"),
-                onClick: (row) => setResetTarget(row),
-                className: "text-amber-700 hover:bg-amber-50",
+                // Satu tombol dua arah, dan ikonnya menggambarkan AKSI-nya —
+                // bukan keadaan barisnya: Validasi memakai gembok TERKUNCI
+                // (menekannya mengunci), Batal Validasi memakai gembok TERBUKA
+                // (menekannya membuka kunci).
+                label: (row) =>
+                  row.validation_at
+                    ? t("nafsulTransaksi.unvalidate")
+                    : t("nafsulTransaksi.validate"),
+                icon: (row) =>
+                  row.validation_at ? (
+                    <LockOpen className="h-3.5 w-3.5 text-amber-600" />
+                  ) : (
+                    <Lock className="h-3.5 w-3.5 text-emerald-600" />
+                  ),
+                onClick: (row) => setValidasiTarget(row),
               },
             ]}
+            onEdit={(row) => router.push(`/nafsul/transaksi/${row.uuid}/edit`)}
             onDelete={(row) => setDeleteTarget(row)}
+            // Kuitansi yang SUDAH divalidasi tidak boleh lagi diubah atau dihapus:
+            // jejak pemeriksaannya jadi tak ada artinya kalau isinya masih bisa
+            // bergeser sesudahnya. Buka kuncinya dulu lewat tombol gembok. Server
+            // menolaknya juga — ini hanya supaya tombolnya tidak ditawarkan.
+            canEdit={(row) => row.validation_at === null}
+            canDelete={(row) => row.validation_at === null}
             isRowLoading={(row) =>
-              deletingUuid === row.uuid || resettingUuid === row.uuid
+              deletingUuid === row.uuid || validatingUuid === row.uuid
             }
             emptyMessage={t("nafsulTransaksi.empty")}
           />
@@ -323,19 +314,37 @@ export default function NafsulTransaksiPage() {
       />
 
       {/*
-        Akibat reset dijabarkan apa adanya di dialognya: tindakan ini melepas
-        rincian DAN menghapus kuitansinya, dan tidak ada tombol urung.
+        Dua-duanya dikonfirmasi dulu: mengunci menempelkan nama pemeriksa pada
+        kuitansi, membuka kunci menghapus nama itu dan mengembalikan hak ubah &
+        hapus. Tidak ada yang boleh terjadi karena salah klik.
       */}
       <ConfirmDialog
-        open={resetTarget !== null}
-        onClose={() => setResetTarget(null)}
-        onConfirm={handleReset}
-        loading={resettingUuid !== null}
-        title={t("nafsulTransaksi.resetTitle")}
-        description={t("nafsulTransaksi.resetConfirm", {
-          number: resetTarget?.transaction_number ?? "",
-          lines: resetTarget?.transactions_count ?? 0,
-        })}
+        open={validasiTarget !== null}
+        onClose={() => setValidasiTarget(null)}
+        onConfirm={handleValidasi}
+        loading={validatingUuid !== null}
+        // Bukan aksi hapus: tanpa ini tombolnya merah dan bertuliskan "Hapus".
+        tone="primary"
+        confirmLabel={
+          validasiTarget?.validation_at
+            ? t("nafsulTransaksi.unvalidate")
+            : t("nafsulTransaksi.validate")
+        }
+        title={
+          validasiTarget?.validation_at
+            ? t("nafsulTransaksi.unvalidateTitle")
+            : t("nafsulTransaksi.validateTitle")
+        }
+        description={
+          validasiTarget?.validation_at
+            ? t("nafsulTransaksi.unvalidateConfirm", {
+                number: validasiTarget?.transaction_number ?? "",
+                name: validasiTarget?.validation_by ?? "—",
+              })
+            : t("nafsulTransaksi.validateConfirm", {
+                number: validasiTarget?.transaction_number ?? "",
+              })
+        }
       />
 
       <ResultDialog
@@ -351,101 +360,6 @@ export default function NafsulTransaksiPage() {
         variant="error"
         description={galat ?? ""}
       />
-
-      {/* ── Detail kuitansi ── */}
-      <Modal
-        open={detail !== null}
-        onClose={() => setDetail(null)}
-        title={`${t("nafsulTransaksi.detailTitle")} ${detail?.transaction_number ?? ""}`}
-        size="lg"
-        panelClassName="max-w-3xl"
-        footer={
-          <Button variant="outline" onClick={() => setDetail(null)}>
-            {t("common.close")}
-          </Button>
-        }
-      >
-        {detailLoading ? (
-          <div className="py-10 text-center text-sm text-gray-400">
-            {t("common.loading")}
-          </div>
-        ) : detail ? (
-          <div className="space-y-4">
-            <div className="overflow-x-auto rounded-lg border border-gray-200">
-              <table className="w-full text-sm">
-                <thead className="bg-gray-50 text-left text-xs uppercase tracking-wide text-gray-500">
-                  <tr>
-                    <th className="px-3 py-2">{t("nafsulTransaksi.member")}</th>
-                    <th className="px-3 py-2">{t("nafsulTransaksi.rate")}</th>
-                    <th className="px-3 py-2">{t("nafsulTransaksi.colPeriod")}</th>
-                    <th className="px-3 py-2 text-right">{t("nafsulTransaksi.amount")}</th>
-                    <th className="px-3 py-2 text-right">{t("nafsulTransaksi.discount")}</th>
-                    <th className="px-3 py-2 text-right">{t("nafsulTransaksi.colTotal")}</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-100">
-                  {(detail.transactions ?? []).map((r) => (
-                    <tr key={r.uuid}>
-                      <td className="px-3 py-2">
-                        <div className="font-medium text-gray-900">{r.member_name}</div>
-                        {r.member_number ? (
-                          <div className="text-xs text-gray-500">{r.member_number}</div>
-                        ) : null}
-                      </td>
-                      <td className="px-3 py-2 text-gray-700">{r.rate_name}</td>
-                      <td className="px-3 py-2 tabular-nums text-gray-700">
-                        {r.payment_period}
-                      </td>
-                      <td className="px-3 py-2 text-right tabular-nums text-gray-700">
-                        {rupiah(r.amount)}
-                      </td>
-                      <td className="px-3 py-2 text-right tabular-nums text-gray-700">
-                        {Number(r.discount) > 0 ? rupiah(r.discount) : "—"}
-                      </td>
-                      <td className="px-3 py-2 text-right font-medium tabular-nums text-gray-900">
-                        {rupiah(r.total)}
-                      </td>
-                    </tr>
-                  ))}
-                  {(detail.transactions ?? []).length === 0 && (
-                    <tr>
-                      <td colSpan={6} className="px-3 py-6 text-center text-sm text-gray-400">
-                        {t("nafsulTransaksi.noLines")}
-                      </td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-
-            <dl className="space-y-1.5 rounded-lg border border-gray-200 bg-gray-50 px-4 py-3 text-sm">
-              {[
-                [t("nafsulTransaksi.colTotal"), detail.total],
-                [t("nafsulTransaksi.memberDeduction"), `-${detail.member_deduction}`],
-                [t("nafsulTransaksi.leaderDeduction"), `-${detail.group_leader_deduction}`],
-                [t("nafsulTransaksi.leaderFee"), `+${detail.group_leader_fee}`],
-              ].map(([label, nilai]) => (
-                <div key={label} className="flex justify-between">
-                  <dt className="text-gray-600">{label}</dt>
-                  <dd className="tabular-nums text-gray-900">
-                    {String(nilai).startsWith("-")
-                      ? `− ${rupiah(String(nilai).slice(1))}`
-                      : String(nilai).startsWith("+")
-                        ? `+ ${rupiah(String(nilai).slice(1))}`
-                        : rupiah(String(nilai))}
-                  </dd>
-                </div>
-              ))}
-              <div className="flex justify-between border-t border-gray-200 pt-1.5 font-semibold">
-                <dt className="text-gray-700">
-                  {t("nafsulTransaksi.paid")} ({t(`nafsulTransaksi.method_${detail.payment_method}`)})
-                </dt>
-                <dd className="tabular-nums text-gray-900">{rupiah(detail.payment)}</dd>
-              </div>
-            </dl>
-          </div>
-        ) : null}
-      </Modal>
 
     </div>
   )

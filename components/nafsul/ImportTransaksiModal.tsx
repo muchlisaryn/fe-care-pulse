@@ -20,6 +20,10 @@ import ImportExcelModal, {
  */
 const KOLOM_KUITANSI: ImportColumn[] = [
   { header: "Kode Kuitansi", field: "kode_kuitansi", contoh: "K1", wajib: true },
+  // Tanggal uang DITERIMA, bukan tanggal impor. Sel yang diformat sebagai
+  // tanggal di Excel pun aman: cellToString mengubahnya jadi YYYY-MM-DD memakai
+  // tanggal LOKAL, sehingga tidak bergeser sehari seperti kalau lewat UTC.
+  { header: "Tanggal", field: "tanggal", contoh: "2026-08-23", wajib: true },
   { header: "Jenis", field: "jenis", contoh: "pribadi", wajib: true },
   { header: "Dibayar", field: "dibayar", contoh: "150000", wajib: true },
   { header: "Metode", field: "metode", contoh: "cash", wajib: true },

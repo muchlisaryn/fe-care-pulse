@@ -21,6 +21,12 @@ export type ExtraAction<T> = {
   className?: string
   // Nonaktifkan tombol untuk baris tertentu, di luar isRowLoading.
   disabled?: (row: T) => boolean
+  // Ikon di kiri label. Fungsi karena ikonnya bisa bergantung keadaan baris
+  // (mis. gembok terkunci vs terbuka pada aksi yang sama).
+  icon?: (row: T) => ReactNode
+  // Sembunyikan tombol sama sekali untuk baris tertentu — beda dari `disabled`
+  // yang tetap menampilkannya dalam keadaan mati.
+  visible?: (row: T) => boolean
 }
 
 type DataTableProps<T extends object> = {
@@ -28,6 +34,8 @@ type DataTableProps<T extends object> = {
   data: T[]
   onEdit?: (row: T) => void
   onDelete?: (row: T) => void
+  // Sembunyikan tombol Ubah / Hapus untuk baris tertentu.
+  canEdit?: (row: T) => boolean
   canDelete?: (row: T) => boolean
   extraActions?: ExtraAction<T>[]
   // Boleh berupa JSX bila kalimat kosongnya perlu penekanan (mis. menyebut
@@ -49,6 +57,7 @@ export function DataTable<T extends object>({
   data,
   onEdit,
   onDelete,
+  canEdit,
   canDelete,
   extraActions,
   emptyMessage,
@@ -72,19 +81,22 @@ export function DataTable<T extends object>({
   function renderActions(row: T, rowLoading: boolean) {
     return (
       <>
-        {extraActions?.map((action, k) => (
-          <Button
-            key={k}
-            size="xs"
-            variant="outline"
-            disabled={rowLoading || (action.disabled?.(row) ?? false)}
-            onClick={() => action.onClick(row)}
-            className={action.className}
-          >
-            {typeof action.label === "function" ? action.label(row) : action.label}
-          </Button>
-        ))}
-        {onEdit && (
+        {extraActions?.map((action, k) =>
+          (action.visible?.(row) ?? true) ? (
+            <Button
+              key={k}
+              size="xs"
+              variant="outline"
+              disabled={rowLoading || (action.disabled?.(row) ?? false)}
+              onClick={() => action.onClick(row)}
+              className={action.className}
+            >
+              {action.icon?.(row)}
+              {typeof action.label === "function" ? action.label(row) : action.label}
+            </Button>
+          ) : null,
+        )}
+        {onEdit && (canEdit?.(row) ?? true) && (
           <Button size="xs" variant="outline" disabled={rowLoading} onClick={() => onEdit(row)}>
             {editLabel}
           </Button>

@@ -20,8 +20,8 @@ export type TransaksiRincian = {
   member_name: string | null
   rate_id: number
   rate_name: string | null
-  /** Periode iuran dalam bentuk "MM/YYYY". */
-  payment_period: string
+  /** Periode iuran "MM/YYYY"; `null` untuk tarif SEKALI BAYAR yang tak berperiode. */
+  payment_period: string | null
   amount: string
   discount: string
   total: string
@@ -33,6 +33,12 @@ export type TransaksiHeader = {
   /** Kunci publik untuk view/update/delete. */
   uuid: string
   transaction_number: string
+  /**
+   * Tanggal uang DITERIMA ("YYYY-MM-DD"). Berbeda dari `created_at` yang
+   * mencatat kapan barisnya dibuat di sistem — setoran Sabtu bisa baru diinput
+   * Senin. `null` hanya pada baris lama yang belum sempat terisi.
+   */
+  date: string | null
   /** "kelompok" = setoran ketua kelompok, "pribadi" = anggota perorangan. */
   transaction_type: "kelompok" | "pribadi"
   total: string
@@ -42,9 +48,18 @@ export type TransaksiHeader = {
   /** Angka yang diketik petugas apa adanya (5 untuk "5%"). */
   member_deduction_input: string
   group_leader_deduction: string
+  /** PERSENTASE komisi ketua kelompok yang diketik petugas (10 untuk 10%). */
+  group_leader_fee_percent: string
   group_leader_fee: string
   payment: string
-  payment_method: "transfer" | "cash"
+  /** "other" = lain-lain (potong tabungan, barter, dsb). */
+  payment_method: "transfer" | "cash" | "other"
+  /**
+   * Jejak pemeriksaan kuitansi. `validation_at` null = BELUM divalidasi — itu
+   * satu-satunya penanda statusnya, tidak ada boolean terpisah.
+   */
+  validation_at: string | null
+  validation_by: string | null
   /** Positif = kurang bayar, negatif = lebih bayar. */
   balance: string
   transactions_count: number

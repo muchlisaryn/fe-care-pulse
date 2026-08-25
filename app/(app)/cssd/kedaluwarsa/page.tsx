@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useState } from "react"
+import { useRouter } from "next/navigation"
 import { AlertTriangle, Boxes, CalendarClock, Clock, MapPin, Search } from "lucide-react"
 import { Input } from "@/components/atoms/Input"
 import { Button } from "@/components/atoms/Button"
@@ -11,6 +12,8 @@ import { PageHeader } from "@/components/molecules/PageHeader"
 import { DataTable, type Column } from "@/components/molecules/DataTable"
 import { Pagination } from "@/components/molecules/Pagination"
 import { ExpiryCard } from "@/components/molecules/ExpiryCard"
+import { RepackageModal } from "@/components/molecules/RepackageModal"
+import { useToast } from "@/components/molecules/ToastProvider"
 import { useAppDispatch, useAppSelector } from "@/lib/store/hooks"
 import {
   fetchSterileExpiry,
@@ -25,6 +28,11 @@ export default function KedaluwarsaPage() {
   const dispatch = useAppDispatch()
   const { items, page, lastPage, total, loading, summary } = useAppSelector((s) => s.sterileExpiry)
   const t = useT()
+  const toast = useToast()
+  const router = useRouter()
+
+  // Batch yang sedang dibuka dialog "Packaging Ulang"-nya (null = tertutup).
+  const [repacking, setRepacking] = useState<SterileExpiryBatch | null>(null)
 
   // Ambang hari & kata kunci yang SUDAH dikirim ke server; `*Input` adalah draft
   // di kotak isian (baru dipakai saat tombol ditekan / form disubmit).
@@ -52,6 +60,28 @@ export default function KedaluwarsaPage() {
 
   function changePage(next: number) {
     dispatch(fetchSterileExpiry({ page: next, search, days }))
+  }
+
+  /**
+   * Selesai menarik label dari rak. Daftar & kartu statistik diambil ulang karena
+   * baris yang ditarik sudah tidak lagi terhitung stok gudang — kalau tidak, angka
+   * di layar tertinggal dan tombolnya bisa ditekan lagi untuk batch yang sama.
+   *
+   * Halaman selalu kembali ke 1: batch yang isinya habis ditarik lenyap dari daftar,
+   * sehingga halaman terakhir bisa jadi tidak ada lagi.
+   */
+  function handleRepacked(result: { labels: number; units: number; packagings: string[] }) {
+    setRepacking(null)
+    dispatch(fetchSterileExpiry({ page: 1, search, days }))
+    dispatch(fetchSterileExpirySummary({ days }))
+    toast.success(
+      t("expiry.repackDone", {
+        units: result.units,
+        labels: result.labels,
+        codes: result.packagings.join(", "),
+      }),
+    )
+    router.push("/cssd/produksi?tab=packaging")
   }
 
   const columns: Column<SterileExpiryBatch>[] = [
@@ -211,6 +241,17 @@ export default function KedaluwarsaPage() {
             data={items}
             emptyMessage={t("expiry.empty")}
             rowNumberOffset={(page - 1) * ITEMS_PER_PAGE}
+            extraActions={[
+              {
+                label: t("expiry.repackAction"),
+                onClick: (b) => setRepacking(b),
+                // Hanya batch yang SUDAH kedaluwarsa yang bisa ditarik, dan baris
+                // gudang lama tanpa batch steril (id 0) tidak punya jejak ke kemasan
+                // asalnya sehingga ronde barunya tak bisa dirangkai — server juga
+                // menolaknya, tombolnya dimatikan di sini supaya tidak menyesatkan.
+                disabled: (b) => !b.expired || b.id <= 0,
+              },
+            ]}
           />
         )}
 
@@ -222,6 +263,13 @@ export default function KedaluwarsaPage() {
           onPageChange={changePage}
         />
       </Card>
+
+      <RepackageModal
+        batch={repacking}
+        days={days}
+        onClose={() => setRepacking(null)}
+        onDone={handleRepacked}
+      />
     </div>
   )
 }
