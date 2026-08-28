@@ -142,6 +142,8 @@ function IsiModal({ ketua }: { ketua: KetuaKelompok }) {
 
       <div className="overflow-hidden rounded-xl border border-slate-200">
         <TabelAnggota
+          // Tabel ini sudah berada di dalam modal; lihat `tampilkanRiwayat`.
+          tampilkanRiwayat={false}
           rows={data?.data ?? []}
           loading={data === null && !error}
           tampilkanTipe={false}

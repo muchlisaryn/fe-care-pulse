@@ -1,82 +1,126 @@
 "use client";
 
-import { useCallback } from "react";
-import { api } from "@/lib/nafsul/api";
-import type { Anggota, Tarif } from "@/lib/nafsul/types";
-import { FEE_TYPE } from "@/lib/nafsul/feeType";
 import { useT } from "@/lib/i18n";
 import ImportExcelModal, {
   type ImportColumn,
-  type MasterSheet,
 } from "@/components/nafsul/ImportExcelModal";
 
 /**
  * Sheet "Kuitansi" — satu baris per kuitansi.
  *
- * `Kode Kuitansi` hanya berlaku di dalam file: dipakai menyambungkan baris di
- * sheet Rincian ke kuitansi ini, lalu dibuang. Nomor kuitansi yang sebenarnya
- * dibuat server, format YYMMDD + urut harian — sama seperti kuitansi yang
- * dibuat lewat form.
+ * Judul kolom memakai NAMA KOLOM DATABASE apa adanya (`date`, `payment`, …),
+ * bukan label bahasa Indonesia. File ini dipakai memindahkan data dari sistem
+ * lama, dan yang memetakannya membaca skema tabel, bukan layar aplikasi —
+ * "Dibayar" memaksa mereka menebak apakah itu `payment` atau `total`.
+ *
+ * `header` yang berubah, `field` TIDAK: `field` adalah kunci payload API, dan
+ * mengubahnya berarti mengubah kontrak dengan backend. `bacaSheet` mencocokkan
+ * judul kolom lewat `header` MAUPUN `field`, jadi file template lama yang masih
+ * berjudul "Tanggal"/"Dibayar" tetap terbaca.
+ *
+ * Setiap kolom di bawah ini punya pasangan kolom di `transaction_headers`;
+ * tidak ada kolom hiasan. Kolom yang nilainya DITURUNKAN server sengaja tidak
+ * ada di sini — `total` (jumlah rincian), `group_leader_deduction` &
+ * `group_leader_fee` (persen × total), `member_deduction_type` /
+ * `member_deduction_input`, serta seluruh kolom audit. Kolom isian yang
+ * diabaikan server lebih buruk daripada kolom yang tidak ada: petugas
+ * mengisinya, angkanya hilang tanpa suara, dan tidak ada galat yang muncul.
  */
 const KOLOM_KUITANSI: ImportColumn[] = [
-  { header: "Kode Kuitansi", field: "kode_kuitansi", contoh: "K1", wajib: true },
+  /**
+   * PEREKAT ANTAR-SHEET, bukan nomor kuitansi. Tanpa pasangan di database.
+   *
+   * Dipakai menyambungkan baris di sheet Rincian ke kuitansi ini, lalu dibuang.
+   * Namanya sengaja bukan `transaction_number` — kolom itu ada tersendiri di
+   * bawah, dan menyatukan keduanya membuat kode sementara "K1" terlihat seperti
+   * nomor kuitansi yang akan tersimpan.
+   */
+  { header: "kode_kuitansi", field: "kode_kuitansi", contoh: "K1", wajib: true },
+  /**
+   * Nomor kuitansi dari sistem lama. Boleh dikosongkan.
+   *
+   * Diisi → dipakai APA ADANYA, supaya kuitansi hasil migrasi tetap memakai
+   * nomor yang tertulis di lembar & arsip lamanya dan bisa ditelusuri balik.
+   * Kosong → server membuatkan (YYMMDD + urut harian), seperti kuitansi yang
+   * dibuat lewat form.
+   *
+   * Wajib unik: server menolak nomor yang kembar di dalam file maupun yang
+   * sudah dipakai kuitansi lain di aplikasi, dan menolaknya per kuitansi —
+   * bukan menunggu index unik menjatuhkan seluruh batch saat penyimpanan.
+   */
+  { header: "transaction_number", field: "no_kuitansi", contoh: "" },
   // Tanggal uang DITERIMA, bukan tanggal impor. Sel yang diformat sebagai
   // tanggal di Excel pun aman: cellToString mengubahnya jadi YYYY-MM-DD memakai
   // tanggal LOKAL, sehingga tidak bergeser sehari seperti kalau lewat UTC.
-  { header: "Tanggal", field: "tanggal", contoh: "2026-08-23", wajib: true },
-  { header: "Jenis", field: "jenis", contoh: "pribadi", wajib: true },
-  { header: "Dibayar", field: "dibayar", contoh: "150000", wajib: true },
-  { header: "Metode", field: "metode", contoh: "cash", wajib: true },
-  { header: "Potongan Anggota", field: "potongan_anggota", contoh: "0" },
-  // Dua kolom terakhir hanya berlaku pada kuitansi kelompok; pada kuitansi
-  // pribadi server menolkannya, sama seperti form yang menyembunyikan
-  // field-nya.
-  { header: "Potongan Ketua", field: "potongan_ketua", contoh: "0" },
-  { header: "Jasa Ketua", field: "jasa_ketua", contoh: "0" },
+  { header: "date", field: "tanggal", contoh: "2026-08-23", wajib: true },
+  { header: "transaction_type", field: "jenis", contoh: "pribadi", wajib: true },
+  { header: "payment", field: "dibayar", contoh: "150000", wajib: true },
+  { header: "payment_method", field: "metode", contoh: "cash", wajib: true },
+  // Rupiah. Kolom satuan (`member_deduction_type`) tidak ada di file, jadi
+  // server selalu membacanya sebagai rupiah.
+  { header: "member_deduction", field: "potongan_anggota", contoh: "0" },
+  /**
+   * PERSENTASE, bukan rupiah — nama kolomnya sendiri yang menyatakan itu, dan
+   * itulah keuntungan memakai nama database: "Potongan Ketua" tidak pernah
+   * bisa membedakan 10 (persen) dari 10000 (rupiah).
+   *
+   * Hanya berlaku pada kuitansi kelompok; pada kuitansi pribadi server
+   * menolkannya, sama seperti form yang menyembunyikan field-nya.
+   */
+  { header: "group_leader_fee_percent", field: "potongan_ketua", contoh: "0" },
+  /**
+   * Nominal jasa ketua, RUPIAH. Boleh dikosongkan.
+   *
+   * Kosong → server menurunkannya dari `group_leader_fee_percent` × total
+   * rincian, seperti kuitansi yang dibuat lewat form. Diisi → angka itu dipakai
+   * apa adanya.
+   *
+   * Kolom ini ada untuk data migrasi: sistem lama menyimpan nominal jasanya
+   * sendiri, dan menghitung ulang dari persen menggeser angka yang sudah
+   * tercetak di kuitansi lama — pembulatan saja sudah cukup membuatnya meleset,
+   * dan selisih itu baru ketahuan saat rekap tidak imbang.
+   *
+   * `group_leader_deduction` tidak punya kolom sendiri: nominalnya SELALU sama
+   * dengan jasa ketua (ketua menahan komisinya dari uang yang ia kumpulkan),
+   * jadi kolom kedua hanya membuka peluang keduanya berselisih.
+   */
+  { header: "group_leader_fee", field: "jasa_ketua", contoh: "" },
 ];
 
 /**
  * Sheet "Rincian" — satu baris per iuran.
  *
- * Anggota & tarif dirujuk lewat kode yang tampil di aplikasi (No. Anggota,
- * Kode Tarif), bukan id database — id tidak pernah muncul di layar mana pun,
- * jadi tidak ada cara wajar mengisinya. Sheet referensi di file yang sama
- * memuat daftar kode ↔ namanya.
+ * Judul kolom memakai nama kolom database, dengan dua penyesuaian yang tidak
+ * bisa dihindari:
+ *
+ *  - `member_number` & `rate_code` merujuk kolom di tabel LAIN (`members`,
+ *    `rates`), bukan `transactions.member_id` / `rate_id`. Id database tidak
+ *    pernah muncul di layar mana pun, jadi tidak ada cara wajar mengisinya —
+ *    yang dipakai adalah kode yang dilihat petugas. `rates.code` ditulis
+ *    `rate_code` karena `code` saja tidak menyebut master mana yang dimaksud;
+ *  - `payment_period` sudah tidak ada lagi di tabel (dipecah jadi `month` +
+ *    `year`), tapi tetap dipakai sebagai satu kolom "MM/YYYY" di file: dua sel
+ *    kosong jauh lebih mudah salah isi daripada satu, dan tarif sekali bayar
+ *    tidak memakai kolom itu sama sekali.
  *
  * Kolom audit (`created_by`, `updated_by`, dst) sengaja tidak ada di file:
  * server mengisinya sendiri dari user yang sedang login.
  *
- * `Periode` mengikuti sifat tarifnya: wajib untuk tarif berulang, dan harus
- * DIKOSONGKAN untuk tarif sekali bayar. `Nominal` boleh kosong — server
- * memakai harga tarifnya, sehingga petugas tidak perlu menyalin angka yang
- * sama ratusan kali.
+ * `payment_period` mengikuti sifat tarifnya: wajib untuk tarif berulang, dan
+ * DIABAIKAN untuk tarif sekali bayar — diisi atau tidak, yang tersimpan tetap
+ * kosong, jadi file migrasi yang mencatat periode pada semua baris tidak perlu
+ * dibersihkan dulu. `amount` boleh kosong — server
+ * memakai harga tarifnya, sehingga petugas tidak perlu menyalin angka yang sama
+ * ratusan kali.
  */
 const KOLOM_RINCIAN: ImportColumn[] = [
-  { header: "Kode Kuitansi", field: "kode_kuitansi", contoh: "K1", wajib: true },
-  { header: "No. Anggota", field: "no_anggota", contoh: "26082101", wajib: true },
-  { header: "Kode Tarif", field: "kode_tarif", contoh: "IUR01", wajib: true },
-  { header: "Periode", field: "periode", contoh: "01/2026" },
-  { header: "Nominal", field: "nominal", contoh: "50000" },
-  { header: "Diskon", field: "diskon", contoh: "0" },
+  { header: "kode_kuitansi", field: "kode_kuitansi", contoh: "K1", wajib: true },
+  { header: "member_number", field: "no_anggota", contoh: "26082101", wajib: true },
+  { header: "rate_code", field: "kode_tarif", contoh: "IUR01", wajib: true },
+  { header: "payment_period", field: "periode", contoh: "01/2026" },
+  { header: "amount", field: "nominal", contoh: "50000" },
+  { header: "discount", field: "diskon", contoh: "0" },
 ];
-
-/**
- * Balasan daftar → array, apa pun bentuknya.
- *
- * Endpoint master di aplikasi ini tidak seragam: sebagian membalas array polos
- * saat diberi `all=1`, sebagian lain tetap membalas objek paginasi
- * (`{ data: [...] }`) karena parameternya belum didukung. Memanggil `.map()`
- * langsung pada bentuk kedua melempar TypeError yang menggagalkan SELURUH
- * pemuatan master — dan gejalanya di layar cuma "sheet referensinya kosong",
- * tanpa petunjuk apa pun soal penyebabnya.
- */
-function daftar<T>(balasan: unknown): T[] {
-  if (Array.isArray(balasan)) return balasan as T[];
-
-  const isi = (balasan as { data?: unknown } | null)?.data;
-
-  return Array.isArray(isi) ? (isi as T[]) : [];
-}
 
 export default function ImportTransaksiModal({
   open,
@@ -90,48 +134,6 @@ export default function ImportTransaksiModal({
 }) {
   const t = useT();
 
-  // Anggota & tarif ditulis sebagai sheet referensi di file template dan file
-  // baris gagal. Sheet tarif ikut menyebut sifatnya, karena itulah yang
-  // menentukan kolom Periode diisi atau dikosongkan.
-  const muatMaster = useCallback(async (): Promise<MasterSheet[]> => {
-    // `allSettled`, bukan `all`: satu master yang gagal dimuat tidak boleh ikut
-    // menghapus sheet referensi milik master lainnya. Yang gagal cukup terbit
-    // sebagai sheet kosong.
-    const [anggota, tarif] = await Promise.allSettled([
-      api<unknown>("/anggota", { params: { all: 1 } }),
-      api<unknown>("/tarif", { params: { all: 1, kategori: "iuran" } }),
-    ]);
-
-    const barisAnggota =
-      anggota.status === "fulfilled" ? daftar<Anggota>(anggota.value) : [];
-    const barisTarif =
-      tarif.status === "fulfilled" ? daftar<Tarif>(tarif.value) : [];
-
-    return [
-      {
-        nama: "Anggota",
-        idLabel: "No. Anggota",
-        rows: barisAnggota.map((a) => [a.no_anggota ?? "", a.nama ?? ""]),
-      },
-      {
-        nama: "Tarif",
-        idLabel: "Kode Tarif",
-        // Harga dipisah ke kolomnya sendiri, bukan disatukan ke nama: petugas
-        // menyalin angkanya ke kolom Nominal, dan angka yang menempel pada
-        // kalimat tidak bisa disalin begitu saja.
-        kolom: ["Nama", "Harga", "Sifat"],
-        rows: barisTarif.map((r) => [
-          r.kode,
-          r.nama,
-          String(r.harga ?? ""),
-          r.fee_type === FEE_TYPE.oneTime
-            ? t("nafsulImport.rateOneTime")
-            : t("nafsulImport.rateRecurring"),
-        ]),
-      },
-    ];
-  }, [t]);
-
   return (
     <ImportExcelModal
       open={open}
@@ -141,17 +143,35 @@ export default function ImportTransaksiModal({
       slug="transaksi"
       sheetUtama="Rincian"
       columns={KOLOM_RINCIAN}
-      barisWajib={{ field: "no_anggota", label: "No. Anggota" }}
+      barisWajib={{ field: "no_anggota", label: "member_number" }}
       // Rincian se-kuitansi tidak boleh terpecah ke dua permintaan: yang
       // terbelah akan tersimpan sebagai dua kuitansi berbeda.
       kunciGrup="kode_kuitansi"
-      ukuranBatch={50}
+      /**
+       * 2000, bukan 50.
+       *
+       * Server tidak lagi membatasi jumlah baris per permintaan, dan biaya
+       * per barisnya sudah bukan empat query melainkan pencarian di array —
+       * jadi yang tersisa cuma ongkos bolak-balik HTTP. Pada file 299.562
+       * baris, 50 baris per permintaan berarti 4538 kali bolak-balik; 2000
+       * memangkasnya jadi sekitar 150.
+       *
+       * Tidak dikirim sekaligus dalam satu permintaan meski servernya
+       * mengizinkan: pemecahan inilah yang membuat progresnya bergerak, dan
+       * yang membuat satu permintaan gagal hanya menjatuhkan bagiannya, bukan
+       * seluruh impor yang sudah berjalan setengah jam.
+       */
+      ukuranBatch={2000}
       sheetInduk={{
         nama: "Kuitansi",
         columns: KOLOM_KUITANSI,
         payloadField: "headers",
       }}
-      muatMaster={muatMaster}
+      // Tanpa `muatMaster`: file template & file baris gagal berisi sheet
+      // datanya saja, tanpa sheet referensi Anggota/Tarif. Daftar itu bisa
+      // memuat puluhan ribu baris — menuliskannya ke tiap file membuat unduhan
+      // berat dan menahan tombol Unduh Template selama masternya dimuat,
+      // padahal daftarnya sudah bisa dilihat di halaman masternya sendiri.
     />
   );
 }

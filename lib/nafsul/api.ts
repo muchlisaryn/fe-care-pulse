@@ -48,12 +48,22 @@ interface ApiOptions {
   auth?: boolean;
 }
 
-/** Unduh file dari endpoint (mis. export CSV) dengan menyertakan token auth. */
-export async function apiDownload(
+/**
+ * Ambil berkas dari endpoint sebagai Blob, dengan token auth ikut terkirim.
+ *
+ * Dipisah dari `apiDownload` karena tidak semua berkas untuk diunduh: PDF
+ * biling ditampilkan dulu di iframe sebagai pratinjau. Membukanya lewat
+ * `window.open(url)` bukan pilihan — permintaan itu tidak membawa header
+ * Authorization, jadi yang sampai ke layar adalah 401, bukan dokumennya.
+ *
+ * Galat dari server dibalas JSON (mis. 422 "belum divalidasi"), jadi isinya
+ * dibaca dulu supaya pesannya bisa ditampilkan apa adanya alih-alih kalimat
+ * umum yang tidak menjelaskan apa-apa.
+ */
+export async function apiBlob(
   path: string,
-  params?: Record<string, string | number | undefined | null>,
-  fallbackName = "download"
-): Promise<void> {
+  params?: Record<string, string | number | undefined | null>
+): Promise<{ blob: Blob; nama: string | null }> {
   const base = typeof window !== "undefined" ? window.location.origin : "http://localhost";
   const url = new URL(`${API_URL}${path}`, base);
   if (params) {
@@ -69,13 +79,33 @@ export async function apiDownload(
   if (token) headers["Authorization"] = `Bearer ${token}`;
 
   const res = await fetch(url.toString(), { headers });
-  if (!res.ok) throw new ApiError("Gagal mengunduh file", res.status);
+
+  if (!res.ok) {
+    let pesan = `Server membalas ${res.status}.`;
+    try {
+      const teks = await res.text();
+      pesan = (JSON.parse(teks) as { message?: string }).message ?? pesan;
+    } catch {
+      // Balasan galat yang bukan JSON: pesan bawaan di atas sudah cukup.
+    }
+    throw new ApiError(pesan, res.status);
+  }
 
   const cd = res.headers.get("Content-Disposition") ?? "";
   const match = /filename="?([^"]+)"?/.exec(cd);
-  const name = match?.[1] ?? fallbackName;
 
-  const blob = await res.blob();
+  return { blob: await res.blob(), nama: match?.[1] ?? null };
+}
+
+/** Unduh file dari endpoint (mis. export CSV) dengan menyertakan token auth. */
+export async function apiDownload(
+  path: string,
+  params?: Record<string, string | number | undefined | null>,
+  fallbackName = "download"
+): Promise<void> {
+  const { blob, nama } = await apiBlob(path, params);
+  const name = nama ?? fallbackName;
+
   const objectUrl = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = objectUrl;

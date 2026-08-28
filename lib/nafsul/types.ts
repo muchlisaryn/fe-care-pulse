@@ -96,6 +96,14 @@ export interface Anggota {
   kode_pengguna: string | null;
   kunjungan: string | null;
   tgl_update: string | null;
+  /**
+   * Periode iuran terakhir yang sudah dibayar, "MM/YYYY". Null = belum pernah.
+   *
+   * Opsional: hanya dikirim oleh daftar berpaginasi. Pemanggil `all=1` (pengisi
+   * dropdown) sengaja tidak dibebani subquery per anggota untuk kolom yang tidak
+   * ditampilkannya.
+   */
+  periode_terakhir_bayar?: string | null;
   created_at?: string | null;
   created_by?: string | null;
   wilayah?: Wilayah | null;

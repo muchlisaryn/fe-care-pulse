@@ -1,9 +1,10 @@
 "use client"
 
-import { Suspense, useRef, useState } from "react"
+import { Suspense, useCallback, useRef, useState } from "react"
 import Link from "next/link"
 import { useRouter, useSearchParams } from "next/navigation"
 import {
+  AlertTriangle,
   ChevronLeft,
   RotateCcw,
   ChevronDown,
@@ -179,6 +180,23 @@ function angka(nilai: string): number {
   return Number.isFinite(n) ? n : 0
 }
 
+/**
+ * Batas tunggakan yang memicu peringatan, dalam bulan.
+ *
+ * Tiga: anggota yang periode terakhirnya tiga bulan di belakang bulan berjalan
+ * berarti sudah melewatkan tiga kali iuran, dan itulah titik yang ingin dilihat
+ * petugas SEBELUM kuitansinya dibuat — bukan setelahnya lewat laporan.
+ */
+const BATAS_TUNGGAKAN = 3
+
+/** Balasan `/anggota/{id}/pembayaran-terakhir`. */
+interface PembayaranTerakhir {
+  periode_terakhir: string | null
+  /** Jarak bulan dari periode terakhir ke bulan berjalan; negatif = bayar di muka. */
+  bulan_tertinggal: number | null
+  pernah_bayar: boolean
+}
+
 /** Ambil tab dari URL; nilai asing jatuh ke "kelompok". */
 function tipeDariUrl(nilai: string | null): Tipe {
   return nilai === "pribadi" || nilai === "kelompok" ? nilai : "kelompok"
@@ -207,6 +225,10 @@ function TransaksiBaruForm() {
   // bukan sebaliknya — kalau dua-duanya saling mengejar, mengganti tab bisa
   // memicu render berulang.
   const [tipe, setTipe] = useState<Tipe>(() => tipeDariUrl(searchParams.get("tab")))
+
+  // Pembayaran terakhir anggota yang sedang dipilih di baris entri.
+  const [bayarTerakhir, setBayarTerakhir] = useState<PembayaranTerakhir | null>(null)
+  const [bayarMemuat, setBayarMemuat] = useState(false)
   const [ketua, setKetua] = useState({ kode: "", nama: "" })
   const [entri, setEntri] = useState<Entri>(entriKosong)
   const [daftar, setDaftar] = useState<Rincian[]>([])
@@ -295,6 +317,39 @@ function TransaksiBaruForm() {
   }
 
   /**
+   * Tarik pembayaran terakhir seorang anggota.
+   *
+   * Dipanggil tiap kali anggota di baris entri berganti. Balasan permintaan
+   * LAMA dibuang lewat penanda `aktif`: petugas kerap mengganti pilihan lebih
+   * cepat daripada jaringannya menjawab, dan tanpa penjagaan itu keterangan
+   * yang tampil bisa milik anggota yang sudah tidak dipilih lagi.
+   */
+  const ambilBayarTerakhir = useCallback((memberId: string) => {
+    if (!memberId) {
+      setBayarTerakhir(null)
+      setBayarMemuat(false)
+
+      return undefined
+    }
+
+    let aktif = true
+    setBayarMemuat(true)
+
+    api<PembayaranTerakhir>(`/anggota/${memberId}/pembayaran-terakhir`)
+      .then((r) => aktif && setBayarTerakhir(r))
+      // Gagal memuat keterangan ini tidak boleh menghalangi pembuatan kuitansi:
+      // ia keterangan pendamping, bukan syarat.
+      .catch(() => aktif && setBayarTerakhir(null))
+      .finally(() => {
+        if (aktif) setBayarMemuat(false)
+      })
+
+    return () => {
+      aktif = false
+    }
+  }, [])
+
+  /**
    * Kosongkan anggota yang sedang dipilih.
    *
    * Dipakai saat tab atau ketua kelompok berganti: anggota milik ketua lama
@@ -307,6 +362,7 @@ function TransaksiBaruForm() {
   function lupakanAnggota() {
     if (timer.current) clearTimeout(timer.current)
     permintaan.current++
+    setBayarTerakhir(null)
     setEntri((e) => ({
       ...e,
       member_id: "",
@@ -382,6 +438,7 @@ function TransaksiBaruForm() {
     setTipe(tipeDariUrl(searchParams.get("tab")))
     setKetua({ kode: "", nama: "" })
     setEntri(entriKosong)
+    setBayarTerakhir(null)
     setEditId(null)
     setDaftar([])
     setTerbuka([])
@@ -397,6 +454,7 @@ function TransaksiBaruForm() {
     // dikosongkan — nomornya dinaikkan supaya balasannya diabaikan.
     permintaan.current++
     setEntri(entriKosong)
+    setBayarTerakhir(null)
     setEditId(null)
   }
 
@@ -427,6 +485,7 @@ function TransaksiBaruForm() {
       memuat: false,
       galat: null,
     })
+    ambilBayarTerakhir(d.member_id)
   }
 
   // Semua angka ringkasan diambil dari rencana yang dikirim server, bukan
@@ -718,6 +777,7 @@ function TransaksiBaruForm() {
                     member_name: row?.nama ?? "",
                     galat: null,
                   }))
+                  ambilBayarTerakhir(v)
                   jadwalkan(
                     {
                       memberId: v,
@@ -832,6 +892,22 @@ function TransaksiBaruForm() {
             )}
           </div>
         </div>
+
+        {/*
+          Keterangan pembayaran terakhir: baris penuh SETELAH grid isian, bukan
+          di dalam sel Anggota.
+
+          Grid-nya `lg:items-end` — seluruh isian dirapatkan ke garis bawah yang
+          sama. Apa pun yang ditambahkan di bawah salah satu select karenanya
+          mendorong select ITU naik sendirian, dan barisnya jadi bertingkat.
+          Sebagai baris tersendiri, keterangannya tetap berada tepat di bawah
+          pemilih anggota tanpa menggeser apa pun.
+        */}
+        {entri.member_id !== "" && (bayarMemuat || bayarTerakhir) && (
+          <div className="mt-3">
+            <PanelBayarTerakhir memuat={bayarMemuat} data={bayarTerakhir} t={t} />
+          </div>
+        )}
 
         {/* Pratinjau isian yang sedang diketik, sebelum masuk daftar. */}
         {entri.memuat && (
@@ -1497,5 +1573,72 @@ function TransaksiBaruForm() {
         description={galat ?? ""}
       />
     </form>
+  )
+}
+
+/**
+ * Keterangan pembayaran terakhir seorang anggota, dengan peringatan bila
+ * tunggakannya sudah mencapai {@link BATAS_TUNGGAKAN} bulan.
+ *
+ * Tiga rupa, bukan satu kalimat yang warnanya berganti-ganti:
+ *
+ *  - **belum pernah bayar** — keadaan yang paling perlu dilihat, dan bukan
+ *    "tertinggal 0 bulan"; anggota ini tidak punya titik awal sama sekali;
+ *  - **tertinggal >= 3 bulan** — peringatan kuning beserta angkanya;
+ *  - **lancar / bayar di muka** — keterangan biasa, tanpa warna yang menuntut
+ *    perhatian. Anggota yang sudah membayar sampai bulan depan tidak boleh
+ *    dibuat terlihat bermasalah.
+ *
+ * Peringatannya sengaja TIDAK memblokir tombol simpan: petugas memang sering
+ * menerima pembayaran justru dari anggota yang menunggak, dan menghalanginya
+ * berarti melarang hal yang jadi tujuan halaman ini.
+ */
+function PanelBayarTerakhir({
+  memuat,
+  data,
+  t,
+}: {
+  memuat: boolean
+  data: PembayaranTerakhir | null
+  t: (kunci: string, vars?: Record<string, string | number>) => string
+}) {
+  if (memuat) {
+    return (
+      <p className="text-sm text-slate-400">{t("nafsulTransaksi.lastPaymentLoading")}</p>
+    )
+  }
+
+  if (!data) return null
+
+  if (!data.pernah_bayar) {
+    return (
+      <div className="inline-flex max-w-full items-start gap-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+        <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+        <span>{t("nafsulTransaksi.lastPaymentNever")}</span>
+      </div>
+    )
+  }
+
+  const tertinggal = data.bulan_tertinggal ?? 0
+  const menunggak = tertinggal >= BATAS_TUNGGAKAN
+
+  if (menunggak) {
+    return (
+      <div className="inline-flex max-w-full items-start gap-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+        <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+        <span>
+          {t("nafsulTransaksi.lastPaymentOverdue", {
+            period: data.periode_terakhir ?? "—",
+            months: tertinggal,
+          })}
+        </span>
+      </div>
+    )
+  }
+
+  return (
+    <p className="text-sm text-slate-600">
+      {t("nafsulTransaksi.lastPaymentOk", { period: data.periode_terakhir ?? "—" })}
+    </p>
   )
 }

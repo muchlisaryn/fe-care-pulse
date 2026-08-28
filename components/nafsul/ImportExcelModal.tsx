@@ -99,8 +99,11 @@ interface ImportExcelModalProps {
    * pengguna dan tidak pernah dikirim, sedangkan sheet ini ikut dikirim ke
    * server sebagai `payloadField`.
    *
-   * Isinya disertakan UTUH di setiap permintaan, bukan dipecah bersama baris —
-   * jumlahnya jauh lebih sedikit, dan tiap batch butuh induk milik barisnya.
+   * Sheet ini tidak dipecah lurus bersama baris: yang ikut di tiap permintaan
+   * adalah induk yang DIRUJUK potongan itu (lihat `indukUntuk`). Mengirimnya
+   * utuh terlihat lebih sederhana, tapi runtuh pada file besar — sheet induk
+   * berisi ribuan baris menembus batas jumlah baris di server sehingga tidak
+   * ada satu batch pun yang bisa lewat.
    */
   sheetInduk?: {
     nama: string;
@@ -131,12 +134,19 @@ interface GagalRow {
 
 interface ImportResponse {
   berhasil: number;
+  /**
+   * Baris yang SUDAH ada sebelumnya, jadi tidak ditulis ulang.
+   *
+   * Opsional: hanya impor transaksi yang mengenali keadaan ini. Impor master
+   * lain menolak duplikat sebagai galat biasa dan tidak mengirim angka ini.
+   */
+  dilewati?: number;
   gagal: number;
   hasil: {
     /** Nama sheet asal baris ini. Kosong pada impor satu sheet. */
     sheet?: string;
     baris: number;
-    status: "ok" | "gagal";
+    status: "ok" | "gagal" | "lewati";
     nama?: string;
     pesan?: string;
   }[];
@@ -290,15 +300,16 @@ export default function ImportExcelModal({
   const [batchKe, setBatchKe] = useState(0);
   const [diproses, setDiproses] = useState(0);
   const [berhasil, setBerhasil] = useState(0);
+  const [dilewati, setDilewati] = useState(0);
   const [gagal, setGagal] = useState<GagalRow[]>([]);
 
   const [masters, setMasters] = useState<MasterSheet[] | null>(null);
   const masterDiminta = useRef(false);
 
   const templateColumns = columns.filter((c) => c.diTemplate !== false);
-  // Kolom bertanda `wajib` — sumber yang sama dengan sorotan kuning di file
-  // Excel, jadi daftar di modal tidak bisa melenceng dari templatnya.
-  const kolomWajib = templateColumns.filter((c) => c.wajib);
+  // Kolom bertanda `wajib` tidak lagi didaftar ulang di modal: judulnya sudah
+  // disorot kuning di file template, dan daftar kedua di layar hanya mengulang
+  // hal yang sama sambil mendorong area unggah turun dari pandangan.
   const namaDari = (row: ParsedRow) => String(row[barisWajib.field] ?? "").trim();
 
   // Master ditarik sekali saat modal dibuka, dipakai sebagai sheet referensi
@@ -365,6 +376,7 @@ export default function ImportExcelModal({
     setBatchKe(0);
     setDiproses(0);
     setBerhasil(0);
+    setDilewati(0);
     setGagal([]);
     if (fileRef.current) fileRef.current.value = "";
   }
@@ -412,6 +424,61 @@ export default function ImportExcelModal({
     }
   }
 
+  /**
+   * Sheet induk diindeks per nilai kunci, sekali untuk satu kali impor.
+   *
+   * Dulu seluruh sheet induk dititipkan utuh di tiap permintaan. Itu jalan
+   * selama induknya sedikit, tapi runtuh pada file besar: sheet Kuitansi berisi
+   * ribuan baris membuat setiap permintaan menembus batas jumlah baris di
+   * server, dan biaya kirimnya tumbuh kuadratik karena tiap batch mengulang
+   * seluruh induk.
+   *
+   * Indeksnya dibangun sekali, bukan disaring ulang tiap batch: menyaring
+   * seluruh induk sebanyak jumlah batch akan mengganti biaya kuadratik di
+   * jaringan dengan biaya kuadratik di browser.
+   */
+  function indeksInduk(): {
+    perKunci: Map<string, ParsedRow[]>;
+    tanpaKunci: ParsedRow[];
+  } {
+    const perKunci = new Map<string, ParsedRow[]>();
+    const tanpaKunci: ParsedRow[] = [];
+
+    if (!kunciGrup) return { perKunci, tanpaKunci };
+
+    barisInduk.forEach((row) => {
+      const kunci = String(row[kunciGrup] ?? "").trim();
+
+      if (kunci === "") {
+        tanpaKunci.push(row);
+
+        return;
+      }
+
+      const isi = perKunci.get(kunci);
+      if (isi) isi.push(row);
+      else perKunci.set(kunci, [row]);
+    });
+
+    return { perKunci, tanpaKunci };
+  }
+
+  /**
+   * Galat API → kalimat yang menyebut penyebabnya.
+   *
+   * `message` sebuah 422 dari Laravel selalu kalimat generik yang sama ("Data
+   * yang dikirim tidak valid"), sedangkan yang menjelaskan justru ada di
+   * `errors`. Menampilkan `message` saja membuat setiap kegagalan validasi
+   * terlihat identik dan mustahil ditelusuri.
+   */
+  function rincianGalat(err: ApiError): string {
+    const rinci = Object.values(err.errors ?? {})
+      .flat()
+      .filter(Boolean);
+
+    return rinci.length > 0 ? `${err.message} ${rinci.join(" ")}` : err.message;
+  }
+
   /** Jalankan impor untuk sekumpulan baris — dipakai impor awal maupun kirim ulang. */
   async function prosesImport(daftar: ParsedRow[]) {
     const denganNama = daftar.filter((r) => namaDari(r) !== "");
@@ -425,6 +492,7 @@ export default function ImportExcelModal({
     setTotalBatch(batches.length);
     setBatchKe(0);
     setBerhasil(0);
+    setDilewati(0);
     // Baris tanpa kolom wajib tidak perlu dikirim ke server — langsung dicatat gagal.
     setDiproses(tanpaNama.length);
     setGagal(
@@ -438,23 +506,45 @@ export default function ImportExcelModal({
     );
 
     let sukses = 0;
+    let dilewat = 0;
     let batch = 0;
     let terkirim = 0;
+
+    const induk = indeksInduk();
 
     try {
       for (const potongan of batches) {
         batch += 1;
         setBatchKe(batch);
 
+        // Hanya induk yang DIRUJUK potongan ini. Baris induk tanpa nilai kunci
+        // tidak bisa dicocokkan ke rincian mana pun tapi tetap salah, jadi
+        // dititipkan sekali — pada batch pertama.
+        const kunciBatch = kunciGrup
+          ? [...new Set(potongan.map((r) => String(r[kunciGrup] ?? "").trim()))]
+          : [];
+
+        const indukBatch = kunciGrup
+          ? [
+              ...(batch === 1 ? induk.tanpaKunci : []),
+              ...kunciBatch
+                .filter((k) => k !== "")
+                .flatMap((k) => induk.perKunci.get(k) ?? []),
+            ]
+          : barisInduk;
+
         const res = await api<ImportResponse>(`/${slug}/import`, {
           method: "POST",
           body: sheetInduk
-            ? { rows: potongan, [sheetInduk.payloadField]: barisInduk }
+            ? { rows: potongan, [sheetInduk.payloadField]: indukBatch }
             : { rows: potongan },
         });
 
         sukses += res.berhasil;
         setBerhasil(sukses);
+
+        dilewat += res.dilewati ?? 0;
+        setDilewati(dilewat);
 
         const gagalBatch = res.hasil
           .filter((h) => h.status === "gagal")
@@ -473,9 +563,9 @@ export default function ImportExcelModal({
               row: asal ?? ({ baris: h.baris } as ParsedRow),
             };
           });
-        // Sheet induk dikirim UTUH di tiap batch, jadi satu barisnya yang salah
-        // dilaporkan berulang — sekali per batch. Yang kedua dan seterusnya
-        // dibuang di sini supaya daftar galat & angkanya tidak menggelembung.
+        // Satu baris induk bisa dirujuk beberapa batch, jadi galatnya bisa
+        // terlapor lebih dari sekali. Yang kedua dan seterusnya dibuang di sini
+        // supaya daftar galat & angkanya tidak menggelembung.
         if (gagalBatch.length) {
           setGagal((g) => {
             const sudahAda = new Set(g.map((x) => `${x.sheet}#${x.baris}`));
@@ -497,7 +587,7 @@ export default function ImportExcelModal({
       // Impor dihentikan: baris yang sudah terkirim tetap tersimpan di server.
       setRunError(
         err instanceof ApiError
-          ? `Impor berhenti pada batch ${batch} dari ${batches.length}: ${err.message}`
+          ? `Impor berhenti pada batch ${batch} dari ${batches.length}: ${rincianGalat(err)}`
           : `Impor berhenti pada batch ${batch} dari ${batches.length} karena koneksi ke server terputus.`
       );
     } finally {
@@ -670,33 +760,6 @@ export default function ImportExcelModal({
           {t(kunciGrup ? "nafsulImport.batchNoteGroup" : "nafsulImport.batchNote", { size: ukuranBatch })}
         </p>
 
-        {/*
-          Kolom wajib disebutkan di modal, bukan hanya disorot kuning di file
-          Excel: pengguna yang menyusun filenya sendiri (tanpa mengunduh
-          templat) tidak akan pernah melihat sorotan itu.
-        */}
-        {kolomWajib.length > 0 && (
-          <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
-            <div className="text-xs font-medium uppercase tracking-wide text-slate-500">
-              {t("nafsulImport.requiredColumns")}
-            </div>
-            <div className="mt-2 flex flex-wrap gap-2">
-              {kolomWajib.map((c) => (
-                <span
-                  key={c.header}
-                  className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-sm text-slate-700"
-                >
-                  {c.header}
-                  <span className="ml-0.5 text-red-500">*</span>
-                </span>
-              ))}
-            </div>
-            <p className="mt-2 text-xs text-slate-500">
-              {t("nafsulImport.requiredHint")}
-            </p>
-          </div>
-        )}
-
         {!namaFile ? (
             <div
               onDragOver={(e) => {
@@ -803,6 +866,17 @@ export default function ImportExcelModal({
                   {t("nafsulImport.success")}{" "}
                   <span className="font-semibold text-emerald-700">{berhasil}</span>
                 </span>
+                {/*
+                  Hanya muncul bila ada isinya. Impor master lain tidak mengenal
+                  keadaan "sudah ada" sama sekali, dan angka nol yang selalu
+                  nongol di sana cuma menimbulkan pertanyaan.
+                */}
+                {dilewati > 0 && (
+                  <span>
+                    {t("nafsulImport.skipped")}{" "}
+                    <span className="font-semibold text-amber-700">{dilewati}</span>
+                  </span>
+                )}
                 <span>
                   {t("nafsulImport.failed")}{" "}
                   <span className="font-semibold text-rose-700">{gagal.length}</span>
