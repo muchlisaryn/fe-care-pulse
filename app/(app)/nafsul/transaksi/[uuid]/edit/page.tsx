@@ -153,7 +153,10 @@ export default function TransaksiEditPage() {
   const jasaKetua =
     Math.round(((totalRincian * angka(header?.group_leader_fee_percent ?? "0")) / 100) * 100) / 100
   const kelompok = asli?.transaction_type === "kelompok"
-  const seharusnya = totalRincian - potonganAnggota - (kelompok ? jasaKetua : 0)
+  // Jasa ketua TIDAK ikut mengurangi: ia catatan hak ketua, bukan pengurang
+  // setoran. Sama dengan terapkanJasaKetua() di server, yang mengisi
+  // `group_leader_fee` dan menolkan `group_leader_deduction`.
+  const seharusnya = totalRincian - potonganAnggota
 
   function ubahBaris(i: number, patch: Partial<BarisForm>) {
     setBaris((prev) => prev.map((b, k) => (k === i ? { ...b, ...patch } : b)))
@@ -583,10 +586,15 @@ export default function TransaksiEditPage() {
             <dt className="text-gray-600">{t("nafsulTransaksi.memberDeduction")}</dt>
             <dd className="tabular-nums text-gray-900">− {rupiah(potonganAnggota)}</dd>
           </div>
+          {/*
+            Jasa ketua ditulis TANPA tanda minus dan diberi keterangan: ia tidak
+            mengurangi apa pun di baris "Harus Dibayar" di bawahnya. Tanda minus
+            di sini dulu membuat totalnya terbaca tidak nyambung.
+          */}
           {kelompok && (
             <div className="flex justify-between">
-              <dt className="text-gray-600">{t("nafsulTransaksi.leaderDeduction")}</dt>
-              <dd className="tabular-nums text-gray-900">− {rupiah(jasaKetua)}</dd>
+              <dt className="text-gray-600">{t("nafsulTransaksi.leaderFee")}</dt>
+              <dd className="tabular-nums text-gray-500">{rupiah(jasaKetua)}</dd>
             </div>
           )}
           <div className="flex justify-between border-t border-gray-200 pt-1.5 font-semibold">

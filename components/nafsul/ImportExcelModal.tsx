@@ -6,6 +6,13 @@ import { useEffect, useRef, useState } from "react";
 import * as XLSX from "xlsx-js-style";
 import { Download, FileSpreadsheet, RotateCcw, Upload } from "lucide-react";
 import { api, ApiError } from "@/lib/nafsul/api";
+import {
+  bagiBatch,
+  indeksInduk,
+  indukUntuk,
+  type ParsedRow,
+} from "@/lib/nafsul/importParse";
+import type { PesanKeluar, PesanMasuk } from "@/lib/nafsul/importWorker";
 import { Button } from "@/components/atoms/Button";
 import { Input } from "@/components/atoms/Input";
 import { Modal } from "@/components/molecules/Modal";
@@ -18,6 +25,16 @@ import { useT } from "@/lib/i18n";
  * satu permintaan gagal tidak menjatuhkan seluruh impor.
  */
 const BATCH_SIZE = 10;
+
+/**
+ * Baris gagal yang ikut digambar di tabel.
+ *
+ * Sisanya tetap terhitung, tetap ikut terekspor ke Excel, dan tetap bisa
+ * dikirim ulang — yang dibatasi hanya jumlah baris yang digambar. File 300 ribu
+ * baris yang seluruhnya ditolak akan membuat React menggambar 300 ribu `<tr>`
+ * dan halamannya membeku persis di saat pengguna paling butuh membaca alasannya.
+ */
+const MAKS_GAGAL_TAMPIL = 200;
 
 /**
  * Satu kolom template Excel → satu field API.
@@ -99,8 +116,11 @@ interface ImportExcelModalProps {
    * pengguna dan tidak pernah dikirim, sedangkan sheet ini ikut dikirim ke
    * server sebagai `payloadField`.
    *
-   * Isinya disertakan UTUH di setiap permintaan, bukan dipecah bersama baris —
-   * jumlahnya jauh lebih sedikit, dan tiap batch butuh induk milik barisnya.
+   * Sheet ini tidak dipecah lurus bersama baris: yang ikut di tiap permintaan
+   * adalah induk yang DIRUJUK potongan itu. Mengirimnya utuh terlihat lebih
+   * sederhana, tapi runtuh pada file besar — sheet induk berisi ribuan baris
+   * menembus batas jumlah baris di server sehingga tidak ada satu batch pun
+   * yang bisa lewat.
    */
   sheetInduk?: {
     nama: string;
@@ -108,8 +128,6 @@ interface ImportExcelModalProps {
     payloadField: string;
   };
 }
-
-type ParsedRow = Record<string, string | number> & { baris: number };
 
 /** Baris gagal disimpan lengkap dengan data aslinya agar bisa diekspor & dikirim ulang. */
 interface GagalRow {
@@ -131,125 +149,37 @@ interface GagalRow {
 
 interface ImportResponse {
   berhasil: number;
+  /**
+   * Baris yang SUDAH ada sebelumnya, jadi tidak ditulis ulang.
+   *
+   * Opsional: hanya impor transaksi yang mengenali keadaan ini. Impor master
+   * lain menolak duplikat sebagai galat biasa dan tidak mengirim angka ini.
+   */
+  dilewati?: number;
   gagal: number;
   hasil: {
     /** Nama sheet asal baris ini. Kosong pada impor satu sheet. */
     sheet?: string;
     baris: number;
-    status: "ok" | "gagal";
+    status: "ok" | "gagal" | "lewati";
     nama?: string;
     pesan?: string;
   }[];
 }
 
-/** Judul kolom dicocokkan tanpa spasi/tanda baca & tanpa membedakan huruf besar-kecil. */
-const normalize = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
-
-const pad = (n: number) => String(n).padStart(2, "0");
-
-/** Sel Excel → teks. Tanggal dipakai apa adanya (tanpa geser zona waktu). */
-function cellToString(value: unknown): string {
-  if (value === null || value === undefined) return "";
-  if (value instanceof Date) {
-    return `${value.getFullYear()}-${pad(value.getMonth() + 1)}-${pad(value.getDate())}`;
-  }
-  return String(value).trim();
-}
-
 /**
- * Satu sheet Excel → daftar baris yang sudah dipetakan ke nama field API.
+ * Sumber batch untuk satu kali jalan impor.
  *
- * Judul kolom dicocokkan lewat `normalize`, jadi "No. Anggota", "no anggota",
- * dan "no_anggota" sama-sama dikenali — file yang diketik ulang pengguna jarang
- * persis sama dengan templatnya.
+ * Ada dua: file (batch-nya tersimpan di worker, diambil satu per satu) dan
+ * daftar di memori (dipakai tombol "kirim ulang", yang isinya hanya baris gagal
+ * dan karena itu selalu kecil). Runner-nya sama untuk keduanya.
  */
-function bacaSheet(
-  sheet: XLSX.WorkSheet,
-  kolom: ImportColumn[]
-): ParsedRow[] {
-  const fieldByHeader = new Map<string, string>();
-  kolom.forEach((c) => {
-    fieldByHeader.set(normalize(c.header), c.field);
-    fieldByHeader.set(normalize(c.field), c.field);
-  });
-
-  const raw = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, {
-    defval: "",
-    raw: true,
-  });
-
-  const hasil: ParsedRow[] = [];
-
-  raw.forEach((r, i) => {
-    // Baris 1 file Excel dipakai judul kolom, jadi data ke-i ada di baris i+2.
-    const row: ParsedRow = { baris: i + 2 };
-
-    Object.entries(r).forEach(([header, value]) => {
-      const field = fieldByHeader.get(normalize(header));
-      if (field) row[field] = cellToString(value);
-    });
-
-    // Baris yang seluruh selnya kosong diabaikan diam-diam.
-    const adaIsi = Object.keys(row).some(
-      (k) => k !== "baris" && String(row[k]).trim() !== ""
-    );
-    if (adaIsi) hasil.push(row);
-  });
-
-  return hasil;
-}
-
-/**
- * Bagi baris jadi beberapa permintaan.
- *
- * Tanpa `kunciGrup`, potongannya lurus sebesar `ukuran`. Dengan `kunciGrup`,
- * baris yang punya nilai kunci sama tidak pernah terpecah ke dua permintaan —
- * server menggabungkannya jadi satu kesatuan (mis. satu kuitansi transaksi),
- * dan grup yang terbelah akan tersimpan sebagai dua kesatuan berbeda.
- *
- * Baris tanpa nilai kunci berdiri sendiri. Grup yang lebih besar dari `ukuran`
- * tetap dikirim utuh dalam satu permintaan — memecahnya justru merusak
- * artinya; batas baris di server dipasang lebih longgar untuk menampungnya.
- */
-function bagiBatch(
-  rows: ParsedRow[],
-  ukuran: number,
-  kunciGrup?: string
-): ParsedRow[][] {
-  if (!kunciGrup) {
-    const hasil: ParsedRow[][] = [];
-    for (let i = 0; i < rows.length; i += ukuran) hasil.push(rows.slice(i, i + ukuran));
-    return hasil;
-  }
-
-  // Baris segrup tidak harus berdampingan di file, jadi dikumpulkan dulu lewat
-  // Map — urutan penyisipannya menjaga grup tetap muncul sesuai urutan file.
-  const grup = new Map<string, ParsedRow[]>();
-
-  rows.forEach((row) => {
-    const nilai = String(row[kunciGrup] ?? "").trim();
-    // Prefiks "k:" vs "b:" menjaga baris tanpa kunci tetap berdiri sendiri
-    // tanpa pernah bertabrakan dengan nilai kunci yang kebetulan sama.
-    const kunci = nilai === "" ? `b:${row.baris}` : `k:${nilai}`;
-    const isi = grup.get(kunci);
-    if (isi) isi.push(row);
-    else grup.set(kunci, [row]);
-  });
-
-  const hasil: ParsedRow[][] = [];
-  let berjalan: ParsedRow[] = [];
-
-  grup.forEach((anggota) => {
-    if (berjalan.length > 0 && berjalan.length + anggota.length > ukuran) {
-      hasil.push(berjalan);
-      berjalan = [];
-    }
-    berjalan = berjalan.concat(anggota);
-  });
-
-  if (berjalan.length > 0) hasil.push(berjalan);
-
-  return hasil;
+interface SumberBatch {
+  totalBaris: number;
+  totalBatch: number;
+  /** Baris yang kolom wajibnya kosong — gagal tanpa perlu dikirim ke server. */
+  tanpaWajib: ParsedRow[];
+  ambil: (index: number) => Promise<{ rows: ParsedRow[]; induk: ParsedRow[] }>;
 }
 
 /**
@@ -258,6 +188,13 @@ function bagiBatch(
  * Alur & tampilannya sama untuk semua: unduh template → unggah file → dikirim
  * per batch dengan progres → baris gagal bisa diekspor atau dikirim ulang.
  * Yang berbeda cuma daftar kolom, endpoint, dan sheet referensinya.
+ *
+ * **File besar tidak pernah menyentuh thread ini.** Pembacaan Excel dikerjakan
+ * Web Worker, dan hasilnya tetap tinggal di sana — halaman hanya memegang satu
+ * batch pada satu waktu beserta angka-angka progresnya. Sebelumnya seluruh isi
+ * file disimpan di state React, lalu dibagi ulang jadi batch di dalam render:
+ * pada 300 ribu baris, satu saja pembaruan progres berarti membagi ulang 300
+ * ribu baris, dan itu terjadi beberapa kali per batch.
  */
 export default function ImportExcelModal({
   open,
@@ -276,12 +213,18 @@ export default function ImportExcelModal({
   const t = useT();
   const fileRef = useRef<HTMLInputElement>(null);
   const [namaFile, setNamaFile] = useState("");
-  const [rows, setRows] = useState<ParsedRow[]>([]);
-  /** Isi sheet induk (mis. Kuitansi) — kosong bila impornya satu tingkat. */
-  const [barisInduk, setBarisInduk] = useState<ParsedRow[]>([]);
   const [parseError, setParseError] = useState<string | null>(null);
   const [runError, setRunError] = useState<string | null>(null);
   const [seret, setSeret] = useState(false);
+  const [membaca, setMembaca] = useState(false);
+  const [barisDibaca, setBarisDibaca] = useState(0);
+
+  /** Ringkasan file yang sudah dibaca worker. Null = belum ada file terbaca. */
+  const [ringkasan, setRingkasan] = useState<{
+    totalBaris: number;
+    totalBatch: number;
+    totalInduk: number;
+  } | null>(null);
 
   const [importing, setImporting] = useState(false);
   const [selesai, setSelesai] = useState(false);
@@ -290,16 +233,44 @@ export default function ImportExcelModal({
   const [batchKe, setBatchKe] = useState(0);
   const [diproses, setDiproses] = useState(0);
   const [berhasil, setBerhasil] = useState(0);
+  const [dilewati, setDilewati] = useState(0);
   const [gagal, setGagal] = useState<GagalRow[]>([]);
 
   const [masters, setMasters] = useState<MasterSheet[] | null>(null);
   const masterDiminta = useRef(false);
 
+  /**
+   * Worker beserta antrean permintaannya.
+   *
+   * Permintaan selalu berurutan (satu batch harus selesai dikirim sebelum
+   * berikutnya diminta), jadi cukup satu penampung janji — bukan peta berkunci
+   * id permintaan.
+   */
+  const workerRef = useRef<Worker | null>(null);
+  const menungguRef = useRef<{
+    resolve: (pesan: PesanKeluar) => void;
+    reject: (alasan: Error) => void;
+  } | null>(null);
+
   const templateColumns = columns.filter((c) => c.diTemplate !== false);
-  // Kolom bertanda `wajib` — sumber yang sama dengan sorotan kuning di file
-  // Excel, jadi daftar di modal tidak bisa melenceng dari templatnya.
-  const kolomWajib = templateColumns.filter((c) => c.wajib);
+  // Kolom bertanda `wajib` tidak lagi didaftar ulang di modal: judulnya sudah
+  // disorot kuning di file template, dan daftar kedua di layar hanya mengulang
+  // hal yang sama sambil mendorong area unggah turun dari pandangan.
   const namaDari = (row: ParsedRow) => String(row[barisWajib.field] ?? "").trim();
+
+  function lepasWorker() {
+    // Janji yang masih menggantung ditolak lebih dulu: tanpa ini `await` yang
+    // sedang menunggu balasan worker tidak akan pernah selesai, dan tombolnya
+    // tinggal selamanya dalam keadaan "sedang mengimpor".
+    menungguRef.current?.reject(new Error("WORKER_DIHENTIKAN"));
+    menungguRef.current = null;
+    workerRef.current?.terminate();
+    workerRef.current = null;
+  }
+
+  // Worker ikut dilepas saat komponen dibongkar — file 300 ribu baris yang
+  // tertinggal di worker tidak akan pernah dikumpulkan selama workernya hidup.
+  useEffect(() => () => lepasWorker(), []);
 
   // Master ditarik sekali saat modal dibuka, dipakai sebagai sheet referensi
   // di dalam file template & file baris gagal.
@@ -354,9 +325,11 @@ export default function ImportExcelModal({
   const bisaKirimUlang = !importing && gagalUtama.length > 0;
 
   function reset() {
+    lepasWorker();
     setNamaFile("");
-    setRows([]);
-    setBarisInduk([]);
+    setRingkasan(null);
+    setMembaca(false);
+    setBarisDibaca(0);
     setParseError(null);
     setRunError(null);
     setSelesai(false);
@@ -365,96 +338,174 @@ export default function ImportExcelModal({
     setBatchKe(0);
     setDiproses(0);
     setBerhasil(0);
+    setDilewati(0);
     setGagal([]);
     if (fileRef.current) fileRef.current.value = "";
+  }
+
+  /** Kirim satu permintaan ke worker dan tunggu balasannya. */
+  function tanyaWorker(pesan: PesanMasuk): Promise<PesanKeluar> {
+    const worker = workerRef.current;
+
+    if (!worker) return Promise.reject(new Error("WORKER_TIDAK_ADA"));
+
+    return new Promise<PesanKeluar>((resolve, reject) => {
+      menungguRef.current = { resolve, reject };
+      // Buffer file dipindahkan, bukan disalin: menyalin 300 ribu baris ke
+      // worker berarti menahan dua salinan sekaligus di puncak pemakaian.
+      if (pesan.type === "parse") worker.postMessage(pesan, [pesan.buffer]);
+      else worker.postMessage(pesan);
+    });
   }
 
   async function handleFile(file: File) {
     reset();
     setNamaFile(file.name);
+    setMembaca(true);
 
     try {
-      const wb = XLSX.read(await file.arrayBuffer(), { cellDates: true });
+      // Path RELATIF, bukan alias "@/": bundler mengenali worker lewat pola
+      // `new Worker(new URL(...))` secara statis, dan alias tidak ikut
+      // diterjemahkan di dalam pola itu — workernya jadi tidak terbundel dan
+      // gagal dimuat saat dijalankan.
+      const worker = new Worker(new URL("../../lib/nafsul/importWorker.ts", import.meta.url));
+      workerRef.current = worker;
 
-      // Sheet dicari berdasarkan NAMA lebih dulu, baru jatuh ke sheet pertama
-      // yang BUKAN sheet induk.
-      //
-      // Dua-duanya perlu: file template menamai sheet datanya `sheetUtama`,
-      // sedangkan file "baris gagal" menamainya "Gagal" — dan file itu memang
-      // dimaksudkan untuk diperbaiki lalu diunggah ulang. Sheet induk harus
-      // dikecualikan dari fallback karena ia berada lebih dulu di kedua file.
-      const namaLain = wb.SheetNames.find((n) => n !== sheetInduk?.nama);
-      const sheet = wb.Sheets[sheetUtama] ?? (namaLain ? wb.Sheets[namaLain] : undefined);
-      if (!sheet) {
-        setParseError(t("nafsulImport.sheetError"));
+      worker.onmessage = (event: MessageEvent<PesanKeluar>) => {
+        // Progres bukan balasan atas satu permintaan: ia mengalir selama
+        // pembacaan berjalan, jadi tidak boleh menyelesaikan janji yang sedang
+        // menunggu hasil akhir.
+        if (event.data.type === "progress") {
+          setBarisDibaca(event.data.dibaca);
+
+          return;
+        }
+
+        const menunggu = menungguRef.current;
+        menungguRef.current = null;
+        menunggu?.resolve(event.data);
+      };
+
+      worker.onerror = () => {
+        const menunggu = menungguRef.current;
+        menungguRef.current = null;
+        menunggu?.reject(new Error("WORKER_GAGAL"));
+      };
+
+      const balasan = await tanyaWorker({
+        type: "parse",
+        buffer: await file.arrayBuffer(),
+        sheetUtama,
+        columns,
+        wajibField: barisWajib.field,
+        kunciGrup,
+        ukuranBatch,
+        sheetInduk: sheetInduk
+          ? { nama: sheetInduk.nama, columns: sheetInduk.columns }
+          : undefined,
+      });
+
+      if (balasan.type === "error") {
+        setParseError(
+          balasan.pesan === "SHEET_TIDAK_ADA"
+            ? t("nafsulImport.sheetError")
+            : balasan.pesan === "SHEET_INDUK_TIDAK_ADA"
+              ? t("nafsulImport.parentSheetMissing", { sheet: sheetInduk?.nama ?? "" })
+              : t("nafsulImport.readError"),
+        );
+
         return;
       }
 
-      const terbaca = bacaSheet(sheet, columns);
+      if (balasan.type !== "parsed") return;
 
-      if (sheetInduk) {
-        const lembarInduk = wb.Sheets[sheetInduk.nama];
-        if (!lembarInduk) {
-          setParseError(t("nafsulImport.parentSheetMissing", { sheet: sheetInduk.nama }));
-          return;
-        }
-        setBarisInduk(bacaSheet(lembarInduk, sheetInduk.columns));
-      }
+      setRingkasan({
+        totalBaris: balasan.total,
+        totalBatch: balasan.totalBatch,
+        totalInduk: balasan.totalInduk,
+      });
 
-      setRows(terbaca);
-      if (terbaca.length === 0) {
-        setParseError(
-          t("nafsulImport.noRows")
-        );
-      }
+      // Baris tanpa kolom wajib sudah disaring worker — ditampilkan sebagai
+      // gagal sejak awal, tanpa pernah dikirim ke server.
+      setGagal(
+        balasan.tanpaWajib.map((row) => ({
+          sheet: sheetUtama,
+          baris: row.baris,
+          nama: "",
+          pesan: `${barisWajib.label} wajib diisi.`,
+          row,
+        })),
+      );
+
+      if (balasan.total === 0) setParseError(t("nafsulImport.noRows"));
     } catch {
       setParseError(t("nafsulImport.readError"));
+    } finally {
+      setMembaca(false);
     }
   }
 
-  /** Jalankan impor untuk sekumpulan baris — dipakai impor awal maupun kirim ulang. */
-  async function prosesImport(daftar: ParsedRow[]) {
-    const denganNama = daftar.filter((r) => namaDari(r) !== "");
-    const tanpaNama = daftar.filter((r) => namaDari(r) === "");
-    const batches = bagiBatch(denganNama, ukuranBatch, kunciGrup);
+  /**
+   * Galat API → kalimat yang menyebut penyebabnya.
+   *
+   * `message` sebuah 422 dari Laravel selalu kalimat generik yang sama ("Data
+   * yang dikirim tidak valid"), sedangkan yang menjelaskan justru ada di
+   * `errors`. Menampilkan `message` saja membuat setiap kegagalan validasi
+   * terlihat identik dan mustahil ditelusuri.
+   */
+  function rincianGalat(err: ApiError): string {
+    const rinci = Object.values(err.errors ?? {})
+      .flat()
+      .filter(Boolean);
 
+    return rinci.length > 0 ? `${err.message} ${rinci.join(" ")}` : err.message;
+  }
+
+  /** Jalankan impor untuk satu sumber batch — dipakai impor awal maupun kirim ulang. */
+  async function jalankan(sumber: SumberBatch) {
     setImporting(true);
     setSelesai(false);
     setRunError(null);
-    setTotalAntrian(daftar.length);
-    setTotalBatch(batches.length);
+    setTotalAntrian(sumber.totalBaris);
+    setTotalBatch(sumber.totalBatch);
     setBatchKe(0);
     setBerhasil(0);
-    // Baris tanpa kolom wajib tidak perlu dikirim ke server — langsung dicatat gagal.
-    setDiproses(tanpaNama.length);
-    setGagal(
-      tanpaNama.map((row) => ({
-        sheet: sheetUtama,
-        baris: row.baris,
-        nama: "",
-        pesan: `${barisWajib.label} wajib diisi.`,
-        row,
-      }))
-    );
+    setDilewati(0);
+    // Baris tanpa kolom wajib tidak perlu dikirim ke server — sudah dicatat gagal.
+    setDiproses(sumber.tanpaWajib.length);
 
     let sukses = 0;
+    let dilewat = 0;
     let batch = 0;
     let terkirim = 0;
 
     try {
-      for (const potongan of batches) {
-        batch += 1;
+      for (let i = 0; i < sumber.totalBatch; i++) {
+        batch = i + 1;
         setBatchKe(batch);
+
+        const { rows: potongan, induk: indukBatch } = await sumber.ambil(i);
+
+        if (potongan.length === 0) continue;
 
         const res = await api<ImportResponse>(`/${slug}/import`, {
           method: "POST",
           body: sheetInduk
-            ? { rows: potongan, [sheetInduk.payloadField]: barisInduk }
+            ? { rows: potongan, [sheetInduk.payloadField]: indukBatch }
             : { rows: potongan },
         });
 
         sukses += res.berhasil;
         setBerhasil(sukses);
+
+        dilewat += res.dilewati ?? 0;
+        setDilewati(dilewat);
+
+        // Baris potongan diindeks per nomor baris sekali per batch. Sebelumnya
+        // tiap galat mencari barisnya dengan `find()` di seluruh daftar — pada
+        // batch besar yang banyak galatnya itu jadi pencarian bersarang.
+        const perBaris = new Map(potongan.map((r) => [r.baris, r]));
+        const indukPerBaris = new Map(indukBatch.map((r) => [r.baris, r]));
 
         const gagalBatch = res.hasil
           .filter((h) => h.status === "gagal")
@@ -463,8 +514,8 @@ export default function ImportExcelModal({
             // potongan rincian yang sedang dikirim — nomor barisnya milik sheet
             // yang berbeda.
             const dariInduk = !!sheetInduk && h.sheet === sheetInduk.nama;
-            const sumber = dariInduk ? barisInduk : potongan;
-            const asal = sumber.find((r) => r.baris === h.baris);
+            const asal = dariInduk ? indukPerBaris.get(h.baris) : perBaris.get(h.baris);
+
             return {
               sheet: dariInduk && h.sheet ? h.sheet : sheetUtama,
               baris: h.baris,
@@ -473,9 +524,10 @@ export default function ImportExcelModal({
               row: asal ?? ({ baris: h.baris } as ParsedRow),
             };
           });
-        // Sheet induk dikirim UTUH di tiap batch, jadi satu barisnya yang salah
-        // dilaporkan berulang — sekali per batch. Yang kedua dan seterusnya
-        // dibuang di sini supaya daftar galat & angkanya tidak menggelembung.
+
+        // Satu baris induk bisa dirujuk beberapa batch, jadi galatnya bisa
+        // terlapor lebih dari sekali. Yang kedua dan seterusnya dibuang di sini
+        // supaya daftar galat & angkanya tidak menggelembung.
         if (gagalBatch.length) {
           setGagal((g) => {
             const sudahAda = new Set(g.map((x) => `${x.sheet}#${x.baris}`));
@@ -488,7 +540,7 @@ export default function ImportExcelModal({
         }
 
         terkirim += potongan.length;
-        setDiproses(tanpaNama.length + terkirim);
+        setDiproses(sumber.tanpaWajib.length + terkirim);
       }
 
       setSelesai(true);
@@ -497,17 +549,70 @@ export default function ImportExcelModal({
       // Impor dihentikan: baris yang sudah terkirim tetap tersimpan di server.
       setRunError(
         err instanceof ApiError
-          ? `Impor berhenti pada batch ${batch} dari ${batches.length}: ${err.message}`
-          : `Impor berhenti pada batch ${batch} dari ${batches.length} karena koneksi ke server terputus.`
+          ? `Impor berhenti pada batch ${batch} dari ${sumber.totalBatch}: ${rincianGalat(err)}`
+          : `Impor berhenti pada batch ${batch} dari ${sumber.totalBatch} karena koneksi ke server terputus.`,
       );
     } finally {
       setImporting(false);
     }
   }
 
-  /** Kirim ulang hanya baris yang gagal, tanpa perlu memuat file lagi. */
+  /** Impor file yang sudah dibaca worker — batch-nya diambil satu per satu. */
+  function mulaiImport() {
+    if (!ringkasan) return;
+
+    // Baris tanpa kolom wajib sudah masuk daftar gagal saat file dibaca; di sini
+    // cukup jumlahnya, untuk menghitung progres.
+    const tanpaWajib = gagal.filter((g) => g.sheet === sheetUtama && g.nama === "");
+
+    jalankan({
+      totalBaris: ringkasan.totalBaris,
+      totalBatch: ringkasan.totalBatch,
+      tanpaWajib: tanpaWajib.map((g) => g.row),
+      ambil: async (index) => {
+        const balasan = await tanyaWorker({ type: "batch", index });
+
+        return balasan.type === "batch"
+          ? { rows: balasan.rows, induk: balasan.induk }
+          : { rows: [], induk: [] };
+      },
+    });
+  }
+
+  /**
+   * Kirim ulang hanya baris yang gagal, tanpa perlu memuat file lagi.
+   *
+   * Baris ini sudah ada di memori halaman (jumlahnya sebatas yang gagal), jadi
+   * dibagi batch di sini saja — tidak perlu menempuh worker.
+   */
   function kirimUlangGagal() {
-    prosesImport(gagalUtama.map((g) => g.row));
+    const daftar = gagalUtama.map((g) => g.row);
+    const denganNama = daftar.filter((r) => namaDari(r) !== "");
+    const tanpaWajib = daftar.filter((r) => namaDari(r) === "");
+    const batches = bagiBatch(denganNama, ukuranBatch, kunciGrup);
+
+    // Induk untuk kiriman ulang diambil dari galat induk yang tercatat; file
+    // aslinya mungkin sudah tidak ada lagi di worker.
+    const indukTersimpan = gagal
+      .filter((g) => g.sheet === sheetInduk?.nama)
+      .map((g) => g.row);
+    const indeks = indeksInduk(indukTersimpan, kunciGrup);
+
+    setGagal((g) => g.filter((x) => x.sheet !== sheetUtama));
+
+    jalankan({
+      totalBaris: daftar.length,
+      totalBatch: batches.length,
+      tanpaWajib,
+      ambil: async (index) => {
+        const potongan = batches[index] ?? [];
+
+        return {
+          rows: potongan,
+          induk: kunciGrup ? indukUntuk(potongan, indeks, kunciGrup, index === 0) : [],
+        };
+      },
+    });
   }
 
   function unduhTemplate() {
@@ -542,7 +647,7 @@ export default function ImportExcelModal({
   }
 
   /** Ekspor baris gagal beserta alasannya — bisa diperbaiki lalu diimpor ulang. */
-  function unduhGagal() {
+  async function unduhGagal() {
     const header = [...columns.map((c) => c.header), "Alasan Gagal"];
     const isi = gagalUtama.map((g) => [
       ...columns.map((c) => String(g.row[c.field] ?? "")),
@@ -560,6 +665,22 @@ export default function ImportExcelModal({
     // induknya — padahal memperbaiki lalu mengimpor ulang justru gunanya file
     // ini. Sheet-nya dinamai "Gagal" agar sheet data utamanya tetap dikenali
     // saat file itu dibaca lagi, sedangkan sheet induk memakai nama aslinya.
+    //
+    // Isinya diminta ke worker saat dibutuhkan saja: menyimpannya di state
+    // halaman berarti menahan seluruh sheet Kuitansi di memori sepanjang modal
+    // terbuka, padahal hanya dipakai kalau tombol ini ditekan.
+    let barisInduk: ParsedRow[] = [];
+
+    if (sheetInduk && workerRef.current) {
+      try {
+        const balasan = await tanyaWorker({ type: "induk" });
+        if (balasan.type === "induk") barisInduk = balasan.rows;
+      } catch {
+        // File-nya sudah tidak ada di worker (mis. modal sempat direset) —
+        // sheet induk ditulis kosong daripada gagal mengunduh sama sekali.
+      }
+    }
+
     const indukGagal = sheetInduk
       ? [{
           nama: sheetInduk.nama,
@@ -635,6 +756,8 @@ export default function ImportExcelModal({
     onClose();
   }
 
+  const gagalTampil = gagal.slice(0, MAKS_GAGAL_TAMPIL);
+
   return (
     <Modal
       open
@@ -654,8 +777,10 @@ export default function ImportExcelModal({
           </Button>
           <Button
             type="button"
-            onClick={() => prosesImport(rows)}
-            disabled={importing || rows.length === 0 || selesai}
+            onClick={mulaiImport}
+            disabled={
+              importing || membaca || !ringkasan || ringkasan.totalBatch === 0 || selesai
+            }
             className="bg-[#075489] hover:bg-[#075489]/90 text-white"
           >
             {importing
@@ -669,33 +794,6 @@ export default function ImportExcelModal({
         <p className="text-sm text-slate-500">
           {t(kunciGrup ? "nafsulImport.batchNoteGroup" : "nafsulImport.batchNote", { size: ukuranBatch })}
         </p>
-
-        {/*
-          Kolom wajib disebutkan di modal, bukan hanya disorot kuning di file
-          Excel: pengguna yang menyusun filenya sendiri (tanpa mengunduh
-          templat) tidak akan pernah melihat sorotan itu.
-        */}
-        {kolomWajib.length > 0 && (
-          <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
-            <div className="text-xs font-medium uppercase tracking-wide text-slate-500">
-              {t("nafsulImport.requiredColumns")}
-            </div>
-            <div className="mt-2 flex flex-wrap gap-2">
-              {kolomWajib.map((c) => (
-                <span
-                  key={c.header}
-                  className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-sm text-slate-700"
-                >
-                  {c.header}
-                  <span className="ml-0.5 text-red-500">*</span>
-                </span>
-              ))}
-            </div>
-            <p className="mt-2 text-xs text-slate-500">
-              {t("nafsulImport.requiredHint")}
-            </p>
-          </div>
-        )}
 
         {!namaFile ? (
             <div
@@ -734,11 +832,20 @@ export default function ImportExcelModal({
                 <div className="min-w-0">
                   <div className="truncate font-medium">{namaFile}</div>
                   <div className="text-sm text-slate-500">
-                    {t("nafsulImport.rowsBatch", {
-                      rows: rows.length,
-                      batches: bagiBatch(rows, ukuranBatch, kunciGrup).length,
-                      size: ukuranBatch,
-                    })}
+                    {/*
+                      Angka batch datang dari worker, bukan dihitung ulang di
+                      sini. Membaginya di dalam render berarti membagi ulang
+                      seluruh isi file setiap kali progres bergerak.
+                    */}
+                    {membaca
+                      ? t("nafsulImport.reading", { rows: barisDibaca })
+                      : ringkasan
+                        ? t("nafsulImport.rowsBatch", {
+                            rows: ringkasan.totalBaris,
+                            batches: ringkasan.totalBatch,
+                            size: ukuranBatch,
+                          })
+                        : "—"}
                   </div>
                 </div>
               </div>
@@ -746,7 +853,7 @@ export default function ImportExcelModal({
                 type="button"
                 variant="outline"
                 onClick={() => fileRef.current?.click()}
-                disabled={importing}
+                disabled={importing || membaca}
               >
                 {t("nafsulImport.changeFile")}
               </Button>
@@ -803,6 +910,17 @@ export default function ImportExcelModal({
                   {t("nafsulImport.success")}{" "}
                   <span className="font-semibold text-emerald-700">{berhasil}</span>
                 </span>
+                {/*
+                  Hanya muncul bila ada isinya. Impor master lain tidak mengenal
+                  keadaan "sudah ada" sama sekali, dan angka nol yang selalu
+                  nongol di sana cuma menimbulkan pertanyaan.
+                */}
+                {dilewati > 0 && (
+                  <span>
+                    {t("nafsulImport.skipped")}{" "}
+                    <span className="font-semibold text-amber-700">{dilewati}</span>
+                  </span>
+                )}
                 <span>
                   {t("nafsulImport.failed")}{" "}
                   <span className="font-semibold text-rose-700">{gagal.length}</span>
@@ -854,7 +972,7 @@ export default function ImportExcelModal({
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
-                    {gagal.map((g, i) => (
+                    {gagalTampil.map((g, i) => (
                       <tr key={`${g.sheet}-${g.baris}-${i}`}>
                         {sheetInduk && (
                           <td className="whitespace-nowrap px-4 py-2 text-slate-500">{g.sheet}</td>
@@ -867,6 +985,14 @@ export default function ImportExcelModal({
                   </tbody>
                 </table>
               </div>
+              {gagal.length > gagalTampil.length && (
+                <p className="border-t border-slate-200 bg-slate-50 px-4 py-2 text-xs text-slate-500">
+                  {t("nafsulImport.failedTruncated", {
+                    shown: gagalTampil.length,
+                    total: gagal.length,
+                  })}
+                </p>
+              )}
             </div>
           )}
       </div>

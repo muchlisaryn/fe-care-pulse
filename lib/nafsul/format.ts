@@ -6,7 +6,20 @@
  */
 export function formatDate(value: string | null | undefined, locale = "id-ID"): string {
   if (!value) return "-";
-  const d = new Date(value);
+
+  // "YYYY-MM-DD" polos ditafsirkan JavaScript sebagai tengah malam UTC, lalu
+  // ditampilkan dalam zona waktu peramban. Di zona berselisih negatif (mis.
+  // peramban yang disetel UTC-5) tanggalnya mundur sehari — dan pada daftar
+  // kuitansi, tanggal yang meleset sehari adalah kesalahan yang tidak terlihat
+  // sebagai kesalahan. Menempelkan "T00:00:00" tanpa "Z" membuatnya dibaca
+  // sebagai waktu LOKAL, sehingga tanggalnya tampil apa adanya.
+  //
+  // Nilai bertanda waktu penuh (`created_at`) tidak tersentuh: ia memang
+  // menunjuk satu titik waktu, dan menerjemahkannya ke zona pembaca benar.
+  const d = /^\d{4}-\d{2}-\d{2}$/.test(value)
+    ? new Date(`${value}T00:00:00`)
+    : new Date(value);
+
   if (Number.isNaN(d.getTime())) return "-";
   return d.toLocaleDateString(locale, {
     day: "2-digit",
