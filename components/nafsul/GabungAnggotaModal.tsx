@@ -1,16 +1,40 @@
 "use client";
 
-import { useState } from "react";
-import { AlertTriangle, ArrowRight, ArrowLeft, Merge } from "lucide-react";
+import { useEffect, useState } from "react";
+import { AlertTriangle, ArrowRight, ArrowLeft, Combine, Search } from "lucide-react";
 import { api, ApiError } from "@/lib/nafsul/api";
+import type { Paginated } from "@/lib/nafsul/types";
 import { Button } from "@/components/atoms/Button";
 import { Checkbox } from "@/components/atoms/Checkbox";
 import { Input } from "@/components/atoms/Input";
 import { Modal } from "@/components/molecules/Modal";
+import { DataTable, type Column } from "@/components/molecules/DataTable";
+import { Pagination } from "@/components/molecules/Pagination";
 import { ResultDialog } from "@/components/molecules/ResultDialog";
 import MasterSelect from "@/components/nafsul/MasterSelect";
 import { useT } from "@/lib/i18n";
 import { rupiah } from "@/lib/format";
+
+/** Nilai kosong tidak boleh tampil sebagai sel kosong — aturan komponen repo. */
+const tandaKosong = <span className="text-xs text-gray-400">—</span>;
+
+/** Satu baris riwayat penggabungan, sebagaimana dikirim `/gabung-anggota`. */
+type Riwayat = {
+  id: number;
+  uuid: string;
+  anggota_asal: Anggota | null;
+  anggota_tujuan: Anggota | null;
+  header_count: number;
+  /** Rincian yang benar-benar BERPINDAH. */
+  transaction_count: number;
+  /** Rincian yang DINONAKTIFKAN karena periodenya bentrok. */
+  disabled_count: number;
+  amount: string;
+  source_disabled: boolean;
+  note: string | null;
+  created_at: string | null;
+  created_by: string | null;
+};
 
 /** Satu anggota sebagaimana dikembalikan `/anggota`. */
 // `no_anggota` bisa null pada data lama — lihat `Anggota` di lib/nafsul/types.
@@ -83,8 +107,129 @@ export default function GabungAnggotaModal({ open, onClose, onSuccess }: Props) 
   const [memuat, setMemuat] = useState(false);
   const [terpilih, setTerpilih] = useState<Set<string>>(new Set());
   const [catatan, setCatatan] = useState("");
+  /**
+   * Izin menonaktifkan rincian yang periodenya bentrok.
+   *
+   * MATI secara bawaan, dan memang harus begitu: ia menghapus (lunak) catatan
+   * setoran, jadi tidak boleh terjadi sebagai efek samping dari tombol Gabungkan
+   * yang ditekan tanpa membaca apa pun.
+   */
+  const [selesaikanBentrok, setSelesaikanBentrok] = useState(false);
   const [menyimpan, setMenyimpan] = useState(false);
   const [hasil, setHasil] = useState<{ sukses: boolean; pesan: string } | null>(null);
+
+  // ── Riwayat penggabungan ────────────────────────────────────────────────
+  // `cariInput` adalah draft yang diketik; `cari` baru berisi setelah tombol
+  // Cari ditekan — pencarian di repo ini tidak pernah live.
+  const [cariInput, setCariInput] = useState("");
+  const [cari, setCari] = useState("");
+  const [halaman, setHalaman] = useState(1);
+  /**
+   * Rentang tanggal penggabungan. Kosong = seluruh riwayat.
+   *
+   * Sengaja TIDAK dibawakan bawaan "bulan ini" seperti dashboard: yang dicari
+   * di sini biasanya satu penggabungan tertentu yang bisa saja terjadi berbulan
+   * lalu, dan menyaringnya diam-diam ke bulan berjalan akan membuat riwayatnya
+   * terlihat kosong padahal ada.
+   */
+  const [rentang, setRentang] = useState({ from: "", to: "" });
+  /**
+   * Dinaikkan setelah penggabungan berhasil, dan ikut jadi bagian kunci di
+   * bawah. Tanpa itu, memuat ulang riwayat pada pencarian & halaman yang sama
+   * tidak mengubah kuncinya sama sekali — sehingga baris yang baru saja dibuat
+   * tidak pernah muncul.
+   */
+  const [versiRiwayat, setVersiRiwayat] = useState(0);
+
+  /**
+   * Hasil disimpan BERSAMA kunci permintaannya, dan status memuat diturunkan
+   * dari perbandingan kunci — bukan disimpan sebagai state tersendiri yang
+   * di-set di badan effect. setState sinkron di dalam effect memicu render
+   * beruntun dan dilarang aturan react-hooks; pola ini juga dipakai ketiga
+   * halaman dashboard.
+   */
+  const kunciRiwayat = `${cari}|${rentang.from}|${rentang.to}|${halaman}|${versiRiwayat}`;
+  const [hasilRiwayat, setHasilRiwayat] = useState<{
+    kunci: string;
+    isi: Paginated<Riwayat> | null;
+  } | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    let aktif = true;
+
+    api<Paginated<Riwayat>>("/gabung-anggota", {
+      params: {
+        search: cari || undefined,
+        date_from: rentang.from || undefined,
+        date_to: rentang.to || undefined,
+        page: halaman,
+      },
+    })
+      .then((res) => {
+        if (aktif) setHasilRiwayat({ kunci: kunciRiwayat, isi: res });
+      })
+      .catch(() => {
+        // Riwayat adalah pelengkap, bukan syarat: kegagalannya tidak boleh
+        // memunculkan dialog error di atas wizard yang sedang dipakai. Kuncinya
+        // tetap ditandai selesai supaya tidak memuat selamanya.
+        if (aktif) setHasilRiwayat({ kunci: kunciRiwayat, isi: null });
+      });
+
+    return () => {
+      aktif = false;
+    };
+  }, [open, kunciRiwayat, cari, rentang.from, rentang.to, halaman]);
+
+  const memuatRiwayat = hasilRiwayat?.kunci !== kunciRiwayat;
+  const riwayat = hasilRiwayat?.isi ?? null;
+
+  function cariRiwayat(e: React.FormEvent) {
+    e.preventDefault();
+    setCari(cariInput);
+    setHalaman(1);
+  }
+
+  const kolomRiwayat: Column<Riwayat>[] = [
+    {
+      header: t("gabungAnggota.histDate"),
+      cell: (r) => r.created_at?.slice(0, 16) ?? tandaKosong,
+    },
+    {
+      header: t("gabungAnggota.histMembers"),
+      cell: (r) => (
+        <span className="flex flex-wrap items-center gap-1.5">
+          <span className="text-gray-900">{labelAnggota(r.anggota_asal)}</span>
+          <ArrowRight className="h-3.5 w-3.5 shrink-0 text-gray-400" />
+          <span className="font-medium text-gray-900">{labelAnggota(r.anggota_tujuan)}</span>
+        </span>
+      ),
+    },
+    {
+      header: t("gabungAnggota.histMoved"),
+      cell: (r) => (
+        <span className="tabular-nums text-gray-700">
+          {r.transaction_count}
+          {/* Yang dinonaktifkan disebut terpisah dan diberi warna: ia bukan
+              perpindahan, melainkan rincian yang dibuang karena bentrok. */}
+          {r.disabled_count > 0 && (
+            <span className="ml-2 text-amber-700">
+              +{r.disabled_count} {t("gabungAnggota.histDisabled")}
+            </span>
+          )}
+        </span>
+      ),
+    },
+    {
+      header: t("gabungAnggota.histAmount"),
+      className: "text-right",
+      cell: (r) => <span className="tabular-nums">{rupiah(Number(r.amount))}</span>,
+    },
+    {
+      header: t("gabungAnggota.histBy"),
+      cell: (r) => r.created_by || tandaKosong,
+    },
+  ];
 
   /** Kembalikan seluruh isian ke keadaan awal — dipakai saat modal ditutup. */
   function reset() {
@@ -94,7 +239,13 @@ export default function GabungAnggotaModal({ open, onClose, onSuccess }: Props) 
     setRingkasan(null);
     setTerpilih(new Set());
     setCatatan("");
+    setSelesaikanBentrok(false);
     setMenyimpan(false);
+    // Pencarian riwayat ikut dikosongkan supaya baris terbaru pasti terlihat.
+    setCariInput("");
+    setCari("");
+    setRentang({ from: "", to: "" });
+    setHalaman(1);
   }
 
   function tutup() {
@@ -135,8 +286,11 @@ export default function GabungAnggotaModal({ open, onClose, onSuccess }: Props) 
     }
   }
 
+  /** Kelompok bentrok baru bisa dipilih setelah izin menonaktifkan diberikan. */
+  const bolehPilih = (k: Kelompok) => k.can_merge || selesaikanBentrok;
+
   function togglePilih(k: Kelompok) {
-    if (!k.can_merge) return;
+    if (!bolehPilih(k)) return;
     setTerpilih((s) => {
       const baru = new Set(s);
       const key = kunci(k);
@@ -146,7 +300,7 @@ export default function GabungAnggotaModal({ open, onClose, onSuccess }: Props) 
     });
   }
 
-  const bisaDipindah = ringkasan?.groups.filter((g) => g.can_merge) ?? [];
+  const bisaDipindah = ringkasan?.groups.filter(bolehPilih) ?? [];
   const semuaTercentang = bisaDipindah.length > 0 && bisaDipindah.every((g) => terpilih.has(kunci(g)));
 
   function toggleSemua() {
@@ -181,15 +335,18 @@ export default function GabungAnggotaModal({ open, onClose, onSuccess }: Props) 
           target_member_id: tujuan.id,
           transaction_header_ids: headerIds,
           include_without_header: terpilih.has(TANPA_KUITANSI),
+          resolve_conflicts: selesaikanBentrok,
           note: catatan || undefined,
         },
       });
 
-      // Modal ditutup DULU, lalu hasilnya ditampilkan: kalau tidak, dialog hasil
-      // muncul di atas wizard yang isinya sudah tidak berlaku lagi.
+      // Modal TETAP TERBUKA, hanya wizardnya yang dikosongkan. Riwayat di
+      // bawahnya dimuat ulang sehingga penggabungan yang barusan langsung
+      // terlihat sebagai baris baru — itulah gunanya riwayat ada di sini.
+      // Dialog hasil muncul di atasnya karena dirender setelah modal.
       reset();
-      onClose();
       onSuccess();
+      setVersiRiwayat((v) => v + 1);
       setHasil({ sukses: true, pesan: res.message });
     } catch (err) {
       setHasil({
@@ -209,44 +366,10 @@ export default function GabungAnggotaModal({ open, onClose, onSuccess }: Props) 
         title={t("gabungAnggota.title")}
         size="xl"
         footer={
-          <div className="flex items-center justify-between gap-2">
-            <span className="text-xs text-gray-400">
-              {t("gabungAnggota.step", { step: String(langkah), total: "3" })}
-            </span>
-
-            <div className="flex gap-2">
-              {langkah > 1 && (
-                <Button
-                  variant="secondary"
-                  onClick={() => setLangkah((s) => (s === 3 ? 2 : 1))}
-                  disabled={menyimpan}
-                  className="flex items-center gap-1.5"
-                >
-                  <ArrowLeft className="h-4 w-4" />
-                  {t("common.back")}
-                </Button>
-              )}
-
-              {langkah < 3 ? (
-                <Button
-                  onClick={() => (langkah === 1 ? setLangkah(2) : muatTransaksi())}
-                  disabled={langkah === 1 ? !asal : !tujuan || memuat}
-                  className="flex items-center gap-1.5"
-                >
-                  {memuat ? t("common.loading") : t("gabungAnggota.next")}
-                  {!memuat && <ArrowRight className="h-4 w-4" />}
-                </Button>
-              ) : (
-                <Button
-                  onClick={simpan}
-                  disabled={menyimpan || jumlahRincian === 0}
-                  className="flex items-center gap-1.5"
-                >
-                  <Merge className="h-4 w-4" />
-                  {menyimpan ? t("common.saving") : t("gabungAnggota.merge")}
-                </Button>
-              )}
-            </div>
+          <div className="flex justify-end">
+            <Button variant="secondary" onClick={tutup} disabled={menyimpan}>
+              {t("common.close")}
+            </Button>
           </div>
         }
       >
@@ -328,12 +451,28 @@ export default function GabungAnggotaModal({ open, onClose, onSuccess }: Props) 
               ) : (
                 <>
                   {ringkasan.conflict_count > 0 && (
-                    <p className="mb-3 flex items-start gap-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-                      <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
-                      {t("gabungAnggota.conflictWarning", {
-                        count: String(ringkasan.conflict_count),
-                      })}
-                    </p>
+                    <div className="mb-3 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                      <p className="flex items-start gap-2">
+                        <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+                        {t("gabungAnggota.conflictWarning", {
+                          count: String(ringkasan.conflict_count),
+                        })}
+                      </p>
+
+                      {/* Jalan keluarnya ditawarkan di sini, tepat di bawah
+                          penjelasan bentroknya — bukan sebagai pilihan lepas di
+                          tempat lain yang harus dicari sendiri. Sengaja mati
+                          secara bawaan: mencentangnya MENGHAPUS (lunak) rincian
+                          milik anggota asal. */}
+                      <label className="mt-2 flex cursor-pointer items-start gap-2 border-t border-amber-300/70 pt-2 font-medium">
+                        <Checkbox
+                          checked={selesaikanBentrok}
+                          onChange={(e) => setSelesaikanBentrok(e.target.checked)}
+                          className="mt-0.5"
+                        />
+                        {t("gabungAnggota.resolveConflicts")}
+                      </label>
+                    </div>
                   )}
 
                   <label className="mb-2 flex cursor-pointer items-center gap-2 border-b border-gray-100 pb-2 text-sm font-medium text-gray-700">
@@ -351,7 +490,7 @@ export default function GabungAnggotaModal({ open, onClose, onSuccess }: Props) 
                       <li key={kunci(g)}>
                         <label
                           className={`flex cursor-pointer items-center gap-3 rounded-lg border px-3 py-2 transition-colors ${
-                            g.can_merge
+                            bolehPilih(g)
                               ? terpilih.has(kunci(g))
                                 ? "border-[#075489]/40 bg-[#075489]/5"
                                 : "border-gray-200 hover:bg-gray-50"
@@ -361,7 +500,7 @@ export default function GabungAnggotaModal({ open, onClose, onSuccess }: Props) 
                           <Checkbox
                             checked={terpilih.has(kunci(g))}
                             onChange={() => togglePilih(g)}
-                            disabled={!g.can_merge}
+                            disabled={!bolehPilih(g)}
                           />
 
                           <span className="min-w-0 flex-1">
@@ -415,6 +554,134 @@ export default function GabungAnggotaModal({ open, onClose, onSuccess }: Props) 
               )}
             </Langkah>
           )}
+
+          {/* Tombol wizard DI SINI, bukan di kaki modal. Di kaki, ia duduk di
+              bawah tabel riwayat dan terbaca seolah tombol untuk tabel itu —
+              "Lanjut" di bawah daftar riwayat tidak jelas melanjutkan apa. */}
+          <div className="flex items-center justify-between gap-2 border-t border-gray-100 pt-4">
+            <span className="text-xs text-gray-400">
+              {t("gabungAnggota.step", { step: String(langkah), total: "3" })}
+            </span>
+
+            <div className="flex gap-2">
+              {langkah > 1 && (
+                <Button
+                  variant="secondary"
+                  onClick={() => setLangkah((s) => (s === 3 ? 2 : 1))}
+                  disabled={menyimpan}
+                  className="flex items-center gap-1.5"
+                >
+                  <ArrowLeft className="h-4 w-4" />
+                  {t("common.back")}
+                </Button>
+              )}
+
+              {langkah < 3 ? (
+                <Button
+                  onClick={() => (langkah === 1 ? setLangkah(2) : muatTransaksi())}
+                  disabled={langkah === 1 ? !asal : !tujuan || memuat}
+                  className="flex items-center gap-1.5"
+                >
+                  {memuat ? t("common.loading") : t("gabungAnggota.next")}
+                  {!memuat && <ArrowRight className="h-4 w-4" />}
+                </Button>
+              ) : (
+                <Button
+                  onClick={simpan}
+                  disabled={menyimpan || jumlahRincian === 0}
+                  className="flex items-center gap-1.5"
+                >
+                  <Combine className="h-4 w-4" />
+                  {menyimpan ? t("common.saving") : t("gabungAnggota.merge")}
+                </Button>
+              )}
+            </div>
+          </div>
+
+          {/* ── Riwayat penggabungan ────────────────────────────────────────
+              Ditaruh DI DALAM modal yang sama, di bawah wizard: pertanyaan
+              "anggota ini dulu digabungkan ke mana" hampir selalu muncul tepat
+              saat hendak menggabungkan yang lain, dan memindahkannya ke halaman
+              terpisah berarti pekerjaan yang sedang berjalan harus ditinggalkan
+              dulu. */}
+          <div className="border-t border-gray-100 pt-5">
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+              <div className="min-w-0">
+                <h3 className="text-sm font-semibold text-gray-800">
+                  {t("gabungAnggota.historyTitle")}
+                </h3>
+                <p className="mt-0.5 text-xs text-gray-500">{t("gabungAnggota.historySub")}</p>
+              </div>
+
+              {/* Pencarian pakai tombol, bukan live search — aturan komponen
+                  repo ini. Enter juga men-submit karena berupa <form>.
+                  Tanggal langsung menyaring saat diubah: ia bukan ketikan yang
+                  perlu diselesaikan dulu, jadi menunggu tombol malah membingungkan. */}
+              <form onSubmit={cariRiwayat} className="flex w-full flex-wrap items-center gap-2">
+                <Input
+                  type="date"
+                  value={rentang.from}
+                  max={rentang.to || undefined}
+                  onChange={(e) => {
+                    setRentang((r) => ({ ...r, from: e.target.value }));
+                    setHalaman(1);
+                  }}
+                  className="w-full sm:w-36"
+                  aria-label={t("common.dateFrom")}
+                />
+                <Input
+                  type="date"
+                  value={rentang.to}
+                  min={rentang.from || undefined}
+                  onChange={(e) => {
+                    setRentang((r) => ({ ...r, to: e.target.value }));
+                    setHalaman(1);
+                  }}
+                  className="w-full sm:w-36"
+                  aria-label={t("common.dateTo")}
+                />
+
+                <div className="relative min-w-40 flex-1">
+                  <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+                  <Input
+                    value={cariInput}
+                    onChange={(e) => setCariInput(e.target.value)}
+                    placeholder={t("gabungAnggota.historySearch")}
+                    className="pl-9"
+                  />
+                </div>
+
+                {/* Warna merek, mengikuti pola tombol Cari di seluruh halaman
+                    daftar repo ini — bukan varian bawaan yang gelap. */}
+                <Button type="submit" className="shrink-0 bg-[#075489] text-white hover:bg-[#075489]/90">
+                  {t("common.search")}
+                </Button>
+              </form>
+            </div>
+
+            {memuatRiwayat ? (
+              <div className="py-10 text-center text-sm text-gray-400">{t("common.loading")}</div>
+            ) : (
+              <>
+                <DataTable
+                  columns={kolomRiwayat}
+                  data={riwayat?.data ?? []}
+                  hideRowNumber
+                  emptyMessage={t("gabungAnggota.historyEmpty")}
+                />
+
+                {riwayat && (
+                  <Pagination
+                    currentPage={riwayat.current_page}
+                    totalPages={riwayat.last_page}
+                    totalItems={riwayat.total}
+                    itemsPerPage={riwayat.per_page}
+                    onPageChange={setHalaman}
+                  />
+                )}
+              </>
+            )}
+          </div>
         </div>
       </Modal>
 

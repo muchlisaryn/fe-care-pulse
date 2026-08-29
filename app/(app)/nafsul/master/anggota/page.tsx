@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { Merge, User, Users } from "lucide-react";
+import { Combine, User, Users } from "lucide-react";
 import { api, ApiError } from "@/lib/nafsul/api";
 import { Button } from "@/components/atoms/Button";
 import { PageHeader } from "@/components/molecules/PageHeader";
@@ -72,7 +72,7 @@ export default function AnggotaListPage() {
               onClick={() => setGabungTerbuka(true)}
               className="flex items-center gap-1.5"
             >
-              <Merge className="h-4 w-4" />
+              <Combine className="h-4 w-4" />
               {t("gabungAnggota.title")}
             </Button>
 

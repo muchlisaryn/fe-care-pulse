@@ -581,6 +581,20 @@ function TransaksiBaruForm() {
   const jenisTerkunci = daftar.length > 0
 
   /**
+   * Ketua kelompok juga tidak bisa diganti begitu ada rincian.
+   *
+   * Potongan & jasa ketua di header dihitung untuk SATU ketua, dan rincian yang
+   * sudah masuk dibuat dari daftar anggota milik ketua itu. Kalau ketuanya masih
+   * bisa ditukar setelahnya, kuitansinya jadi memuat anggota dari kelompok lain
+   * sementara komisinya tetap tercatat atas nama ketua yang terakhir dipilih —
+   * dan tidak ada satu pun angka di layar yang menunjukkan kejanggalan itu.
+   *
+   * Dropdown-nya dimatikan, bukan disembunyikan: ketua yang sedang berlaku
+   * tetap harus terbaca sepanjang pengisian.
+   */
+  const ketuaTerkunci = daftar.length > 0
+
+  /**
    * Tarif terpilih tidak berperiode → isian jumlah bulan disembunyikan dan
    * `payment_period` yang dikirim ke server bernilai null.
    */
@@ -750,7 +764,13 @@ function TransaksiBaruForm() {
                 toOption={(k) => ({ value: k.noketua, label: k.nama })}
                 placeholder={t("nafsulTransaksi.selectGroupLeader")}
                 labelTerpilih={ketua.nama}
+                disabled={ketuaTerkunci}
               />
+              {ketuaTerkunci && (
+                // Alasannya disebut, bukan cuma dimatikan: kolom yang mati tanpa
+                // keterangan terbaca sebagai kerusakan, bukan aturan.
+                <p className="text-xs text-slate-400">{t("nafsulTransaksi.leaderLocked")}</p>
+              )}
             </div>
           )}
 

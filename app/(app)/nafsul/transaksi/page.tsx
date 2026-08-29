@@ -221,6 +221,18 @@ export default function NafsulTransaksiPage() {
       ),
     },
     {
+      header: t("nafsulTransaksi.colName"),
+      cell: (row) =>
+        // Kuitansi pribadi TIDAK menampilkan nama ketua penampungnya — bagi
+        // petugas, setoran perorangan memang tidak punya ketua kelompok, dan
+        // menuliskan nama penampung di sini hanya menyesatkan.
+        row.transaction_type === "pribadi" ? (
+          <span className="text-slate-500">{t("nafsulTransaksi.personal")}</span>
+        ) : (
+          row.group_leader_name || <span className="text-xs text-gray-400">—</span>
+        ),
+    },
+    {
       header: t("nafsulTransaksi.colType"),
       cell: (row) => (
         <span
