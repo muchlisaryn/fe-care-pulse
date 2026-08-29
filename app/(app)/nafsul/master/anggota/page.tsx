@@ -2,12 +2,13 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { User, Users } from "lucide-react";
+import { Merge, User, Users } from "lucide-react";
 import { api, ApiError } from "@/lib/nafsul/api";
 import { Button } from "@/components/atoms/Button";
 import { PageHeader } from "@/components/molecules/PageHeader";
 import { StatCard } from "@/components/molecules/StatCard";
 import DaftarAnggota, { type TipeAnggota } from "@/components/nafsul/DaftarAnggota";
+import GabungAnggotaModal from "@/components/nafsul/GabungAnggotaModal";
 import { localeOf, useLanguage } from "@/lib/i18n";
 
 /** Jumlah anggota per tipe — dihitung server dengan COUNT, bukan dari isi daftar. */
@@ -27,6 +28,15 @@ export default function AnggotaListPage() {
   const { t, lang } = useLanguage();
   const [statistik, setStatistik] = useState<Statistik | null>(null);
   const [errorStatistik, setErrorStatistik] = useState<string | null>(null);
+  const [gabungTerbuka, setGabungTerbuka] = useState(false);
+  /**
+   * Dinaikkan setelah penggabungan berhasil.
+   *
+   * Dipakai sebagai `key` daftar & pemicu pemuatan ulang statistik: anggota
+   * asal bisa saja baru dinonaktifkan, dan daftar yang masih menampilkannya
+   * akan membuka halaman anggota yang sudah tidak ada.
+   */
+  const [versi, setVersi] = useState(0);
 
   useEffect(() => {
     let aktif = true;
@@ -53,9 +63,23 @@ export default function AnggotaListPage() {
         title={t("nafsulAnggota.title")}
         subtitle={t("nafsulAnggota.subtitle")}
         action={
-          <Button asChild className="bg-[#075489] hover:bg-[#075489]/90 text-white">
-            <Link href="/nafsul/master/anggota/baru">{t("nafsulAnggota.addMember")}</Link>
-          </Button>
+          <div className="flex flex-wrap gap-2">
+            {/* Gabung Anggota berdampingan dengan Tambah Anggota, tapi bergaya
+                sekunder: ia dipakai sesekali untuk membereskan data ganda,
+                bukan pekerjaan harian seperti mendaftarkan anggota baru. */}
+            <Button
+              variant="outline"
+              onClick={() => setGabungTerbuka(true)}
+              className="flex items-center gap-1.5"
+            >
+              <Merge className="h-4 w-4" />
+              {t("gabungAnggota.title")}
+            </Button>
+
+            <Button asChild className="bg-[#075489] hover:bg-[#075489]/90 text-white">
+              <Link href="/nafsul/master/anggota/baru">{t("nafsulAnggota.addMember")}</Link>
+            </Button>
+          </div>
         }
       />
 
@@ -84,7 +108,13 @@ export default function AnggotaListPage() {
         </div>
       )}
 
-      <DaftarAnggota />
+      <DaftarAnggota key={versi} />
+
+      <GabungAnggotaModal
+        open={gabungTerbuka}
+        onClose={() => setGabungTerbuka(false)}
+        onSuccess={() => setVersi((v) => v + 1)}
+      />
     </div>
   );
 }
