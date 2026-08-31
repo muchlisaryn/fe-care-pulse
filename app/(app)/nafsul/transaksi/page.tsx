@@ -11,7 +11,6 @@ import {
   LockOpen,
   Printer,
   Search,
-  Upload,
   Wallet,
 } from "lucide-react"
 import { Button } from "@/components/atoms/Button"
@@ -22,7 +21,6 @@ import { DataTable, type Column } from "@/components/molecules/DataTable"
 import { ConfirmDialog } from "@/components/molecules/ConfirmDialog"
 import { ResultDialog } from "@/components/molecules/ResultDialog"
 import { Modal } from "@/components/molecules/Modal"
-import ImportTransaksiModal from "@/components/nafsul/ImportTransaksiModal"
 import { Pagination } from "@/components/molecules/Pagination"
 import { useAppDispatch, useAppSelector } from "@/lib/store/hooks"
 import {
@@ -39,11 +37,22 @@ import { api, apiBlob, ApiError } from "@/lib/nafsul/api"
 import { formatDate } from "@/lib/nafsul/format"
 import { localeOf, useLanguage } from "@/lib/i18n"
 
-/** Angka desimal dari API ("50000.00") → "Rp 50.000". */
-function rupiah(nilai: string | number): string {
+/**
+ * Sel rupiah pada tabel: "Rp" dipatok di kiri, angka di kanan (justify-between)
+ * agar antar-baris "Rp"-nya sejajar di kiri dan digitnya sejajar di kanan —
+ * tidak ikut bergeser saat panjang angkanya berbeda.
+ */
+function SelRupiah({ nilai, className }: { nilai: string | number; className?: string }) {
   const angka = Number(nilai)
-  if (!Number.isFinite(angka)) return "—"
-  return `Rp ${angka.toLocaleString("id-ID", { maximumFractionDigits: 0 })}`
+  if (!Number.isFinite(angka)) {
+    return <span className={`tabular-nums ${className ?? ""}`}>—</span>
+  }
+  return (
+    <span className={`flex justify-between gap-3 tabular-nums ${className ?? ""}`}>
+      <span>Rp</span>
+      <span>{angka.toLocaleString("id-ID", { maximumFractionDigits: 0 })}</span>
+    </span>
+  )
 }
 
 export default function NafsulTransaksiPage() {
@@ -74,7 +83,6 @@ export default function NafsulTransaksiPage() {
   const [sampaiInput, setSampaiInput] = useState(dateTo)
 
   const [galat, setGalat] = useState<string | null>(null)
-  const [imporTerbuka, setImporTerbuka] = useState(false)
 
   const [deleteTarget, setDeleteTarget] = useState<TransaksiHeader | null>(null)
   const [deletingUuid, setDeletingUuid] = useState<string | null>(null)
@@ -264,17 +272,13 @@ export default function NafsulTransaksiPage() {
     {
       header: t("nafsulTransaksi.colTotal"),
       className: "text-right",
-      cell: (row) => (
-        <span className="tabular-nums text-gray-700">{rupiah(row.total)}</span>
-      ),
+      cell: (row) => <SelRupiah nilai={row.total} className="text-gray-700" />,
     },
     {
       header: t("nafsulTransaksi.colPayment"),
       className: "text-right",
       cell: (row) => (
-        <span className="font-semibold tabular-nums text-gray-900">
-          {rupiah(row.payment)}
-        </span>
+        <SelRupiah nilai={row.payment} className="font-semibold text-gray-900" />
       ),
     },
     {
@@ -312,10 +316,6 @@ export default function NafsulTransaksiPage() {
           </div>
         </div>
         <div className="flex flex-wrap gap-2">
-          <Button variant="outline" onClick={() => setImporTerbuka(true)}>
-            <Upload className="mr-2 h-4 w-4" />
-            {t("nafsulMaster.importExcel")}
-          </Button>
           <Link href="/nafsul/transaksi/baru">
             <Button className="bg-[#075489] hover:bg-[#075489]/90 text-white">
               {t("nafsulTransaksi.add")}
@@ -323,14 +323,6 @@ export default function NafsulTransaksiPage() {
           </Link>
         </div>
       </div>
-
-      <ImportTransaksiModal
-        open={imporTerbuka}
-        onClose={() => setImporTerbuka(false)}
-        // Daftar di-cache Redux; tanpa ini kuitansi hasil impor tidak muncul
-        // sampai halaman dibuka ulang.
-        onSelesai={() => dispatch(invalidateTransaksi())}
-      />
 
       <Card className="p-0">
         <div className="border-b border-gray-100 px-5 py-4">
@@ -432,6 +424,7 @@ export default function NafsulTransaksiPage() {
         ) : (
           <DataTable
             rowNumberOffset={(page - 1) * PER_PAGE}
+            actionsAlign="center"
             columns={columns}
             data={items}
             extraActions={[
