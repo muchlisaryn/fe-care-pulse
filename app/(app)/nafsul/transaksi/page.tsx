@@ -1,7 +1,7 @@
-"use client"
+"use client";
 
-import { useEffect, useState } from "react"
-import Link from "next/link"
+import { useEffect, useState } from "react";
+import Link from "next/link";
 import {
   BadgeCheck,
   ChevronRight,
@@ -15,19 +15,19 @@ import {
   User,
   Users,
   Wallet,
-} from "lucide-react"
-import { Button } from "@/components/atoms/Button"
-import { Input } from "@/components/atoms/Input"
-import { Label } from "@/components/atoms/Label"
-import { Select } from "@/components/atoms/Select"
-import { Card } from "@/components/molecules/Card"
-import { DataTable, type Column } from "@/components/molecules/DataTable"
-import { ConfirmDialog } from "@/components/molecules/ConfirmDialog"
-import { ResultDialog } from "@/components/molecules/ResultDialog"
-import { Modal } from "@/components/molecules/Modal"
-import { Pagination } from "@/components/molecules/Pagination"
-import ImportTransaksiModal from "@/components/nafsul/ImportTransaksiModal"
-import { useAppDispatch, useAppSelector } from "@/lib/store/hooks"
+} from "lucide-react";
+import { Button } from "@/components/atoms/Button";
+import { Input } from "@/components/atoms/Input";
+import { Label } from "@/components/atoms/Label";
+import { Select } from "@/components/atoms/Select";
+import { Card } from "@/components/molecules/Card";
+import { DataTable, type Column } from "@/components/molecules/DataTable";
+import { ConfirmDialog } from "@/components/molecules/ConfirmDialog";
+import { ResultDialog } from "@/components/molecules/ResultDialog";
+import { Modal } from "@/components/molecules/Modal";
+import { Pagination } from "@/components/molecules/Pagination";
+import ImportTransaksiModal from "@/components/nafsul/ImportTransaksiModal";
+import { useAppDispatch, useAppSelector } from "@/lib/store/hooks";
 import {
   fetchTransaksi,
   setTransaksiSearch,
@@ -37,34 +37,42 @@ import {
   invalidateTransaksi,
   PER_PAGE,
   type TransaksiHeader,
-} from "@/lib/store/slices/nafsulTransaksiSlice"
-import { api, apiBlob, ApiError } from "@/lib/nafsul/api"
-import { formatDate } from "@/lib/nafsul/format"
-import { localeOf, useLanguage } from "@/lib/i18n"
+} from "@/lib/store/slices/nafsulTransaksiSlice";
+import { api, apiBlob, ApiError } from "@/lib/nafsul/api";
+import { formatDate } from "@/lib/nafsul/format";
+import { localeOf, useLanguage } from "@/lib/i18n";
 
 /**
  * Sel rupiah pada tabel: "Rp" dipatok di kiri, angka di kanan (justify-between)
  * agar antar-baris "Rp"-nya sejajar di kiri dan digitnya sejajar di kanan —
  * tidak ikut bergeser saat panjang angkanya berbeda.
  */
-function SelRupiah({ nilai, className }: { nilai: string | number; className?: string }) {
-  const angka = Number(nilai)
+function SelRupiah({
+  nilai,
+  className,
+}: {
+  nilai: string | number;
+  className?: string;
+}) {
+  const angka = Number(nilai);
   if (!Number.isFinite(angka)) {
-    return <span className={`tabular-nums ${className ?? ""}`}>—</span>
+    return <span className={`tabular-nums ${className ?? ""}`}>—</span>;
   }
   return (
-    <span className={`flex justify-between gap-3 tabular-nums ${className ?? ""}`}>
+    <span
+      className={`flex justify-between gap-3 tabular-nums ${className ?? ""}`}
+    >
       <span>Rp</span>
       <span>{angka.toLocaleString("id-ID", { maximumFractionDigits: 0 })}</span>
     </span>
-  )
+  );
 }
 
 export default function NafsulTransaksiPage() {
   // `lang` ikut diambil supaya nama bulan pada kolom tanggal mengikuti
   // bahasa yang sedang dipilih, bukan dipatok ke Indonesia.
-  const { t, lang } = useLanguage()
-  const dispatch = useAppDispatch()
+  const { t, lang } = useLanguage();
+  const dispatch = useAppDispatch();
   const {
     items,
     totalItems,
@@ -77,60 +85,64 @@ export default function NafsulTransaksiPage() {
     loading,
     loaded,
     dirty,
-  } = useAppSelector((s) => s.nafsulTransaksi)
+  } = useAppSelector((s) => s.nafsulTransaksi);
 
-  const [searchInput, setSearchInput] = useState(search)
-  const [metodeInput, setMetodeInput] = useState(paymentMethod)
+  const [searchInput, setSearchInput] = useState(search);
+  const [metodeInput, setMetodeInput] = useState(paymentMethod);
   // Draft rentang tanggal — baru masuk Redux saat tombol Cari ditekan, sama
   // seperti kotak pencarian di sebelahnya.
-  const [dariInput, setDariInput] = useState(dateFrom)
-  const [sampaiInput, setSampaiInput] = useState(dateTo)
+  const [dariInput, setDariInput] = useState(dateFrom);
+  const [sampaiInput, setSampaiInput] = useState(dateTo);
 
-  const [galat, setGalat] = useState<string | null>(null)
-  const [imporTerbuka, setImporTerbuka] = useState(false)
+  const [galat, setGalat] = useState<string | null>(null);
+  const [imporTerbuka, setImporTerbuka] = useState(false);
 
   // Pilihan jenis kuitansi sebelum masuk ke formnya. Kelompok dan pribadi kini
   // dua halaman terpisah, jadi tombol Tambah harus menanyakan yang mana dulu.
-  const [pilihJenis, setPilihJenis] = useState(false)
+  const [pilihJenis, setPilihJenis] = useState(false);
 
-  const [deleteTarget, setDeleteTarget] = useState<TransaksiHeader | null>(null)
-  const [deletingUuid, setDeletingUuid] = useState<string | null>(null)
+  const [deleteTarget, setDeleteTarget] = useState<TransaksiHeader | null>(
+    null,
+  );
+  const [deletingUuid, setDeletingUuid] = useState<string | null>(null);
 
-  const [validasiTarget, setValidasiTarget] = useState<TransaksiHeader | null>(null)
-  const [validatingUuid, setValidatingUuid] = useState<string | null>(null)
-  const [pesanSukses, setPesanSukses] = useState<string | null>(null)
+  const [validasiTarget, setValidasiTarget] = useState<TransaksiHeader | null>(
+    null,
+  );
+  const [validatingUuid, setValidatingUuid] = useState<string | null>(null);
+  const [pesanSukses, setPesanSukses] = useState<string | null>(null);
 
   // Pratinjau biling. `bilingUrl` adalah object URL blob — wajib dibebaskan
   // saat modal ditutup dan saat komponen dilepas, kalau tidak blob PDF-nya
   // menetap di memori tab sampai halaman ditinggalkan.
-  const [bilingRow, setBilingRow] = useState<TransaksiHeader | null>(null)
-  const [bilingUrl, setBilingUrl] = useState<string | null>(null)
-  const [bilingLoading, setBilingLoading] = useState(false)
-  const [bilingError, setBilingError] = useState<string | null>(null)
+  const [bilingRow, setBilingRow] = useState<TransaksiHeader | null>(null);
+  const [bilingUrl, setBilingUrl] = useState<string | null>(null);
+  const [bilingLoading, setBilingLoading] = useState(false);
+  const [bilingError, setBilingError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (loaded && !dirty) return
-    dispatch(fetchTransaksi())
-  }, [loaded, dirty, dispatch])
+    if (loaded && !dirty) return;
+    dispatch(fetchTransaksi());
+  }, [loaded, dirty, dispatch]);
 
   function handleSearch(e: React.FormEvent) {
-    e.preventDefault()
-    dispatch(setTransaksiSearch(searchInput))
-    dispatch(setTransaksiPaymentMethod(metodeInput))
-    dispatch(setTransaksiDateRange({ from: dariInput, to: sampaiInput }))
+    e.preventDefault();
+    dispatch(setTransaksiSearch(searchInput));
+    dispatch(setTransaksiPaymentMethod(metodeInput));
+    dispatch(setTransaksiDateRange({ from: dariInput, to: sampaiInput }));
   }
 
   async function handleDelete() {
-    if (!deleteTarget || deletingUuid !== null) return
-    setDeletingUuid(deleteTarget.uuid)
+    if (!deleteTarget || deletingUuid !== null) return;
+    setDeletingUuid(deleteTarget.uuid);
     try {
-      await api(`/transaksi/header/${deleteTarget.uuid}`, { method: "DELETE" })
-      dispatch(invalidateTransaksi())
-      setDeleteTarget(null)
+      await api(`/transaksi/header/${deleteTarget.uuid}`, { method: "DELETE" });
+      dispatch(invalidateTransaksi());
+      setDeleteTarget(null);
     } catch (e) {
-      setGalat((e as ApiError).message ?? t("nafsulTransaksi.saveFailed"))
+      setGalat((e as ApiError).message ?? t("nafsulTransaksi.saveFailed"));
     } finally {
-      setDeletingUuid(null)
+      setDeletingUuid(null);
     }
   }
 
@@ -145,21 +157,21 @@ export default function NafsulTransaksiPage() {
    * berubah.
    */
   async function handleValidasi() {
-    if (!validasiTarget || validatingUuid !== null) return
-    const membuka = validasiTarget.validation_at !== null
-    setValidatingUuid(validasiTarget.uuid)
+    if (!validasiTarget || validatingUuid !== null) return;
+    const membuka = validasiTarget.validation_at !== null;
+    setValidatingUuid(validasiTarget.uuid);
     try {
       const hasil = await api<{ message: string }>(
         `/transaksi/header/${validasiTarget.uuid}/${membuka ? "batal-validasi" : "validasi"}`,
-        { method: "POST" }
-      )
-      dispatch(invalidateTransaksi())
-      setValidasiTarget(null)
-      setPesanSukses(hasil.message)
+        { method: "POST" },
+      );
+      dispatch(invalidateTransaksi());
+      setValidasiTarget(null);
+      setPesanSukses(hasil.message);
     } catch (e) {
-      setGalat((e as ApiError).message ?? t("nafsulTransaksi.saveFailed"))
+      setGalat((e as ApiError).message ?? t("nafsulTransaksi.saveFailed"));
     } finally {
-      setValidatingUuid(null)
+      setValidatingUuid(null);
     }
   }
 
@@ -168,47 +180,49 @@ export default function NafsulTransaksiPage() {
    * terkirim), lalu tampilkan lewat object URL di iframe.
    */
   async function bukaBiling(row: TransaksiHeader) {
-    setBilingRow(row)
-    setBilingError(null)
-    setBilingLoading(true)
+    setBilingRow(row);
+    setBilingError(null);
+    setBilingLoading(true);
     setBilingUrl((lama) => {
-      if (lama) URL.revokeObjectURL(lama)
-      return null
-    })
+      if (lama) URL.revokeObjectURL(lama);
+      return null;
+    });
     try {
-      const { blob } = await apiBlob(`/transaksi/header/${row.uuid}/biling`)
-      setBilingUrl(URL.createObjectURL(blob))
+      const { blob } = await apiBlob(`/transaksi/header/${row.uuid}/biling`);
+      setBilingUrl(URL.createObjectURL(blob));
     } catch (e) {
-      setBilingError((e as ApiError).message ?? t("nafsulTransaksi.billingFailed"))
+      setBilingError(
+        (e as ApiError).message ?? t("nafsulTransaksi.billingFailed"),
+      );
     } finally {
-      setBilingLoading(false)
+      setBilingLoading(false);
     }
   }
 
   function tutupBiling() {
-    setBilingRow(null)
+    setBilingRow(null);
     setBilingUrl((lama) => {
-      if (lama) URL.revokeObjectURL(lama)
-      return null
-    })
-    setBilingError(null)
+      if (lama) URL.revokeObjectURL(lama);
+      return null;
+    });
+    setBilingError(null);
   }
 
   function unduhBiling() {
-    if (!bilingUrl || !bilingRow) return
-    const a = document.createElement("a")
-    a.href = bilingUrl
-    a.download = `biling-${bilingRow.transaction_number}.pdf`
-    a.click()
+    if (!bilingUrl || !bilingRow) return;
+    const a = document.createElement("a");
+    a.href = bilingUrl;
+    a.download = `biling-${bilingRow.transaction_number}.pdf`;
+    a.click();
   }
 
   // Bebaskan object URL saat komponen dilepas — tutupBiling() hanya terpanggil
   // bila penggunanya benar-benar menutup modalnya.
   useEffect(() => {
     return () => {
-      if (bilingUrl) URL.revokeObjectURL(bilingUrl)
-    }
-  }, [bilingUrl])
+      if (bilingUrl) URL.revokeObjectURL(bilingUrl);
+    };
+  }, [bilingUrl]);
 
   const columns: Column<TransaksiHeader>[] = [
     {
@@ -220,7 +234,9 @@ export default function NafsulTransaksiPage() {
       className: "whitespace-nowrap",
       cell: (row) =>
         row.date ? (
-          <span className="text-gray-700">{formatDate(row.date, localeOf(lang))}</span>
+          <span className="text-gray-700">
+            {formatDate(row.date, localeOf(lang))}
+          </span>
         ) : (
           <span className="text-xs text-gray-400">—</span>
         ),
@@ -269,10 +285,14 @@ export default function NafsulTransaksiPage() {
               ) : null}
             </span>
           ) : (
-            <span className="text-slate-500">{t("nafsulTransaksi.personal")}</span>
+            <span className="text-slate-500">
+              {t("nafsulTransaksi.personal")}
+            </span>
           )
         ) : (
-          row.group_leader_name || <span className="text-xs text-gray-400">—</span>
+          row.group_leader_name || (
+            <span className="text-xs text-gray-400">—</span>
+          )
         ),
     },
     {
@@ -292,24 +312,21 @@ export default function NafsulTransaksiPage() {
     {
       header: t("nafsulTransaksi.colTotal"),
       className: "text-right",
-      // Total DIKURANGI potongan anggota (`member_deduction`, rupiah).
-      //
-      // Hanya tampilan: kolom `total` di database tetap menyimpan jumlah
-      // rincian tanpa potongan, karena `balance` di server sudah menguranginya
-      // sekali — kalau potongannya ikut disimpan di kolom itu, ia terhitung
-      // dua kali.
-      cell: (row) => (
-        <SelRupiah
-          nilai={Number(row.total) - Number(row.member_deduction)}
-          className="text-gray-700"
-        />
-      ),
+      // `total` ditampilkan apa adanya — TIDAK dikurangi potongan anggota lagi
+      // di sini. Kuitansi hasil impor sudah menyimpan nilai bersihnya
+      // (`payment − member_deduction`), jadi mengurangi sekali lagi di layar
+      // membuat potongannya terhitung dua kali. Potongan tetap terbaca di
+      // Sisa/`balance`, yang dihitung server.
+      cell: (row) => <SelRupiah nilai={row.total} className="text-gray-700" />,
     },
     {
       header: t("nafsulTransaksi.colPayment"),
       className: "text-right",
       cell: (row) => (
-        <SelRupiah nilai={row.payment} className="font-semibold text-gray-900" />
+        <SelRupiah
+          nilai={row.payment}
+          className="font-semibold text-gray-900"
+        />
       ),
     },
     {
@@ -328,7 +345,7 @@ export default function NafsulTransaksiPage() {
         </span>
       ),
     },
-  ]
+  ];
 
   return (
     <div className="space-y-6">
@@ -412,13 +429,19 @@ export default function NafsulTransaksiPage() {
               >
                 <option value="">{t("nafsulTransaksi.allMethods")}</option>
                 <option value="cash">{t("nafsulTransaksi.method_cash")}</option>
-                <option value="transfer">{t("nafsulTransaksi.method_transfer")}</option>
-                <option value="other">{t("nafsulTransaksi.method_other")}</option>
+                <option value="transfer">
+                  {t("nafsulTransaksi.method_transfer")}
+                </option>
+                <option value="other">
+                  {t("nafsulTransaksi.method_other")}
+                </option>
               </Select>
             </div>
 
             <div className="space-y-1.5">
-              <Label htmlFor="transaksi-dari">{t("nafsulTransaksi.dateFrom")}</Label>
+              <Label htmlFor="transaksi-dari">
+                {t("nafsulTransaksi.dateFrom")}
+              </Label>
               <Input
                 id="transaksi-dari"
                 type="date"
@@ -432,7 +455,9 @@ export default function NafsulTransaksiPage() {
               />
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="transaksi-sampai">{t("nafsulTransaksi.dateTo")}</Label>
+              <Label htmlFor="transaksi-sampai">
+                {t("nafsulTransaksi.dateTo")}
+              </Label>
               <Input
                 id="transaksi-sampai"
                 type="date"
@@ -527,7 +552,9 @@ export default function NafsulTransaksiPage() {
         onClose={tutupBiling}
         title={
           bilingRow
-            ? t("nafsulTransaksi.billingTitle", { number: bilingRow.transaction_number })
+            ? t("nafsulTransaksi.billingTitle", {
+                number: bilingRow.transaction_number,
+              })
             : ""
         }
         size="lg"
@@ -542,7 +569,8 @@ export default function NafsulTransaksiPage() {
               disabled={!bilingUrl}
               className="bg-[#075489] hover:bg-[#075489]/90 text-white"
             >
-              <Download className="h-4 w-4" /> {t("nafsulTransaksi.billingDownload")}
+              <Download className="h-4 w-4" />{" "}
+              {t("nafsulTransaksi.billingDownload")}
             </Button>
           </>
         }
@@ -578,20 +606,18 @@ export default function NafsulTransaksiPage() {
         size="sm"
       >
         <div className="space-y-2.5">
-          {(
-            [
-              {
-                tipe: "kelompok" as const,
-                href: "/nafsul/transaksi/baru/kelompok",
-                icon: Users,
-              },
-              {
-                tipe: "pribadi" as const,
-                href: "/nafsul/transaksi/baru/pribadi",
-                icon: User,
-              },
-            ]
-          ).map(({ tipe, href, icon: Ikon }) => (
+          {[
+            {
+              tipe: "kelompok" as const,
+              href: "/nafsul/transaksi/baru/kelompok",
+              icon: Users,
+            },
+            {
+              tipe: "pribadi" as const,
+              href: "/nafsul/transaksi/baru/pribadi",
+              icon: User,
+            },
+          ].map(({ tipe, href, icon: Ikon }) => (
             <Link
               key={tipe}
               href={href}
@@ -637,10 +663,10 @@ export default function NafsulTransaksiPage() {
         title={
           validasiTarget?.validation_at
             ? t("nafsulTransaksi.unvalidateTitle")
-            // Nomornya pindah ke judul. Keterangannya kini pertanyaan polos
-            // tanpa nomor, dan dialog konfirmasi untuk tindakan yang mengunci
-            // kuitansi tidak boleh menyembunyikan kuitansi MANA yang dikunci.
-            : t("nafsulTransaksi.validateTitle", {
+            : // Nomornya pindah ke judul. Keterangannya kini pertanyaan polos
+              // tanpa nomor, dan dialog konfirmasi untuk tindakan yang mengunci
+              // kuitansi tidak boleh menyembunyikan kuitansi MANA yang dikunci.
+              t("nafsulTransaksi.validateTitle", {
                 number: validasiTarget?.transaction_number ?? "",
               })
         }
@@ -669,7 +695,6 @@ export default function NafsulTransaksiPage() {
         variant="error"
         description={galat ?? ""}
       />
-
     </div>
-  )
+  );
 }
