@@ -294,15 +294,16 @@ export default function NafsulTransaksiPage() {
     {
       header: t("nafsulTransaksi.colTotal"),
       className: "text-right",
-      // Total rincian DIKURANGI potongan anggota — angka yang benar-benar
-      // ditagihkan, dan yang selisihnya dengan kolom Pembayaran sama dengan
-      // `balance` dari server (`total − member_deduction − group_leader_deduction
-      // − payment`). Kolom `total` di database sengaja tetap menyimpan jumlah
-      // rincian apa adanya: `balance` menguranginya sekali lagi di sana, jadi
-      // potongannya tidak boleh ikut disimpan di kolom itu.
+      // Total rincian DIKURANGI potongan anggota apa adanya
+      // (`member_deduction_input`, angka yang diketik petugas).
+      //
+      // Hanya tampilan: kolom `total` di database tetap menyimpan jumlah
+      // rincian tanpa potongan, karena `balance` di server sudah menguranginya
+      // sekali — kalau potongannya ikut disimpan di kolom itu, ia terhitung
+      // dua kali.
       cell: (row) => (
         <SelRupiah
-          nilai={Number(row.total) - Number(row.member_deduction)}
+          nilai={Number(row.total) - Number(row.member_deduction_input)}
           className="text-gray-700"
         />
       ),
