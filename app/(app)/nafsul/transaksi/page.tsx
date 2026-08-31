@@ -285,7 +285,7 @@ export default function NafsulTransaksiPage() {
       header: t("nafsulTransaksi.colMethod"),
       cell: (row) => (
         <span
-          className={`rounded-full px-2 py-0.5 text-xs font-medium ${
+          className={`inline-flex items-center whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-medium ${
             {
               cash: "bg-amber-50 text-amber-700",
               transfer: "bg-sky-50 text-sky-700",
