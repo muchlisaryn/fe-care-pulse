@@ -29,6 +29,7 @@ import {
   fetchTransaksi,
   setTransaksiSearch,
   setTransaksiPaymentMethod,
+  setTransaksiDateRange,
   setTransaksiPage,
   invalidateTransaksi,
   PER_PAGE,
@@ -58,6 +59,8 @@ export default function NafsulTransaksiPage() {
     page,
     search,
     paymentMethod,
+    dateFrom,
+    dateTo,
     loading,
     loaded,
     dirty,
@@ -65,6 +68,10 @@ export default function NafsulTransaksiPage() {
 
   const [searchInput, setSearchInput] = useState(search)
   const [metodeInput, setMetodeInput] = useState(paymentMethod)
+  // Draft rentang tanggal — baru masuk Redux saat tombol Cari ditekan, sama
+  // seperti kotak pencarian di sebelahnya.
+  const [dariInput, setDariInput] = useState(dateFrom)
+  const [sampaiInput, setSampaiInput] = useState(dateTo)
 
   const [galat, setGalat] = useState<string | null>(null)
   const [imporTerbuka, setImporTerbuka] = useState(false)
@@ -93,6 +100,14 @@ export default function NafsulTransaksiPage() {
     e.preventDefault()
     dispatch(setTransaksiSearch(searchInput))
     dispatch(setTransaksiPaymentMethod(metodeInput))
+    dispatch(setTransaksiDateRange({ from: dariInput, to: sampaiInput }))
+  }
+
+  /** Kosongkan rentang tanggal & langsung muat ulang tanpa menekan Cari. */
+  function bersihkanTanggal() {
+    setDariInput("")
+    setSampaiInput("")
+    dispatch(setTransaksiDateRange({ from: "", to: "" }))
   }
 
   async function handleDelete() {
@@ -307,33 +322,81 @@ export default function NafsulTransaksiPage() {
 
       <Card className="p-0">
         <div className="border-b border-gray-100 px-5 py-4">
-          <form onSubmit={handleSearch} className="flex flex-col gap-2 sm:flex-row">
-            <div className="relative flex-1">
-              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
-              <Input
-                placeholder={t("nafsulTransaksi.searchPlaceholder")}
-                value={searchInput}
-                onChange={(e) => setSearchInput(e.target.value)}
-                className="pl-9"
-              />
+          {/*
+            Dua baris, bukan satu deret memanjang: dengan rentang tanggal ikut
+            masuk, satu baris memaksa kotak pencarian menyusut sampai nomor
+            kuitansi yang diketik tidak lagi terlihat utuh.
+          */}
+          <form onSubmit={handleSearch} className="space-y-2">
+            <div className="flex flex-col gap-2 sm:flex-row">
+              <div className="relative flex-1">
+                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+                <Input
+                  placeholder={t("nafsulTransaksi.searchPlaceholder")}
+                  value={searchInput}
+                  onChange={(e) => setSearchInput(e.target.value)}
+                  className="pl-9"
+                />
+              </div>
+              <Select
+                aria-label={t("nafsulTransaksi.colMethod")}
+                value={metodeInput}
+                onChange={(e) => setMetodeInput(e.target.value)}
+                className="sm:w-44"
+              >
+                <option value="">{t("nafsulTransaksi.allMethods")}</option>
+                <option value="cash">{t("nafsulTransaksi.method_cash")}</option>
+                <option value="transfer">{t("nafsulTransaksi.method_transfer")}</option>
+                <option value="other">{t("nafsulTransaksi.method_other")}</option>
+              </Select>
             </div>
-            <Select
-              aria-label={t("nafsulTransaksi.colMethod")}
-              value={metodeInput}
-              onChange={(e) => setMetodeInput(e.target.value)}
-              className="sm:w-44"
-            >
-              <option value="">{t("nafsulTransaksi.allMethods")}</option>
-              <option value="cash">{t("nafsulTransaksi.method_cash")}</option>
-              <option value="transfer">{t("nafsulTransaksi.method_transfer")}</option>
-              <option value="other">{t("nafsulTransaksi.method_other")}</option>
-            </Select>
-            <Button
-              type="submit"
-              className="shrink-0 bg-[#075489] hover:bg-[#075489]/90 text-white"
-            >
-              {t("common.search")}
-            </Button>
+
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+              <span className="shrink-0 text-sm text-gray-500">
+                {t("nafsulTransaksi.dateRange")}
+              </span>
+              <Input
+                type="date"
+                aria-label={t("nafsulTransaksi.dateFrom")}
+                value={dariInput}
+                // Batas atas mengikuti isian "sampai": rentang terbalik tidak
+                // pernah punya hasil, dan lebih baik tidak bisa dipilih daripada
+                // menghasilkan tabel kosong yang tampak seperti data hilang.
+                max={sampaiInput || undefined}
+                onChange={(e) => setDariInput(e.target.value)}
+                className="sm:w-44"
+              />
+              <span className="hidden shrink-0 text-sm text-gray-400 sm:inline">
+                &ndash;
+              </span>
+              <Input
+                type="date"
+                aria-label={t("nafsulTransaksi.dateTo")}
+                value={sampaiInput}
+                min={dariInput || undefined}
+                onChange={(e) => setSampaiInput(e.target.value)}
+                className="sm:w-44"
+              />
+
+              {/* Muncul hanya saat ada yang bisa dibersihkan. */}
+              {(dariInput || sampaiInput) && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={bersihkanTanggal}
+                  className="shrink-0"
+                >
+                  {t("nafsulTransaksi.dateClear")}
+                </Button>
+              )}
+
+              <Button
+                type="submit"
+                className="shrink-0 bg-[#075489] hover:bg-[#075489]/90 text-white sm:ml-auto"
+              >
+                {t("common.search")}
+              </Button>
+            </div>
           </form>
         </div>
 

@@ -106,10 +106,10 @@ const KOLOM_KUITANSI: ImportColumn[] = [
  * Kolom audit (`created_by`, `updated_by`, dst) sengaja tidak ada di file:
  * server mengisinya sendiri dari user yang sedang login.
  *
- * `payment_period` mengikuti sifat tarifnya: wajib untuk tarif berulang, dan
- * DIABAIKAN untuk tarif sekali bayar — diisi atau tidak, yang tersimpan tetap
- * kosong, jadi file migrasi yang mencatat periode pada semua baris tidak perlu
- * dibersihkan dulu. `amount` boleh kosong — server
+ * `payment_period` mengikuti FILE, bukan klasifikasi tarif di master: diisi →
+ * tersimpan, dikosongkan → kosong. Satu tarif yang salah diklasifikasi di master
+ * karenanya tidak bisa lagi membuang periode seluruh barisnya diam-diam.
+ * `amount` boleh kosong — server
  * memakai harga tarifnya, sehingga petugas tidak perlu menyalin angka yang sama
  * ratusan kali.
  */
