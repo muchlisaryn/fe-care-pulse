@@ -59,8 +59,8 @@ type BarisForm = {
 type HeaderForm = {
   /** "YYYY-MM-DD" — tanggal uang diterima. */
   date: string
-  member_deduction_type: "amount" | "percent"
-  member_deduction_input: string
+  /** Potongan anggota, RUPIAH — satu-satunya bentuknya. */
+  member_deduction: string
   group_leader_fee_percent: string
   payment: string
   payment_method: "cash" | "transfer" | "other"
@@ -109,8 +109,7 @@ export default function TransaksiEditPage() {
         // Baris lama bisa belum punya tanggal; jatuhkan ke tanggal barisnya
         // dibuat supaya isiannya tidak kosong dan wajib diisi ulang manual.
         date: data.date ?? (data.created_at ?? "").slice(0, 10),
-        member_deduction_type: data.member_deduction_type,
-        member_deduction_input: String(Number(data.member_deduction_input)),
+        member_deduction: String(Number(data.member_deduction)),
         group_leader_fee_percent: String(Number(data.group_leader_fee_percent)),
         payment: String(Number(data.payment)),
         payment_method: data.payment_method,
@@ -146,10 +145,7 @@ export default function TransaksiEditPage() {
     (n, b) => n + Math.max(0, angka(b.amount) - angka(b.discount)),
     0,
   )
-  const potonganAnggota =
-    header?.member_deduction_type === "percent"
-      ? Math.round(((totalRincian * angka(header.member_deduction_input)) / 100) * 100) / 100
-      : Math.round(angka(header?.member_deduction_input ?? "0") * 100) / 100
+  const potonganAnggota = Math.round(angka(header?.member_deduction ?? "0") * 100) / 100
   const jasaKetua =
     Math.round(((totalRincian * angka(header?.group_leader_fee_percent ?? "0")) / 100) * 100) / 100
   const kelompok = asli?.transaction_type === "kelompok"
@@ -220,8 +216,7 @@ export default function TransaksiEditPage() {
           // Total dikirim untuk memenuhi validasi; angka yang DIPAKAI dihitung
           // ulang server dari rinciannya, jadi keduanya tidak bisa berselisih.
           total: totalRincian,
-          member_deduction_type: header.member_deduction_type,
-          member_deduction_input: angka(header.member_deduction_input),
+          member_deduction: angka(header.member_deduction),
           group_leader_fee_percent: kelompok ? angka(header.group_leader_fee_percent) : 0,
           payment: angka(header.payment),
           payment_method: header.payment_method,
@@ -455,46 +450,17 @@ export default function TransaksiEditPage() {
 
           <div className="space-y-1.5">
             <Label htmlFor="ed-potongan">{t("nafsulTransaksi.memberDeduction")}</Label>
-            <div className="flex gap-2">
-              <NumberInput
-                id="ed-potongan"
-                prefix={header.member_deduction_type === "percent" ? "%" : "Rp"}
-                grouped={header.member_deduction_type !== "percent"}
-                value={header.member_deduction_input}
-                onValueChange={(v) =>
-                  setHeader((h) => (h ? { ...h, member_deduction_input: v } : h))
-                }
-              />
-              <div className="flex shrink-0 rounded-lg border border-slate-200 p-0.5">
-                {(["amount", "percent"] as const).map((satuan) => (
-                  <button
-                    key={satuan}
-                    type="button"
-                    onClick={() =>
-                      setHeader((h) => (h ? { ...h, member_deduction_type: satuan } : h))
-                    }
-                    aria-pressed={header.member_deduction_type === satuan}
-                    className={`rounded-md px-3 text-sm font-medium transition-colors ${
-                      header.member_deduction_type === satuan
-                        ? "bg-[#075489] text-white"
-                        : "text-slate-500 hover:bg-slate-50"
-                    }`}
-                  >
-                    {satuan === "amount" ? "Rp" : "%"}
-                  </button>
-                ))}
-              </div>
-            </div>
-            {header.member_deduction_type === "percent" &&
-              angka(header.member_deduction_input) > 0 && (
-                <p className="text-xs text-slate-500">
-                  {t("nafsulTransaksi.percentOf", {
-                    percent: header.member_deduction_input,
-                    base: rupiah(totalRincian),
-                    result: rupiah(potonganAnggota),
-                  })}
-                </p>
-              )}
+            {/*
+              Rupiah saja — pemilih satuan Rp/% dilepas bersama kolom
+              `member_deduction_type` & `member_deduction_input` yang dibuang
+              dari database. Potongan kini satu angka dengan satu arti.
+            */}
+            <NumberInput
+              id="ed-potongan"
+              prefix="Rp"
+              value={header.member_deduction}
+              onValueChange={(v) => setHeader((h) => (h ? { ...h, member_deduction: v } : h))}
+            />
           </div>
 
           {kelompok && (

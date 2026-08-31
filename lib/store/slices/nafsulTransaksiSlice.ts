@@ -62,11 +62,12 @@ export type TransaksiHeader = {
   member_name: string | null
   members_count: number
   total: string
+  /**
+   * Potongan anggota, RUPIAH. Satu-satunya bentuknya — satuan persen beserta
+   * angka ketiknya (`member_deduction_type`/`_input`) sudah dibuang dari
+   * database.
+   */
   member_deduction: string
-  /** "amount" = rupiah, "percent" = persen dari total rincian. */
-  member_deduction_type: "amount" | "percent"
-  /** Angka yang diketik petugas apa adanya (5 untuk "5%"). */
-  member_deduction_input: string
   group_leader_deduction: string
   /** PERSENTASE komisi ketua kelompok yang diketik petugas (10 untuk 10%). */
   group_leader_fee_percent: string

@@ -20,9 +20,7 @@ import ImportExcelModal, {
  *
  * Setiap kolom di bawah ini punya pasangan kolom di `transaction_headers`;
  * tidak ada kolom hiasan. Kolom yang nilainya DITURUNKAN server sengaja tidak
- * ada di sini — `total` (jumlah rincian), `group_leader_deduction` &
- * `group_leader_fee` (persen × total), `member_deduction_type` /
- * `member_deduction_input`, serta seluruh kolom audit. Kolom isian yang
+ * ada di sini — `group_leader_deduction` serta seluruh kolom audit. Kolom isian yang
  * diabaikan server lebih buruk daripada kolom yang tidak ada: petugas
  * mengisinya, angkanya hilang tanpa suara, dan tidak ada galat yang muncul.
  */
@@ -49,9 +47,19 @@ const KOLOM_KUITANSI: ImportColumn[] = [
   { header: "transaction_type", field: "jenis", contoh: "pribadi", wajib: true },
   { header: "payment", field: "dibayar", contoh: "150000", wajib: true },
   { header: "payment_method", field: "metode", contoh: "cash", wajib: true },
-  // Rupiah. Kolom satuan (`member_deduction_type`) tidak ada di file, jadi
-  // server selalu membacanya sebagai rupiah.
+  // Rupiah — satu-satunya bentuk potongan anggota.
   { header: "member_deduction", field: "potongan_anggota", contoh: "0" },
+  /**
+   * Nilai kuitansi, RUPIAH. Boleh dikosongkan.
+   *
+   * Diisi → angka itu yang tersimpan, apa adanya. Kosong → server menurunkannya
+   * dari `payment − member_deduction`.
+   *
+   * Dipakai apa adanya karena alasan yang sama seperti `group_leader_fee`:
+   * total pada kuitansi lama adalah angka yang sudah tercetak, dan menghitung
+   * ulang dari rincian yang kerap tidak lengkap justru menggesernya.
+   */
+  { header: "total", field: "total", contoh: "" },
   /**
    * PERSENTASE, bukan rupiah — nama kolomnya sendiri yang menyatakan itu, dan
    * itulah keuntungan memakai nama database: "Potongan Ketua" tidak pernah

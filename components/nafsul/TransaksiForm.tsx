@@ -602,8 +602,7 @@ export default function TransaksiForm({ tipe }: { tipe: Tipe }) {
             sudah terpotong di tiap baris rincian — mengirimkannya lagi di sini
             membuat server menguranginya untuk kedua kalinya.
           */
-          member_deduction_type: "amount",
-          member_deduction_input: 0,
+          member_deduction: 0,
           // Hanya persentasenya yang dikirim; nominal potongan & jasa ketua
           // dihitung server dari total rincian yang juga dihitungnya sendiri.
           group_leader_fee_percent: angka(header.group_leader_fee_percent),
