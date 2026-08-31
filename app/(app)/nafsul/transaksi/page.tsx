@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from "react"
 import Link from "next/link"
-import { useRouter } from "next/navigation"
 import {
   BadgeCheck,
   ChevronRight,
@@ -66,7 +65,6 @@ export default function NafsulTransaksiPage() {
   // bahasa yang sedang dipilih, bukan dipatok ke Indonesia.
   const { t, lang } = useLanguage()
   const dispatch = useAppDispatch()
-  const router = useRouter()
   const {
     items,
     totalItems,
@@ -497,13 +495,16 @@ export default function NafsulTransaksiPage() {
                 onClick: (row) => bukaBiling(row),
               },
             ]}
-            onEdit={(row) => router.push(`/nafsul/transaksi/${row.uuid}/edit`)}
+            // Tombol Ubah sengaja TIDAK ditawarkan di daftar ini. Halaman
+            // editnya sendiri (`/nafsul/transaksi/{uuid}/edit`) masih hidup dan
+            // bisa dibuka lewat tautan langsung, jadi ini menyembunyikan
+            // jalannya — bukan mencabut kemampuannya.
             onDelete={(row) => setDeleteTarget(row)}
-            // Kuitansi yang SUDAH divalidasi tidak boleh lagi diubah atau dihapus:
-            // jejak pemeriksaannya jadi tak ada artinya kalau isinya masih bisa
-            // bergeser sesudahnya. Buka kuncinya dulu lewat tombol gembok. Server
-            // menolaknya juga — ini hanya supaya tombolnya tidak ditawarkan.
-            canEdit={(row) => row.validation_at === null}
+            // Kuitansi yang SUDAH divalidasi tidak boleh lagi dihapus: jejak
+            // pemeriksaannya jadi tak ada artinya kalau isinya masih bisa
+            // bergeser sesudahnya. Buka kuncinya dulu lewat tombol gembok.
+            // Server menolaknya juga — ini hanya supaya tombolnya tidak
+            // ditawarkan.
             canDelete={(row) => row.validation_at === null}
             isRowLoading={(row) =>
               deletingUuid === row.uuid || validatingUuid === row.uuid
