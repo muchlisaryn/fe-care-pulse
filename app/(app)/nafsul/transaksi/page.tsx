@@ -5,16 +5,21 @@ import Link from "next/link"
 import { useRouter } from "next/navigation"
 import {
   BadgeCheck,
+  ChevronRight,
   Download,
   Loader2,
   Lock,
   LockOpen,
   Printer,
   Search,
+  Upload,
+  User,
+  Users,
   Wallet,
 } from "lucide-react"
 import { Button } from "@/components/atoms/Button"
 import { Input } from "@/components/atoms/Input"
+import { Label } from "@/components/atoms/Label"
 import { Select } from "@/components/atoms/Select"
 import { Card } from "@/components/molecules/Card"
 import { DataTable, type Column } from "@/components/molecules/DataTable"
@@ -22,6 +27,7 @@ import { ConfirmDialog } from "@/components/molecules/ConfirmDialog"
 import { ResultDialog } from "@/components/molecules/ResultDialog"
 import { Modal } from "@/components/molecules/Modal"
 import { Pagination } from "@/components/molecules/Pagination"
+import ImportTransaksiModal from "@/components/nafsul/ImportTransaksiModal"
 import { useAppDispatch, useAppSelector } from "@/lib/store/hooks"
 import {
   fetchTransaksi,
@@ -83,6 +89,11 @@ export default function NafsulTransaksiPage() {
   const [sampaiInput, setSampaiInput] = useState(dateTo)
 
   const [galat, setGalat] = useState<string | null>(null)
+  const [imporTerbuka, setImporTerbuka] = useState(false)
+
+  // Pilihan jenis kuitansi sebelum masuk ke formnya. Kelompok dan pribadi kini
+  // dua halaman terpisah, jadi tombol Tambah harus menanyakan yang mana dulu.
+  const [pilihJenis, setPilihJenis] = useState(false)
 
   const [deleteTarget, setDeleteTarget] = useState<TransaksiHeader | null>(null)
   const [deletingUuid, setDeletingUuid] = useState<string | null>(null)
@@ -109,13 +120,6 @@ export default function NafsulTransaksiPage() {
     dispatch(setTransaksiSearch(searchInput))
     dispatch(setTransaksiPaymentMethod(metodeInput))
     dispatch(setTransaksiDateRange({ from: dariInput, to: sampaiInput }))
-  }
-
-  /** Kosongkan rentang tanggal & langsung muat ulang tanpa menekan Cari. */
-  function bersihkanTanggal() {
-    setDariInput("")
-    setSampaiInput("")
-    dispatch(setTransaksiDateRange({ from: "", to: "" }))
   }
 
   async function handleDelete() {
@@ -248,9 +252,27 @@ export default function NafsulTransaksiPage() {
       cell: (row) =>
         // Kuitansi pribadi TIDAK menampilkan nama ketua penampungnya — bagi
         // petugas, setoran perorangan memang tidak punya ketua kelompok, dan
-        // menuliskan nama penampung di sini hanya menyesatkan.
+        // menuliskan nama penampung di sini hanya menyesatkan. Yang ditampilkan
+        // nama anggota pertamanya, dengan "(+n)" bila kuitansi itu memuat
+        // anggota lain — satu kuitansi pribadi boleh berisi lebih dari satu orang.
         row.transaction_type === "pribadi" ? (
-          <span className="text-slate-500">{t("nafsulTransaksi.personal")}</span>
+          row.member_name ? (
+            <span className="text-gray-700">
+              {row.member_name}
+              {row.members_count > 1 ? (
+                <span
+                  className="ml-1 text-xs text-gray-400"
+                  title={t("nafsulTransaksi.othersCount", {
+                    count: row.members_count - 1,
+                  })}
+                >
+                  (+{row.members_count - 1})
+                </span>
+              ) : null}
+            </span>
+          ) : (
+            <span className="text-slate-500">{t("nafsulTransaksi.personal")}</span>
+          )
         ) : (
           row.group_leader_name || <span className="text-xs text-gray-400">—</span>
         ),
@@ -316,104 +338,110 @@ export default function NafsulTransaksiPage() {
           </div>
         </div>
         <div className="flex flex-wrap gap-2">
-          <Link href="/nafsul/transaksi/baru">
-            <Button className="bg-[#075489] hover:bg-[#075489]/90 text-white">
-              {t("nafsulTransaksi.add")}
-            </Button>
-          </Link>
+          <Button variant="outline" onClick={() => setImporTerbuka(true)}>
+            <Upload className="mr-2 h-4 w-4" />
+            {t("nafsulMaster.importExcel")}
+          </Button>
+          <Button
+            onClick={() => setPilihJenis(true)}
+            className="bg-[#075489] hover:bg-[#075489]/90 text-white"
+          >
+            {t("nafsulTransaksi.add")}
+          </Button>
         </div>
       </div>
+
+      <ImportTransaksiModal
+        open={imporTerbuka}
+        onClose={() => setImporTerbuka(false)}
+        // Daftar di-cache Redux; tanpa ini kuitansi hasil impor tidak muncul
+        // sampai halaman dibuka ulang.
+        onSelesai={() => dispatch(invalidateTransaksi())}
+      />
 
       <Card className="p-0">
         <div className="border-b border-gray-100 px-5 py-4">
           {/*
-            Dua baris, bukan satu deret memanjang: dengan rentang tanggal ikut
-            masuk, satu baris memaksa kotak pencarian menyusut sampai nomor
-            kuitansi yang diketik tidak lagi terlihat utuh.
-          */}
-          {/*
-            Satu baris: cari, cara bayar, rentang tanggal, tombol.
-
-            `flex-wrap` bukan pembatalan "satu baris" — pada layar yang cukup
-            lebar semuanya tetap sebaris. Ia hanya menentukan apa yang terjadi
-            saat ruangnya kurang: membungkus ke bawah, alih-alih memampatkan
-            kotak pencarian sampai nomor kuitansi yang diketik tidak lagi
-            terlihat utuh.
+            Susunannya sama dengan penyaring Order Instrumen: tiap isian
+            berlabel, sebaris di layar lebar (`lg:items-end` merapatkan semuanya
+            ke garis bawah yang sama), dan membungkus ke bawah saat ruangnya
+            kurang — bukan memampatkan kotak pencarian sampai nomor kuitansi
+            yang diketik tidak lagi terlihat utuh.
           */}
           <form
             onSubmit={handleSearch}
-            className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center"
+            className="flex flex-col gap-3 lg:flex-row lg:flex-wrap lg:items-end"
           >
-            {/* Melar mengisi sisa ruang; `min-w` menjaganya tetap terbaca saat
-                barisnya penuh. */}
-            <div className="relative min-w-[13rem] flex-1">
-              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+            <div className="min-w-[220px] flex-1 space-y-1.5">
+              <Label htmlFor="transaksi-cari">{t("common.search")}</Label>
+              <div className="relative">
+                {loading ? (
+                  <Loader2 className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 animate-spin text-[#075489]" />
+                ) : (
+                  <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+                )}
+                <Input
+                  id="transaksi-cari"
+                  placeholder={t("nafsulTransaksi.searchPlaceholder")}
+                  value={searchInput}
+                  onChange={(e) => setSearchInput(e.target.value)}
+                  className="pl-9"
+                />
+              </div>
+            </div>
+
+            {/*
+              Tanpa Label di atasnya: pilihan kosongnya sudah berbunyi "Cara
+              Bayar", jadi label terpisah cuma mengulang kata yang sama persis
+              tepat di atasnya.
+            */}
+            <div className="w-full sm:w-48">
+              <Select
+                aria-label={t("nafsulTransaksi.colMethod")}
+                value={metodeInput}
+                onChange={(e) => setMetodeInput(e.target.value)}
+              >
+                <option value="">{t("nafsulTransaksi.allMethods")}</option>
+                <option value="cash">{t("nafsulTransaksi.method_cash")}</option>
+                <option value="transfer">{t("nafsulTransaksi.method_transfer")}</option>
+                <option value="other">{t("nafsulTransaksi.method_other")}</option>
+              </Select>
+            </div>
+
+            <div className="space-y-1.5">
+              <Label htmlFor="transaksi-dari">{t("nafsulTransaksi.dateFrom")}</Label>
               <Input
-                placeholder={t("nafsulTransaksi.searchPlaceholder")}
-                value={searchInput}
-                onChange={(e) => setSearchInput(e.target.value)}
-                className="pl-9"
+                id="transaksi-dari"
+                type="date"
+                value={dariInput}
+                // Batas atas mengikuti isian "sampai": rentang terbalik tidak
+                // pernah punya hasil, dan lebih baik tidak bisa dipilih daripada
+                // menghasilkan tabel kosong yang tampak seperti data hilang.
+                max={sampaiInput || undefined}
+                onChange={(e) => setDariInput(e.target.value)}
+                className="sm:w-44"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="transaksi-sampai">{t("nafsulTransaksi.dateTo")}</Label>
+              <Input
+                id="transaksi-sampai"
+                type="date"
+                value={sampaiInput}
+                min={dariInput || undefined}
+                onChange={(e) => setSampaiInput(e.target.value)}
+                className="sm:w-44"
               />
             </div>
 
-            <Select
-              aria-label={t("nafsulTransaksi.colMethod")}
-              value={metodeInput}
-              onChange={(e) => setMetodeInput(e.target.value)}
-              className="shrink-0 sm:w-40"
-            >
-              <option value="">{t("nafsulTransaksi.allMethods")}</option>
-              <option value="cash">{t("nafsulTransaksi.method_cash")}</option>
-              <option value="transfer">{t("nafsulTransaksi.method_transfer")}</option>
-              <option value="other">{t("nafsulTransaksi.method_other")}</option>
-            </Select>
-
-            {/* Label "Rentang tanggal" dilepas demi ruang; keterangannya pindah
-                ke `title` & `aria-label` tiap isian, yang tetap terbaca pembaca
-                layar maupun saat penunjuk disentuhkan. */}
-            <Input
-              type="date"
-              aria-label={t("nafsulTransaksi.dateFrom")}
-              title={t("nafsulTransaksi.dateFrom")}
-              value={dariInput}
-              // Batas atas mengikuti isian "sampai": rentang terbalik tidak
-              // pernah punya hasil, dan lebih baik tidak bisa dipilih daripada
-              // menghasilkan tabel kosong yang tampak seperti data hilang.
-              max={sampaiInput || undefined}
-              onChange={(e) => setDariInput(e.target.value)}
-              className="shrink-0 sm:w-[9.5rem]"
-            />
-            <span className="hidden shrink-0 text-sm text-gray-400 sm:inline">
-              &ndash;
-            </span>
-            <Input
-              type="date"
-              aria-label={t("nafsulTransaksi.dateTo")}
-              title={t("nafsulTransaksi.dateTo")}
-              value={sampaiInput}
-              min={dariInput || undefined}
-              onChange={(e) => setSampaiInput(e.target.value)}
-              className="shrink-0 sm:w-[9.5rem]"
-            />
-
-            {/* Muncul hanya saat ada yang bisa dibersihkan. */}
-            {(dariInput || sampaiInput) && (
+            <div className="flex justify-end gap-2">
               <Button
-                type="button"
-                variant="outline"
-                onClick={bersihkanTanggal}
-                className="shrink-0"
+                type="submit"
+                className="shrink-0 bg-[#075489] hover:bg-[#075489]/90 text-white"
               >
-                {t("nafsulTransaksi.dateClear")}
+                {t("common.search")}
               </Button>
-            )}
-
-            <Button
-              type="submit"
-              className="shrink-0 bg-[#075489] hover:bg-[#075489]/90 text-white"
-            >
-              {t("common.search")}
-            </Button>
+            </div>
           </form>
         </div>
 
@@ -523,6 +551,51 @@ export default function NafsulTransaksiPage() {
             className="h-[70vh] w-full rounded-lg border"
           />
         ) : null}
+      </Modal>
+
+      {/*
+        Pilihan jenis kuitansi. Dua tautan, bukan dua tab di dalam satu form:
+        jenisnya menentukan isian yang muncul (ketua kelompok, potongan & jasa
+        ketua) dan tersimpan di header, jadi lebih baik dipilih SEBELUM ada yang
+        diketik daripada dikunci di tengah pengisian.
+      */}
+      <Modal
+        open={pilihJenis}
+        onClose={() => setPilihJenis(false)}
+        title={t("nafsulTransaksi.pickTypeTitle")}
+        size="sm"
+      >
+        <div className="space-y-2.5">
+          {(
+            [
+              {
+                tipe: "kelompok" as const,
+                href: "/nafsul/transaksi/baru/kelompok",
+                icon: Users,
+              },
+              {
+                tipe: "pribadi" as const,
+                href: "/nafsul/transaksi/baru/pribadi",
+                icon: User,
+              },
+            ]
+          ).map(({ tipe, href, icon: Ikon }) => (
+            <Link
+              key={tipe}
+              href={href}
+              onClick={() => setPilihJenis(false)}
+              className="flex items-center gap-3 rounded-xl border border-[#075489]/25 bg-[#075489]/5 px-4 py-3 transition-colors hover:border-[#075489] hover:bg-[#075489]/10"
+            >
+              <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-[#075489] text-white">
+                <Ikon className="h-5 w-5" />
+              </span>
+              <span className="min-w-0 flex-1 font-medium text-[#075489]">
+                {t("nafsulTransaksi.tab_" + tipe)}
+              </span>
+              <ChevronRight className="h-4 w-4 shrink-0 text-[#075489]/60" />
+            </Link>
+          ))}
+        </div>
       </Modal>
 
       <ConfirmDialog

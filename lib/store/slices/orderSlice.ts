@@ -1,6 +1,7 @@
 import { createAsyncThunk, createSlice, type PayloadAction } from "@reduxjs/toolkit"
 import api from "@/lib/axios"
 import type { TimelineEvent } from "@/components/molecules/OrderTimeline"
+import { rentangSebulanTerakhir } from "@/lib/dateRange"
 
 // Status order sesuai PRD §4.6 (order.status) + tahapan pipeline CSSD
 // (pencucian → pengemasan → selesai) untuk tracking.
@@ -110,6 +111,8 @@ export type Order = {
   timeline?: TimelineEvent[]
 }
 
+const bawaan = rentangSebulanTerakhir()
+
 type OrderState = {
   items: Order[]
   totalItems: number
@@ -118,6 +121,10 @@ type OrderState = {
   search: string
   status: OrderStatus | "" // "" = semua status
   // Filter rentang tanggal pinjam (order_date), format "YYYY-MM-DD"; "" = tidak difilter.
+  //
+  // Bawaannya SEBULAN TERAKHIR, bukan kosong: order menumpuk terus, dan yang
+  // dibuka petugas hampir selalu peminjaman belakangan ini. Tombol Reset di
+  // penyaring tetap mengosongkannya untuk melihat seluruh riwayat.
   dateFrom: string
   dateTo: string
   loading: boolean
@@ -132,8 +139,8 @@ const initialState: OrderState = {
   page: 1,
   search: "",
   status: "",
-  dateFrom: "",
-  dateTo: "",
+  dateFrom: bawaan.from,
+  dateTo: bawaan.to,
   loading: false,
   loaded: false,
   dirty: false,

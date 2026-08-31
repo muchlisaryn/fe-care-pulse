@@ -1,5 +1,6 @@
 import { createAsyncThunk, createSlice, type PayloadAction } from "@reduxjs/toolkit"
 import { api } from "@/lib/nafsul/api"
+import { rentangSebulanTerakhir } from "@/lib/dateRange"
 import type { Paginated } from "@/lib/nafsul/types"
 
 /**
@@ -49,6 +50,17 @@ export type TransaksiHeader = {
    * dari `transaction_type`, bukan nama ketua penampung anggota perorangan.
    */
   group_leader_name: string | null
+  /**
+   * Nama anggota pada rincian pertama, dan banyaknya anggota BERBEDA di
+   * kuitansi ini (bukan jumlah baris rincian — satu anggota bisa punya
+   * beberapa periode sekaligus).
+   *
+   * Dipakai kolom "Nama" untuk kuitansi PRIBADI, yang tidak punya ketua
+   * kelompok yang berarti. `null`/0 pada respons yang tidak menyertakannya
+   * (mis. `show`).
+   */
+  member_name: string | null
+  members_count: number
   total: string
   member_deduction: string
   /** "amount" = rupiah, "percent" = persen dari total rincian. */
@@ -93,6 +105,10 @@ type TransaksiState = {
    * hal yang sering berbeda, dan yang dicari orang di daftar kuitansi selalu
    * yang pertama. Keduanya berdiri sendiri: mengisi salah satu saja sah, dan
    * berarti "sejak" atau "sampai" tanpa ujung yang lain.
+   *
+   * Bawaannya SEBULAN TERAKHIR, bukan kosong: kuitansi menumpuk terus, dan yang
+   * dibuka petugas hampir selalu setoran belakangan ini. Tombol Bersihkan tetap
+   * ada untuk melihat seluruh riwayat.
    */
   dateFrom: string
   dateTo: string
@@ -101,6 +117,8 @@ type TransaksiState = {
   dirty: boolean
 }
 
+const bawaan = rentangSebulanTerakhir()
+
 const initialState: TransaksiState = {
   items: [],
   totalItems: 0,
@@ -108,8 +126,8 @@ const initialState: TransaksiState = {
   page: 1,
   search: "",
   paymentMethod: "",
-  dateFrom: "",
-  dateTo: "",
+  dateFrom: bawaan.from,
+  dateTo: bawaan.to,
   loading: false,
   loaded: false,
   dirty: false,
