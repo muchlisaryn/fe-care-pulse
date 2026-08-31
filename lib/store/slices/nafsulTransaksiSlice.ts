@@ -41,6 +41,14 @@ export type TransaksiHeader = {
   date: string | null
   /** "kelompok" = setoran ketua kelompok, "pribadi" = anggota perorangan. */
   transaction_type: "kelompok" | "pribadi"
+  /**
+   * Nama ketua kelompok pemilik kuitansi, diambil dari rincian pertama.
+   *
+   * `null` pada kuitansi yang belum punya rincian sama sekali. Pada kuitansi
+   * PRIBADI nilainya diabaikan — daftar menampilkan "Pribadi" yang diturunkan
+   * dari `transaction_type`, bukan nama ketua penampung anggota perorangan.
+   */
+  group_leader_name: string | null
   total: string
   member_deduction: string
   /** "amount" = rupiah, "percent" = persen dari total rincian. */

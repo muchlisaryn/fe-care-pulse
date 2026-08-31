@@ -30,6 +30,7 @@ export default function MasterSelect<T>({
   searchPlaceholder,
   labelTerpilih,
   params,
+  disabled = false,
 }: {
   /** Endpoint master, mis. "/wilayah". */
   endpoint: string;
@@ -47,6 +48,13 @@ export default function MasterSelect<T>({
   searchPlaceholder?: string;
   /** Label nilai terpilih saat opsinya belum dimuat (form edit). */
   labelTerpilih?: string;
+  /**
+   * Matikan dropdown TANPA menyembunyikannya — nilai terpilih tetap terbaca.
+   *
+   * Untuk pilihan yang sudah tidak boleh diubah tapi tetap perlu dilihat,
+   * mis. ketua kelompok setelah rincian pertama masuk daftar.
+   */
+  disabled?: boolean;
   /**
    * Parameter penyaring tambahan, mis. `{ noketua: "KKL2601001" }`.
    *
@@ -140,6 +148,7 @@ export default function MasterSelect<T>({
       placeholder={placeholder}
       searchPlaceholder={searchPlaceholder ?? t("common.searchPlaceholder")}
       labelTerpilih={labelTerpilih}
+      disabled={disabled}
       onOpen={handleOpen}
       onQueryChange={handleQuery}
     />

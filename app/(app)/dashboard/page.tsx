@@ -1,40 +1,41 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import Link from "next/link"
-import { Stethoscope, Layers, PackageCheck, ArrowLeftRight, Hourglass, PackageOpen } from "lucide-react"
-import { StatCard } from "@/components/molecules/StatCard"
-import { Card } from "@/components/molecules/Card"
+import { Warehouse, Activity, Wallet } from "lucide-react"
+import { NavTileCard } from "@/components/molecules/NavTileCard"
 import { PageHeader } from "@/components/molecules/PageHeader"
+import { DashboardPreviewModal, type DashboardPreview } from "@/components/molecules/DashboardPreviewModal"
 import { useAppSelector } from "@/lib/store/hooks"
+import { angka, rupiah, rupiahRingkas, persen } from "@/lib/format"
 import api from "@/lib/axios"
 import { useT } from "@/lib/i18n"
 
-type Stats = { total_instruments: number; total_units: number; available_units: number }
 type OrderCounts = { diajukan: number; dipinjam: number }
+
+/** Dashboard mana yang sedang diintip lewat modal. */
+type Intip = "cssd" | "nurse" | "nafsul" | null
 
 export default function DashboardPage() {
   const name = useAppSelector((s) => s.auth.name)
   const t = useT()
 
-  const [stats, setStats] = useState<Stats>({ total_instruments: 0, total_units: 0, available_units: 0 })
   const [orders, setOrders] = useState<OrderCounts>({ diajukan: 0, dipinjam: 0 })
   const [loading, setLoading] = useState(true)
+  const [intip, setIntip] = useState<Intip>(null)
 
+  // Hanya dua angka yang masih diambil di sini: jumlah order masuk & sedang
+  // dipinjam, yang dipajang di kartu peran. Statistik inventaris tidak lagi
+  // ditarik — angkanya sudah ada di Dashboard CSSD, dan menariknya dua kali
+  // hanya membuat dua layar bisa menyebut angka berbeda.
   useEffect(() => {
     let active = true
     Promise.all([
-      api.get("/master/instruments/stats"),
       api.get("/master/orders", { params: { status: "diajukan" } }),
       api.get("/master/orders", { params: { status: "dipinjam" } }),
     ])
-      .then(([s, a, c]) => {
+      .then(([a, c]) => {
         if (!active) return
-        setStats(s.data.data)
-        setOrders({
-          diajukan: a.data.data.total,
-          dipinjam: c.data.data.total,
-        })
+        setOrders({ diajukan: a.data.data.total, dipinjam: c.data.data.total })
       })
       .finally(() => {
         if (active) setLoading(false)
@@ -44,7 +45,7 @@ export default function DashboardPage() {
     }
   }, [])
 
-  const v = (n: number) => (loading ? "…" : String(n))
+  const v = (n: number) => (loading ? "…" : angka(n))
 
   return (
     <div className="space-y-6">
@@ -53,70 +54,142 @@ export default function DashboardPage() {
         subtitle={t("dashboard.subtitle")}
       />
 
-      {/* Statistik inventaris */}
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <StatCard title={t("dashboard.statInstrumentTypes")} value={v(stats.total_instruments)} icon={Stethoscope} />
-        <StatCard title={t("dashboard.statTotalUnits")} value={v(stats.total_units)} icon={Layers} />
-        <StatCard title={t("dashboard.statAvailableUnits")} value={v(stats.available_units)} icon={PackageCheck} />
-        <StatCard title={t("dashboard.statBorrowed")} value={v(orders.dipinjam)} icon={ArrowLeftRight} />
-      </div>
-
-      {/* Order yang perlu ditindak */}
+      {/* Kartu peran MENGINTIP isinya lewat modal, bukan langsung berpindah:
+          sebagian besar kunjungan cuma ingin tahu angkanya, dan modal
+          mengembalikan pengguna ke sini tanpa perlu menekan tombol kembali.
+          Halaman lengkap tiap dashboard dibuka lewat menunya di sidebar. */}
       <div>
-        <h2 className="mb-3 text-sm font-semibold text-gray-700">{t("dashboard.borrowOrders")}</h2>
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-          <ActionCard
-            href="/cssd/tracking-order"
-            icon={Hourglass}
-            label={t("dashboard.incomingOrders")}
+        <h2 className="mb-3 text-sm font-semibold text-gray-700">{t("dashboard.roleDashboards")}</h2>
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+          <NavTileCard
+            onClick={() => setIntip("cssd")}
+            icon={Warehouse}
+            title={t("dashboardCssd.title")}
+            description={t("dashboardCssd.subtitle")}
             value={v(orders.diajukan)}
-            tone="amber"
+            tone="warning"
           />
-          <ActionCard
-            href="/cssd/tracking-order"
-            icon={PackageOpen}
-            label={t("dashboard.statBorrowed")}
+          <NavTileCard
+            onClick={() => setIntip("nurse")}
+            icon={Activity}
+            title={t("dashboardNurse.title")}
+            description={t("dashboardNurse.subtitle")}
             value={v(orders.dipinjam)}
-            tone="teal"
+          />
+          <NavTileCard
+            onClick={() => setIntip("nafsul")}
+            icon={Wallet}
+            title={t("dashboardNafsul.title")}
+            description={t("dashboardNafsul.subtitle")}
+            tone="success"
           />
         </div>
       </div>
+
+      <DashboardPreviewModal
+        open={intip === "cssd"}
+        onClose={() => setIntip(null)}
+        title={t("dashboardCssd.title")}
+        endpoint="/cssd/dashboard"
+        map={(d) => {
+          const x = d as {
+            summary: {
+              instrument_types: number
+              sterile_ready: number
+              incoming_orders: number
+              currently_borrowed: number
+            }
+            borrow_chart: { day: number; total: number }[]
+          }
+          return {
+            stats: [
+              { label: t("dashboardCssd.statInstrumentTypes"), value: angka(x.summary.instrument_types) },
+              { label: t("dashboardCssd.statSterileReady"), value: angka(x.summary.sterile_ready) },
+              { label: t("dashboardCssd.statIncoming"), value: angka(x.summary.incoming_orders) },
+              { label: t("dashboardCssd.statBorrowed"), value: angka(x.summary.currently_borrowed) },
+            ],
+            chart: {
+              title: t("dashboardCssd.chartTitle"),
+              variant: "bar",
+              data: x.borrow_chart.map((h) => ({ label: String(h.day), value: h.total })),
+              formatValue: (n) => `${angka(n)} ${t("dashboardCssd.orderSuffix")}`,
+              formatAxis: (n) => angka(Math.round(n)),
+              emptyLabel: t("dashboardCssd.emptyChart"),
+            },
+          } satisfies DashboardPreview
+        }}
+      />
+
+      <DashboardPreviewModal
+        open={intip === "nurse"}
+        onClose={() => setIntip(null)}
+        title={t("dashboardNurse.title")}
+        endpoint="/nurse/dashboard"
+        map={(d) => {
+          const x = d as {
+            summary: {
+              period_orders: number
+              currently_borrowed: number
+              not_returned: number
+              overdue: number
+            }
+            borrow_chart: { day: number; total: number }[]
+          }
+          return {
+            stats: [
+              { label: t("dashboardNurse.statPeriodOrders"), value: angka(x.summary.period_orders) },
+              { label: t("dashboardNurse.statBorrowed"), value: angka(x.summary.currently_borrowed) },
+              { label: t("dashboardNurse.statNotReturned"), value: angka(x.summary.not_returned) },
+              { label: t("dashboardNurse.statOverdue"), value: angka(x.summary.overdue) },
+            ],
+            chart: {
+              title: t("dashboardNurse.chartTitle"),
+              variant: "bar",
+              data: x.borrow_chart.map((h) => ({ label: String(h.day), value: h.total })),
+              formatValue: (n) => angka(n),
+              formatAxis: (n) => angka(Math.round(n)),
+              emptyLabel: t("dashboardCssd.emptyChart"),
+            },
+          } satisfies DashboardPreview
+        }}
+      />
+
+      <DashboardPreviewModal
+        open={intip === "nafsul"}
+        onClose={() => setIntip(null)}
+        title={t("dashboardNafsul.title")}
+        endpoint="/nafsul/dashboard"
+        map={(d) => {
+          const x = d as {
+            year: number
+            summary: { year_income: number; month_income: number }
+            validation: { valid: number; invalid: number }
+            monthly_income: { label: string; total: number }[]
+            payment_methods: { method: string; percent: number }[]
+          }
+          const tunai = x.payment_methods.find((m) => m.method === "cash")
+          return {
+            stats: [
+              { label: t("dashboardNafsul.statYearIncome"), value: rupiah(x.summary.year_income) },
+              { label: t("dashboardNafsul.statMonthIncome"), value: rupiah(x.summary.month_income) },
+              { label: t("dashboardNafsul.valid"), value: angka(x.validation.valid) },
+              {
+                label: t("dashboardNafsul.paymentTitle"),
+                value: persen(tunai?.percent ?? 0),
+                hint: t("dashboardNafsul.cashShare"),
+              },
+            ],
+            chart: {
+              title: t("dashboardNafsul.monthlyTitle"),
+              variant: "bar",
+              data: x.monthly_income.map((b) => ({ label: b.label, value: b.total })),
+              formatValue: rupiah,
+              formatAxis: rupiahRingkas,
+              emptyLabel: t("dashboardNafsul.emptyChart"),
+            },
+          } satisfies DashboardPreview
+        }}
+      />
     </div>
-  )
-}
-
-const toneMap = {
-  amber: "bg-amber-50 text-amber-600",
-  blue: "bg-[#075489]/8 text-[#075489]",
-  teal: "bg-[#4ba69d]/10 text-[#4ba69d]",
-}
-
-function ActionCard({
-  href,
-  icon: Icon,
-  label,
-  value,
-  tone,
-}: {
-  href: string
-  icon: typeof Hourglass
-  label: string
-  value: string
-  tone: keyof typeof toneMap
-}) {
-  return (
-    <Link href={href} className="block">
-      <Card className="transition-all hover:border-[#075489]/40 hover:shadow-md">
-        <div className="flex items-center gap-4">
-          <div className={`flex h-12 w-12 items-center justify-center rounded-xl ${toneMap[tone]}`}>
-            <Icon className="h-6 w-6" />
-          </div>
-          <div>
-            <p className="text-2xl font-bold text-gray-900">{value}</p>
-            <p className="text-sm text-gray-500">{label}</p>
-          </div>
-        </div>
-      </Card>
-    </Link>
   )
 }

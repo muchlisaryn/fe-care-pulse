@@ -44,6 +44,19 @@ type RencanaBaris = {
 type Rencana = {
   months: number
   free_months: number
+  /**
+   * Tunggakan anggota pada tarif ini sampai bulan berjalan; `null` untuk tarif
+   * sekali bayar, yang memang tidak punya jadwal periode.
+   */
+  arrear_months: number | null
+  /**
+   * Bonus bulan gratis hangus karena tunggakannya melewati 2 bulan.
+   *
+   * Dikirim server agar hilangnya bonus bisa DITERANGKAN, bukan cuma tampil
+   * sebagai "0 bulan gratis" — petugas yang tidak tahu sebabnya akan mengira
+   * aplikasinya salah hitung.
+   */
+  discount_blocked: boolean
   start_period: string | null
   end_period: string | null
   total: string
@@ -129,10 +142,6 @@ const entriKosong: Entri = {
 }
 
 const headerKosong = {
-  // Potongan anggota: nilai yang diketik + satuannya. Nominal rupiahnya
-  // dihitung server dari kedua nilai ini.
-  member_deduction_input: "",
-  member_deduction_type: "amount" as "amount" | "percent",
   /**
    * Potongan ketua kelompok, dalam PERSEN (mis. "10" = 10%).
    *
@@ -494,25 +503,20 @@ function TransaksiBaruForm() {
   const totalRincian = semuaPeriode.reduce((j, p) => j + angka(p.total), 0)
 
   /**
-   * Komisi ketua kelompok — muncul dua kali dengan nominal yang sama.
+   * Komisi ketua kelompok — CATATAN HAK ketua, bukan pengurang setoran.
    *
-   * Ketua menahan komisinya dari uang yang ia kumpulkan, jadi angka ini
-   * mengurangi setoran (sebagai potongan) lalu ditambahkan kembali (sebagai
-   * jasa). Keduanya saling menghapus di "Harus Dibayar"; yang disetorkan tetap
-   * total dikurangi potongan anggota. Tetap ditampilkan dua baris karena
-   * kuitansi harus memperlihatkan hak ketua secara terpisah.
+   * Sengaja tidak ikut mengurangi "Harus Dibayar": yang disetorkan anggota
+   * tidak berkurang hanya karena ketua berhak atas komisi, dan komisinya
+   * dibayarkan lewat kas. Karena itu pula bagiannya berdiri sebagai kartu
+   * sendiri di bawah ringkasan, bukan menumpang sebagai baris potongan.
+   *
+   * Sama dengan terapkanJasaKetua() di server, yang mengisi `group_leader_fee`
+   * dan menolkan `group_leader_deduction`.
    */
   const jasaKetua =
     tipe === "kelompok"
       ? Math.round(totalRincian * angka(header.group_leader_fee_percent)) / 100
       : 0
-
-  // Rumusnya sama persis dengan terapkanPotonganAnggota() di server, supaya
-  // angka di layar tidak pernah berbeda dari yang tersimpan.
-  const potonganAnggota =
-    header.member_deduction_type === "percent"
-      ? Math.round(totalRincian * angka(header.member_deduction_input)) / 100
-      : angka(header.member_deduction_input)
 
   // Nilai kotor sebelum bulan gratis dipotong. `totalRincian` sudah bersih
   // (tiap periode gratis nilainya 0), jadi tanpa angka ini rincian di bawah
@@ -542,11 +546,18 @@ function TransaksiBaruForm() {
 
   const totalDiskon = diskonPerAnggota.reduce((j, d) => j + d.nilai, 0)
 
-  const potongan = potonganAnggota + jasaKetua
-  // Sama dengan TransactionHeader::getBalanceAttribute(): komisi ketua kelompok
-  // ditahan dari setoran, jadi ikut mengurangi. `group_leader_fee` di server
-  // hanya catatan hak ketua dan tidak menambah kembali.
-  const harusDibayar = totalRincian - potongan
+  /**
+   * Yang harus disetorkan = total rincian, titik.
+   *
+   * `totalRincian` sudah bersih dari potongan bulan gratis (tiap periode gratis
+   * nilainya 0), jadi potongan itu TIDAK boleh dikurangkan sekali lagi lewat
+   * baris "Potongan Anggota" — angkanya di sana cuma cerminan. Jasa ketua juga
+   * tidak mengurangi; lihat catatan di atas.
+   *
+   * Sama dengan TransactionHeader::getBalanceAttribute() setelah
+   * `member_deduction` dan `group_leader_deduction` sama-sama nol.
+   */
+  const harusDibayar = totalRincian
   const sisa = harusDibayar - angka(header.payment)
 
   /**
@@ -570,6 +581,20 @@ function TransaksiBaruForm() {
   const jenisTerkunci = daftar.length > 0
 
   /**
+   * Ketua kelompok juga tidak bisa diganti begitu ada rincian.
+   *
+   * Potongan & jasa ketua di header dihitung untuk SATU ketua, dan rincian yang
+   * sudah masuk dibuat dari daftar anggota milik ketua itu. Kalau ketuanya masih
+   * bisa ditukar setelahnya, kuitansinya jadi memuat anggota dari kelompok lain
+   * sementara komisinya tetap tercatat atas nama ketua yang terakhir dipilih —
+   * dan tidak ada satu pun angka di layar yang menunjukkan kejanggalan itu.
+   *
+   * Dropdown-nya dimatikan, bukan disembunyikan: ketua yang sedang berlaku
+   * tetap harus terbaca sepanjang pengisian.
+   */
+  const ketuaTerkunci = daftar.length > 0
+
+  /**
    * Tarif terpilih tidak berperiode → isian jumlah bulan disembunyikan dan
    * `payment_period` yang dikirim ke server bernilai null.
    */
@@ -583,14 +608,10 @@ function TransaksiBaruForm() {
     entri.rate_id !== "" ||
     entri.months !== "" ||
     header.payment !== "" ||
-    header.member_deduction_input !== ""
+    header.group_leader_fee_percent !== ""
 
   const siapTambah = entri.rencana !== null && !entri.memuat
-  const siapSimpan =
-    daftar.length > 0 &&
-    header.payment !== "" &&
-    potongan <= totalRincian &&
-    !saving
+  const siapSimpan = daftar.length > 0 && header.payment !== "" && !saving
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -602,8 +623,14 @@ function TransaksiBaruForm() {
         method: "POST",
         body: {
           date: header.date,
-          member_deduction_type: header.member_deduction_type,
-          member_deduction_input: angka(header.member_deduction_input),
+          /*
+            Potongan anggota selalu NOL dari halaman ini. Angka yang tampil di
+            layar hanyalah cerminan potongan bulan gratis, dan potongan itu
+            sudah terpotong di tiap baris rincian — mengirimkannya lagi di sini
+            membuat server menguranginya untuk kedua kalinya.
+          */
+          member_deduction_type: "amount",
+          member_deduction_input: 0,
           // Hanya persentasenya yang dikirim; nominal potongan & jasa ketua
           // dihitung server dari total rincian yang juga dihitungnya sendiri.
           group_leader_fee_percent: angka(header.group_leader_fee_percent),
@@ -737,7 +764,13 @@ function TransaksiBaruForm() {
                 toOption={(k) => ({ value: k.noketua, label: k.nama })}
                 placeholder={t("nafsulTransaksi.selectGroupLeader")}
                 labelTerpilih={ketua.nama}
+                disabled={ketuaTerkunci}
               />
+              {ketuaTerkunci && (
+                // Alasannya disebut, bukan cuma dimatikan: kolom yang mati tanpa
+                // keterangan terbaca sebagai kerusakan, bukan aturan.
+                <p className="text-xs text-slate-400">{t("nafsulTransaksi.leaderLocked")}</p>
+              )}
             </div>
           )}
 
@@ -936,6 +969,19 @@ function TransaksiBaruForm() {
               <span className="inline-flex items-center gap-1 text-emerald-700">
                 <Gift className="h-3.5 w-3.5" />
                 {t("nafsulTransaksi.freeMonths", { count: entri.rencana.free_months })}
+              </span>
+            )}
+            {/*
+              Hilangnya bonus DITERANGKAN, bukan dibiarkan tampil sebagai
+              ketiadaan: tanpa kalimat ini petugas yang menagih 12 bulan dan
+              tidak melihat bulan gratis akan mengira aplikasinya salah hitung.
+            */}
+            {entri.rencana.discount_blocked && (
+              <span className="inline-flex items-center gap-1 text-amber-700">
+                <AlertTriangle className="h-3.5 w-3.5" />
+                {t("nafsulTransaksi.discountBlocked", {
+                  months: entri.rencana.arrear_months ?? 0,
+                })}
               </span>
             )}
             <span className="font-semibold tabular-nums text-slate-900">
@@ -1167,124 +1213,29 @@ function TransaksiBaruForm() {
             value={header.date}
             onChange={(e) => setHeader((h) => ({ ...h, date: e.target.value }))}
           />
-          <p className="text-xs text-slate-500">{t("nafsulTransaksi.dateHint")}</p>
         </div>
 
         <div className="grid gap-5 p-5 lg:grid-cols-5">
           <div className="space-y-4 lg:col-span-3">
             <div className="grid gap-4 sm:grid-cols-2">
+              {/*
+                Tampilan saja, bukan isian. Potongan anggota bukan lagi angka
+                yang dikarang petugas: nilainya selalu total potongan bulan
+                gratis dari rincian di atas. Dibiarkan bisa diketik, angkanya
+                akan berselisih dengan diskon yang tercatat di baris-baris
+                kuitansi yang sama.
+              */}
               <div className="space-y-1.5">
                 <Label htmlFor="hd-potongan-anggota">
                   {t("nafsulTransaksi.memberDeduction")}
                 </Label>
-                <div className="flex gap-2">
-                  <div className="min-w-0 flex-1">
-                    <NumberInput
-                      id="hd-potongan-anggota"
-                      prefix={header.member_deduction_type === "percent" ? "%" : "Rp"}
-                      placeholder="0"
-                      value={header.member_deduction_input}
-                      onValueChange={(v) =>
-                        setHeader((h) => ({ ...h, member_deduction_input: v }))
-                      }
-                    />
-                  </div>
-                  {/*
-                    Satuannya dipilih di sebelah angkanya, bukan lewat dua field
-                    terpisah: petugas hanya punya SATU potongan anggota, jadi dua
-                    kotak isian akan mengundang keduanya terisi sekaligus.
-                  */}
-                  <div className="flex shrink-0 rounded-lg border border-slate-200 p-0.5">
-                    {(["amount", "percent"] as const).map((satuan) => (
-                      <button
-                        key={satuan}
-                        type="button"
-                        onClick={() =>
-                          setHeader((h) =>
-                            h.member_deduction_type === satuan
-                              ? h
-                              : // Nilainya dikosongkan saat satuan berganti: "25000"
-                                // yang tadinya rupiah menjadi 25000% kalau dibiarkan,
-                                // dan itu langsung ditolak server.
-                                { ...h, member_deduction_type: satuan, member_deduction_input: "" }
-                          )
-                        }
-                        aria-pressed={header.member_deduction_type === satuan}
-                        className={`rounded-md px-3 text-sm font-medium transition-colors ${
-                          header.member_deduction_type === satuan
-                            ? "bg-[#075489] text-white"
-                            : "text-slate-500 hover:bg-slate-50"
-                        }`}
-                      >
-                        {satuan === "amount" ? "Rp" : "%"}
-                      </button>
-                    ))}
-                  </div>
+                <div
+                  id="hd-potongan-anggota"
+                  className="flex h-[38px] items-center rounded-lg border border-slate-200 bg-slate-50 px-4 text-sm font-medium tabular-nums text-slate-700"
+                >
+                  {rupiah(totalDiskon)}
                 </div>
-                {/* Hasil hitungnya ditampilkan supaya persen tidak perlu dikira-kira. */}
-                {header.member_deduction_type === "percent" &&
-                  angka(header.member_deduction_input) > 0 && (
-                    <p className="text-xs text-slate-500">
-                      {t("nafsulTransaksi.percentOf", {
-                        percent: header.member_deduction_input,
-                        base: rupiah(totalRincian),
-                        result: rupiah(potonganAnggota),
-                      })}
-                    </p>
-                  )}
               </div>
-
-              {/* Hanya berlaku pada setoran kelompok. */}
-              {tipe === "kelompok" && (
-                <>
-                  <div className="space-y-1.5">
-                    <Label htmlFor="hd-potongan-ketua">
-                      {t("nafsulTransaksi.leaderDeduction")}
-                    </Label>
-                    <NumberInput
-                      id="hd-potongan-ketua"
-                      prefix="%"
-                      placeholder="0"
-                      grouped={false}
-                      value={header.group_leader_fee_percent}
-                      onValueChange={(v) =>
-                        // Dibatasi 100 saat diketik, bukan ditolak setelah
-                        // disimpan: potongan di atas 100% tidak punya arti, dan
-                        // ringkasan di sebelahnya langsung ikut salah.
-                        setHeader((h) => ({
-                          ...h,
-                          group_leader_fee_percent:
-                            v === "" || Number(v) <= 100 ? v : "100",
-                        }))
-                      }
-                    />
-                    <p className="text-xs text-slate-500">
-                      {t("nafsulTransaksi.leaderDeductionHint")}
-                    </p>
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label htmlFor="hd-jasa-ketua">
-                      {t("nafsulTransaksi.leaderFee")}
-                    </Label>
-                    {/*
-                      Hanya tampilan, bukan isian: nominalnya selalu turunan
-                      dari persentase × total rincian. Kalau boleh diketik
-                      sendiri, angkanya bisa berselisih dengan persentase yang
-                      tercatat di kuitansi yang sama tanpa ada yang tahu mana
-                      yang benar.
-                    */}
-                    <div
-                      id="hd-jasa-ketua"
-                      className="flex h-[38px] items-center rounded-lg border border-slate-200 bg-slate-50 px-4 text-sm font-medium tabular-nums text-slate-700"
-                    >
-                      {rupiah(jasaKetua)}
-                    </div>
-                    <p className="text-xs text-slate-500">
-                      {t("nafsulTransaksi.leaderFeeHint")}
-                    </p>
-                  </div>
-                </>
-              )}
 
               <div className="space-y-1.5">
                 <Label htmlFor="hd-metode">
@@ -1461,34 +1412,14 @@ function TransaksiBaruForm() {
               )
             )}
 
-            {potonganAnggota > 0 && (
-              <div className="flex justify-between gap-3 text-red-700">
-                <dt>
-                  <span className="mr-1 text-red-600/60">(−)</span>
-                  {t("nafsulTransaksi.memberDeduction")}{" "}
-                  {header.member_deduction_type === "percent" && (
-                    <span className="tabular-nums">
-                      ({header.member_deduction_input}%)
-                    </span>
-                  )}
-                </dt>
-                <dd className="tabular-nums">− {rupiah(potonganAnggota)}</dd>
-              </div>
-            )}
-
-            {jasaKetua > 0 && (
-              <div className="flex justify-between gap-3 text-red-700">
-                <dt>
-                  <span className="mr-1 text-red-600/60">(−)</span>
-                  {t("nafsulTransaksi.leaderDeduction")}{" "}
-                  <span className="tabular-nums">
-                    ({header.group_leader_fee_percent}%)
-                  </span>
-                </dt>
-                <dd className="tabular-nums">− {rupiah(jasaKetua)}</dd>
-              </div>
-            )}
-
+            {/*
+              Potongan anggota TIDAK muncul sebagai baris tersendiri di sini:
+              nilainya sama persis dengan blok Diskon di atas, dan menampilkan
+              angka yang sama dua kali dengan tanda minus membuatnya terbaca
+              seolah dipotong dua kali. Jasa ketua kelompok juga tidak ada di
+              sini — ia tidak mengurangi setoran, dan tempatnya di kartu sendiri
+              setelah kartu ini.
+            */}
             <div className="flex items-baseline justify-between gap-3 border-t border-slate-200 pt-2.5">
               <dt className="font-medium text-slate-700">{t("nafsulTransaksi.due")}</dt>
               <dd className="text-xl font-bold tabular-nums text-[#075489]">
@@ -1516,14 +1447,73 @@ function TransaksiBaruForm() {
                 {t("nafsulTransaksi.exact")}
               </p>
             )}
-            {potongan > totalRincian && (
-              <p className="border-t border-slate-200 pt-2 text-xs text-red-600">
-                {t("nafsulTransaksi.deductionTooBig")}
-              </p>
-            )}
           </dl>
         </div>
       </div>
+
+      {/*
+        ── Potongan ketua kelompok ──
+
+        Kartu tersendiri SETELAH kartu pembayaran, bukan satu baris di dalam
+        ringkasan. Angkanya tidak mengurangi setoran — ia mencatat hak ketua —
+        jadi menaruhnya berderet dengan potongan yang benar-benar mengurangi
+        membuat keduanya terbaca sebagai hal yang sama.
+      */}
+      {tipe === "kelompok" && (
+        <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
+          <h2 className="border-b border-slate-200 bg-slate-50/60 px-5 py-3.5 font-semibold text-slate-800">
+            {t("nafsulTransaksi.leaderDeduction")}
+          </h2>
+
+          <div className="grid gap-4 p-5 sm:grid-cols-2">
+            <div className="space-y-1.5">
+              <Label htmlFor="hd-potongan-ketua">
+                {t("nafsulTransaksi.leaderDeduction")}
+              </Label>
+              <NumberInput
+                id="hd-potongan-ketua"
+                prefix="%"
+                placeholder="0"
+                grouped={false}
+                value={header.group_leader_fee_percent}
+                onValueChange={(v) =>
+                  // Dibatasi 100 saat diketik, bukan ditolak setelah disimpan:
+                  // potongan di atas 100% tidak punya arti, dan nominal di
+                  // sebelahnya langsung ikut salah.
+                  setHeader((h) => ({
+                    ...h,
+                    group_leader_fee_percent:
+                      v === "" || Number(v) <= 100 ? v : "100",
+                  }))
+                }
+              />
+              <p className="text-xs text-slate-500">
+                {t("nafsulTransaksi.leaderDeductionHint")}
+              </p>
+            </div>
+
+            <div className="space-y-1.5">
+              <Label htmlFor="hd-jasa-ketua">{t("nafsulTransaksi.leaderFee")}</Label>
+              {/*
+                Hanya tampilan, bukan isian: nominalnya selalu turunan dari
+                persentase × total rincian. Kalau boleh diketik sendiri, angkanya
+                bisa berselisih dengan persentase yang tercatat di kuitansi yang
+                sama tanpa ada yang tahu mana yang benar.
+              */}
+              <div
+                id="hd-jasa-ketua"
+                className="flex h-[38px] items-center rounded-lg border border-slate-200 bg-slate-50 px-4 text-sm font-medium tabular-nums text-slate-700"
+              >
+                {rupiah(jasaKetua)}
+              </div>
+              <p className="text-xs text-slate-500">
+                {t("nafsulTransaksi.leaderFeeHint")}
+              </p>
+            </div>
+
+          </div>
+        </div>
+      )}
 
       <div className="flex gap-3">
         <Button

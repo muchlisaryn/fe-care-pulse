@@ -2,12 +2,13 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { User, Users } from "lucide-react";
+import { Combine, User, Users, UsersRound } from "lucide-react";
 import { api, ApiError } from "@/lib/nafsul/api";
 import { Button } from "@/components/atoms/Button";
 import { PageHeader } from "@/components/molecules/PageHeader";
 import { StatCard } from "@/components/molecules/StatCard";
 import DaftarAnggota, { type TipeAnggota } from "@/components/nafsul/DaftarAnggota";
+import GabungAnggotaModal from "@/components/nafsul/GabungAnggotaModal";
 import { localeOf, useLanguage } from "@/lib/i18n";
 
 /** Jumlah anggota per tipe — dihitung server dengan COUNT, bukan dari isi daftar. */
@@ -27,6 +28,15 @@ export default function AnggotaListPage() {
   const { t, lang } = useLanguage();
   const [statistik, setStatistik] = useState<Statistik | null>(null);
   const [errorStatistik, setErrorStatistik] = useState<string | null>(null);
+  const [gabungTerbuka, setGabungTerbuka] = useState(false);
+  /**
+   * Dinaikkan setelah penggabungan berhasil.
+   *
+   * Dipakai sebagai `key` daftar & pemicu pemuatan ulang statistik: anggota
+   * asal bisa saja baru dinonaktifkan, dan daftar yang masih menampilkannya
+   * akan membuka halaman anggota yang sudah tidak ada.
+   */
+  const [versi, setVersi] = useState(0);
 
   useEffect(() => {
     let aktif = true;
@@ -53,15 +63,48 @@ export default function AnggotaListPage() {
         title={t("nafsulAnggota.title")}
         subtitle={t("nafsulAnggota.subtitle")}
         action={
-          <Button asChild className="bg-[#075489] hover:bg-[#075489]/90 text-white">
-            <Link href="/nafsul/master/anggota/baru">{t("nafsulAnggota.addMember")}</Link>
-          </Button>
+          <div className="flex flex-wrap gap-2">
+            {/* Gabung Anggota berdampingan dengan Tambah Anggota, tapi bergaya
+                sekunder: ia dipakai sesekali untuk membereskan data ganda,
+                bukan pekerjaan harian seperti mendaftarkan anggota baru. */}
+            <Button
+              variant="outline"
+              onClick={() => setGabungTerbuka(true)}
+              className="flex items-center gap-1.5"
+            >
+              <Combine className="h-4 w-4" />
+              {t("gabungAnggota.title")}
+            </Button>
+
+            <Button asChild className="bg-[#075489] hover:bg-[#075489]/90 text-white">
+              <Link href="/nafsul/master/anggota/baru">{t("nafsulAnggota.addMember")}</Link>
+            </Button>
+          </div>
         }
       />
 
       {/* Angka kartu berasal dari COUNT di server; kliknya membuka halaman
           tersendiri per tipe, bukan menyaring tabel di bawahnya. */}
-      <div className="mb-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
+      <div className="mb-4 grid grid-cols-1 gap-4 sm:grid-cols-3">
+        {/*
+          Total ditaruh PALING DEPAN dan TIDAK bisa diklik.
+
+          Paling depan karena ia angka pokoknya — dua kartu di sebelahnya adalah
+          pecahannya, dan pecahan yang mendahului keseluruhannya memaksa pembaca
+          menjumlah sendiri untuk tahu berapa anggotanya.
+
+          Tidak bisa diklik karena tidak ada halaman "semua anggota" untuk
+          dituju: daftarnya sudah ada tepat di bawah kartu ini. Karena itu pula
+          ia tidak memakai keterangan "Klik untuk lihat detail" seperti dua
+          tetangganya — janji yang tidak bisa ditepati lebih buruk daripada
+          tidak ada keterangan sama sekali.
+        */}
+        <StatCard
+          title={t("nafsulAnggota.statTotal")}
+          value={statistik ? statistik.total.toLocaleString(localeOf(lang)) : "…"}
+          icon={UsersRound}
+        />
+
         {KARTU.map(({ tipe, judul, ikon }) => (
           <Link
             key={tipe}
@@ -84,7 +127,13 @@ export default function AnggotaListPage() {
         </div>
       )}
 
-      <DaftarAnggota />
+      <DaftarAnggota key={versi} />
+
+      <GabungAnggotaModal
+        open={gabungTerbuka}
+        onClose={() => setGabungTerbuka(false)}
+        onSuccess={() => setVersi((v) => v + 1)}
+      />
     </div>
   );
 }

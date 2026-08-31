@@ -28,30 +28,23 @@ import ImportExcelModal, {
  */
 const KOLOM_KUITANSI: ImportColumn[] = [
   /**
-   * PEREKAT ANTAR-SHEET, bukan nomor kuitansi. Tanpa pasangan di database.
+   * Nomor kuitansi — WAJIB, dan merangkap dua peran.
    *
-   * Dipakai menyambungkan baris di sheet Rincian ke kuitansi ini, lalu dibuang.
-   * Namanya sengaja bukan `transaction_number` — kolom itu ada tersendiri di
-   * bawah, dan menyatukan keduanya membuat kode sementara "K1" terlihat seperti
-   * nomor kuitansi yang akan tersimpan.
+   * Tersimpan sebagai nomor kuitansinya, SEKALIGUS jadi kunci yang
+   * menyambungkan baris ini ke rincian-rinciannya di sheet Rincian. Nilainya
+   * harus unik: server menolak yang kembar di dalam file maupun yang sudah
+   * dipakai kuitansi lain di aplikasi.
+   *
+   * Dulu peran perekat dipegang kolom terpisah `kode_kuitansi`, dan kolom ini
+   * boleh dikosongkan agar server yang membuatkan nomornya. Dua kolom untuk
+   * satu peran ternyata cuma jebakan — nomor lama diisikan ke kolom perekat
+   * yang memang selalu dibuang, lalu kuitansinya tersimpan dengan nomor buatan
+   * server tanpa satu pun galat muncul.
+   *
+   * Formatnya bebas: nomor lama adalah fakta yang sudah terjadi, dan aturan
+   * penomoran hari ini tidak berlaku surut untuknya.
    */
-  { header: "kode_kuitansi", field: "kode_kuitansi", contoh: "K1", wajib: true },
-  /**
-   * Nomor kuitansi dari sistem lama. Boleh dikosongkan.
-   *
-   * Diisi → dipakai APA ADANYA, supaya kuitansi hasil migrasi tetap memakai
-   * nomor yang tertulis di lembar & arsip lamanya dan bisa ditelusuri balik.
-   * Kosong → server membuatkan (YYMMDD + urut harian), seperti kuitansi yang
-   * dibuat lewat form.
-   *
-   * Wajib unik: server menolak nomor yang kembar di dalam file maupun yang
-   * sudah dipakai kuitansi lain di aplikasi, dan menolaknya per kuitansi —
-   * bukan menunggu index unik menjatuhkan seluruh batch saat penyimpanan.
-   */
-  { header: "transaction_number", field: "no_kuitansi", contoh: "" },
-  // Tanggal uang DITERIMA, bukan tanggal impor. Sel yang diformat sebagai
-  // tanggal di Excel pun aman: cellToString mengubahnya jadi YYYY-MM-DD memakai
-  // tanggal LOKAL, sehingga tidak bergeser sehari seperti kalau lewat UTC.
+  { header: "transaction_number", field: "no_kuitansi", contoh: "2608140001", wajib: true },
   { header: "date", field: "tanggal", contoh: "2026-08-23", wajib: true },
   { header: "transaction_type", field: "jenis", contoh: "pribadi", wajib: true },
   { header: "payment", field: "dibayar", contoh: "150000", wajib: true },
@@ -114,7 +107,8 @@ const KOLOM_KUITANSI: ImportColumn[] = [
  * ratusan kali.
  */
 const KOLOM_RINCIAN: ImportColumn[] = [
-  { header: "kode_kuitansi", field: "kode_kuitansi", contoh: "K1", wajib: true },
+  // Menunjuk ke baris sheet Kuitansi yang bernomor sama.
+  { header: "transaction_number", field: "no_kuitansi", contoh: "2608140001", wajib: true },
   { header: "member_number", field: "no_anggota", contoh: "26082101", wajib: true },
   { header: "rate_code", field: "kode_tarif", contoh: "IUR01", wajib: true },
   { header: "payment_period", field: "periode", contoh: "01/2026" },
@@ -146,7 +140,7 @@ export default function ImportTransaksiModal({
       barisWajib={{ field: "no_anggota", label: "member_number" }}
       // Rincian se-kuitansi tidak boleh terpecah ke dua permintaan: yang
       // terbelah akan tersimpan sebagai dua kuitansi berbeda.
-      kunciGrup="kode_kuitansi"
+      kunciGrup="no_kuitansi"
       /**
        * 2000, bukan 50.
        *
