@@ -40,7 +40,6 @@ export default function ImportKotaModal({
       slug="kota"
       sheetUtama="Kota"
       columns={COLUMNS}
-      barisWajib={{ field: "nama", label: "Nama Kota" }}
     />
   );
 }

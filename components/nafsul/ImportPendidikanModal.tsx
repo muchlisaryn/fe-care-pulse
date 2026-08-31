@@ -37,7 +37,6 @@ export default function ImportPendidikanModal({
       slug="pendidikan"
       sheetUtama="Pendidikan"
       columns={COLUMNS}
-      barisWajib={{ field: "nama", label: "Nama Pendidikan" }}
     />
   );
 }

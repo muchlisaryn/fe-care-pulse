@@ -30,8 +30,6 @@ export interface PesanParse {
   buffer: ArrayBuffer
   sheetUtama: string
   columns: KolomBaca[]
-  /** Field yang wajib terisi; baris tanpa isian ini tidak ikut dikirim. */
-  wajibField: string
   kunciGrup?: string
   ukuranBatch: number
   sheetInduk?: { nama: string; columns: KolomBaca[] }
@@ -56,8 +54,6 @@ export type PesanKeluar =
       total: number
       totalBatch: number
       totalInduk: number
-      /** Baris yang kolom wajibnya kosong — dikembalikan utuh agar bisa diekspor. */
-      tanpaWajib: ParsedRow[]
     }
   | { type: "batch"; index: number; rows: ParsedRow[]; induk: ParsedRow[] }
   | { type: "induk"; rows: ParsedRow[] }
@@ -152,17 +148,11 @@ function tanganiParse(pesan: PesanParse): void {
     kirim({ type: "progress", fase: "baca", dibaca, total }),
   )
 
-  // Baris tanpa kolom wajib disaring DI SINI, bukan di thread utama: menyaring
-  // 300 ribu baris di sana berarti mengirim 300 ribu baris ke sana lebih dulu.
-  const denganWajib: ParsedRow[] = []
-  const tanpaWajib: ParsedRow[] = []
-
-  for (const row of rows) {
-    if (String(row[pesan.wajibField] ?? "").trim() === "") tanpaWajib.push(row)
-    else denganWajib.push(row)
-  }
-
-  batches = bagiBatch(denganWajib, pesan.ukuranBatch, pesan.kunciGrup)
+  // Tidak ada penyaringan di sini: kolom wajib yang kosong dinilai SERVER,
+  // supaya aturannya hanya hidup di satu tempat. Baris yang seluruh selnya
+  // kosong sudah dibuang bacaSheet(), jadi yang terkirim tetap hanya baris yang
+  // benar-benar berisi.
+  batches = bagiBatch(rows, pesan.ukuranBatch, pesan.kunciGrup)
   indeks = indeksInduk(barisInduk, pesan.kunciGrup)
 
   kirim({
@@ -170,6 +160,5 @@ function tanganiParse(pesan: PesanParse): void {
     total: rows.length,
     totalBatch: batches.length,
     totalInduk: barisInduk.length,
-    tanpaWajib,
   })
 }

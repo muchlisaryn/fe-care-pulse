@@ -145,7 +145,6 @@ export default function ImportTransaksiModal({
       slug="transaksi"
       sheetUtama="Rincian"
       columns={KOLOM_RINCIAN}
-      barisWajib={{ field: "no_anggota", label: "member_number" }}
       // Rincian se-kuitansi tidak boleh terpecah ke dua permintaan: yang
       // terbelah akan tersimpan sebagai dua kuitansi berbeda.
       kunciGrup="no_kuitansi"

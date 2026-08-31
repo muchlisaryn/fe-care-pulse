@@ -43,7 +43,6 @@ export default function ImportKetuaKelompokModal({
       slug="ketua-kelompok"
       sheetUtama="Ketua Kelompok"
       columns={COLUMNS}
-      barisWajib={{ field: "nama", label: "Nama" }}
     />
   );
 }

@@ -39,7 +39,6 @@ export default function ImportWilayahModal({
       slug="wilayah"
       sheetUtama="Wilayah"
       columns={COLUMNS}
-      barisWajib={{ field: "nama", label: "Nama Wilayah" }}
     />
   );
 }

@@ -86,12 +86,6 @@ interface ImportExcelModalProps {
   /** Nama sheet data di file template, mis. "Anggota". */
   sheetUtama: string;
   columns: ImportColumn[];
-  /**
-   * Kolom yang dicek di browser sebelum baris dikirim — baris tanpa isian ini
-   * langsung dicatat gagal tanpa membebani server. Terpisah dari penanda
-   * `wajib` di tiap kolom, yang hanya menyorot judulnya di file Excel.
-   */
-  barisWajib: { field: string; label: string };
   /** Sheet referensi master. Tanpa ini, file hanya berisi sheet data. */
   muatMaster?: () => Promise<MasterSheet[]>;
   /**
@@ -170,8 +164,6 @@ interface ImportResponse {
 interface SumberBatch {
   totalBaris: number;
   totalBatch: number;
-  /** Baris yang kolom wajibnya kosong — gagal tanpa perlu dikirim ke server. */
-  tanpaWajib: ParsedRow[];
   ambil: (index: number) => Promise<{ rows: ParsedRow[]; induk: ParsedRow[] }>;
 }
 
@@ -197,7 +189,6 @@ export default function ImportExcelModal({
   slug,
   sheetUtama,
   columns,
-  barisWajib,
   muatMaster,
   kunciGrup,
   ukuranBatch = BATCH_SIZE,
@@ -248,7 +239,6 @@ export default function ImportExcelModal({
   // Kolom bertanda `wajib` tidak lagi didaftar ulang di modal: judulnya sudah
   // disorot kuning di file template, dan daftar kedua di layar hanya mengulang
   // hal yang sama sambil mendorong area unggah turun dari pandangan.
-  const namaDari = (row: ParsedRow) => String(row[barisWajib.field] ?? "").trim();
 
   function lepasWorker() {
     // Janji yang masih menggantung ditolak lebih dulu: tanpa ini `await` yang
@@ -388,7 +378,6 @@ export default function ImportExcelModal({
         buffer: await file.arrayBuffer(),
         sheetUtama,
         columns,
-        wajibField: barisWajib.field,
         kunciGrup,
         ukuranBatch,
         sheetInduk: sheetInduk
@@ -416,17 +405,9 @@ export default function ImportExcelModal({
         totalInduk: balasan.totalInduk,
       });
 
-      // Baris tanpa kolom wajib sudah disaring worker — ditampilkan sebagai
-      // gagal sejak awal, tanpa pernah dikirim ke server.
-      setGagal(
-        balasan.tanpaWajib.map((row) => ({
-          sheet: sheetUtama,
-          baris: row.baris,
-          nama: "",
-          pesan: `${barisWajib.label} wajib diisi.`,
-          row,
-        })),
-      );
+      // Daftar gagal dikosongkan: SELURUH isinya kini datang dari server —
+      // kolom wajib yang kosong pun dinilai di sana, bukan ditebak di klien.
+      setGagal([]);
 
       if (balasan.total === 0) setParseError(t("nafsulImport.noRows"));
     } catch {
@@ -461,8 +442,7 @@ export default function ImportExcelModal({
     setTotalBatch(sumber.totalBatch);
     setBatchKe(0);
     setBerhasil(0);
-    // Baris tanpa kolom wajib tidak perlu dikirim ke server — sudah dicatat gagal.
-    setDiproses(sumber.tanpaWajib.length);
+    setDiproses(0);
 
     let sukses = 0;
     let batch = 0;
@@ -526,7 +506,7 @@ export default function ImportExcelModal({
         }
 
         terkirim += potongan.length;
-        setDiproses(sumber.tanpaWajib.length + terkirim);
+        setDiproses(terkirim);
       }
 
       setSelesai(true);
@@ -547,14 +527,9 @@ export default function ImportExcelModal({
   function mulaiImport() {
     if (!ringkasan) return;
 
-    // Baris tanpa kolom wajib sudah masuk daftar gagal saat file dibaca; di sini
-    // cukup jumlahnya, untuk menghitung progres.
-    const tanpaWajib = gagal.filter((g) => g.sheet === sheetUtama && g.nama === "");
-
     jalankan({
       totalBaris: ringkasan.totalBaris,
       totalBatch: ringkasan.totalBatch,
-      tanpaWajib: tanpaWajib.map((g) => g.row),
       ambil: async (index) => {
         const balasan = await tanyaWorker({ type: "batch", index });
 
@@ -572,10 +547,11 @@ export default function ImportExcelModal({
    * dibagi batch di sini saja — tidak perlu menempuh worker.
    */
   function kirimUlangGagal() {
+    // Seluruh baris gagal dikirim ulang apa adanya — termasuk yang kolom
+    // wajibnya kosong. Yang menilainya tetap server, sama seperti kiriman
+    // pertama.
     const daftar = gagalUtama.map((g) => g.row);
-    const denganNama = daftar.filter((r) => namaDari(r) !== "");
-    const tanpaWajib = daftar.filter((r) => namaDari(r) === "");
-    const batches = bagiBatch(denganNama, ukuranBatch, kunciGrup);
+    const batches = bagiBatch(daftar, ukuranBatch, kunciGrup);
 
     // Induk untuk kiriman ulang diambil dari galat induk yang tercatat; file
     // aslinya mungkin sudah tidak ada lagi di worker.
@@ -589,7 +565,6 @@ export default function ImportExcelModal({
     jalankan({
       totalBaris: daftar.length,
       totalBatch: batches.length,
-      tanpaWajib,
       ambil: async (index) => {
         const potongan = batches[index] ?? [];
 

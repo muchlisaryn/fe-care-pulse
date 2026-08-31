@@ -37,7 +37,6 @@ export default function ImportPekerjaanModal({
       slug="pekerjaan"
       sheetUtama="Pekerjaan"
       columns={COLUMNS}
-      barisWajib={{ field: "nama", label: "Nama Pekerjaan" }}
     />
   );
 }

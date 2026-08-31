@@ -110,7 +110,6 @@ export default function ImportAnggotaModal({
       slug="anggota"
       sheetUtama="Anggota"
       columns={COLUMNS}
-      barisWajib={{ field: "nama", label: "Nama Lengkap" }}
       muatMaster={muatMaster}
     />
   );
