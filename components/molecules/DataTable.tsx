@@ -1,6 +1,8 @@
 "use client"
 
+import { Pencil, Trash2 } from "lucide-react"
 import { Button } from "@/components/atoms/Button"
+import { RowActionsMenu, type RowActionItem } from "@/components/molecules/RowActionsMenu"
 import { useT } from "@/lib/i18n"
 import { cn } from "@/lib/utils"
 import type { ReactNode } from "react"
@@ -51,6 +53,10 @@ type DataTableProps<T extends object> = {
   autoWidth?: boolean
   // Perataan isi kolom Aksi. Bawaan "end" (kanan) — sesuai kebanyakan tabel.
   actionsAlign?: "start" | "center" | "end"
+  // Lipat seluruh aksi baris ke satu tombol titik-tiga. Dipakai tabel yang
+  // aksinya lebih dari dua: deretan tombol per baris membuat kolom Aksi lebih
+  // lebar daripada datanya sendiri.
+  actionsAsMenu?: boolean
   // Jumlah baris di halaman-halaman sebelumnya, mis. `(page - 1) * perPage`.
   // Tanpa ini penomoran mengulang dari 1 di tiap halaman.
   rowNumberOffset?: number
@@ -73,6 +79,7 @@ export function DataTable<T extends object>({
   rowNumberOffset = 0,
   autoWidth = false,
   actionsAlign = "end",
+  actionsAsMenu = false,
   labels,
 }: DataTableProps<T>) {
   // Kelas perataan Aksi — dipakai di header (teks) & sel (flex) tabel & kartu.
@@ -92,6 +99,44 @@ export function DataTable<T extends object>({
 
   // Tombol aksi baris — dipakai bersama oleh tampilan tabel (desktop) & kartu (mobile).
   function renderActions(row: T, rowLoading: boolean) {
+    if (actionsAsMenu) {
+      // Isi menunya disusun dari sumber yang sama persis dengan deretan tombol
+      // di bawah — termasuk `visible`/`canEdit`/`canDelete`, supaya aksi yang
+      // tidak boleh muncul tetap tidak muncul, hanya wadahnya yang berbeda.
+      const items: RowActionItem[] = []
+
+      extraActions?.forEach((action) => {
+        if (!(action.visible?.(row) ?? true)) return
+        items.push({
+          label: typeof action.label === "function" ? action.label(row) : action.label,
+          icon: action.icon?.(row),
+          disabled: action.disabled?.(row) ?? false,
+          onClick: () => action.onClick(row),
+        })
+      })
+
+      // Ubah & Hapus ikut berikon seperti aksi tambahan di atasnya: di dalam
+      // menu, label tanpa ikon terbaca sebagai baris yang berbeda jenis.
+      if (onEdit && (canEdit?.(row) ?? true)) {
+        items.push({
+          label: editLabel,
+          icon: <Pencil className="h-3.5 w-3.5" />,
+          onClick: () => onEdit(row),
+        })
+      }
+
+      if (onDelete && (canDelete?.(row) ?? true)) {
+        items.push({
+          label: deleteLabel,
+          icon: <Trash2 className="h-3.5 w-3.5" />,
+          tone: "danger",
+          onClick: () => onDelete(row),
+        })
+      }
+
+      return <RowActionsMenu items={items} disabled={rowLoading} align={actionsAlign === "start" ? "start" : "end"} />
+    }
+
     return (
       <>
         {extraActions?.map((action, k) =>

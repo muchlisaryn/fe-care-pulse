@@ -201,6 +201,9 @@ export default function TabelAnggota({
         hideRowNumber
         autoWidth
         actionsAlign="center"
+        // Tiga aksi per baris (Cetak Kartu, Ubah, Hapus) — dilipat jadi satu
+        // tombol titik-tiga supaya kolom Aksi tidak lebih lebar dari datanya.
+        actionsAsMenu
         emptyMessage={pesanKosong ?? t("nafsulAnggota.empty")}
         extraActions={tampilkanAksi ? aksiCetak : undefined}
         onEdit={

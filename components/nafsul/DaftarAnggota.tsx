@@ -101,11 +101,6 @@ export default function DaftarAnggota({ tipeTetap }: { tipeTetap?: TipeAnggota }
     muat(draft, 1);
   }
 
-  function handleReset() {
-    setDraft(filterAwal);
-    muat(filterAwal, 1);
-  }
-
   async function handleDelete() {
     if (!deleteTarget) return;
     setDeleting(true);
@@ -167,8 +162,8 @@ export default function DaftarAnggota({ tipeTetap }: { tipeTetap?: TipeAnggota }
           awal loading=true), tetapi ekstensi peramban (pengisi formulir / pengelola
           kata sandi) kerap melucuti atribut `disabled` pada tombol form sebelum
           React sempat menghidrasi — memicu peringatan mismatch palsu. Dibatasi ke
-          dua tombol ini saja, bukan di atom Button, agar mismatch nyata di tempat
-          lain tetap terdeteksi.
+          tombol ini saja, bukan di atom Button, agar mismatch nyata di tempat lain
+          tetap terdeteksi.
         */}
         <div className="flex gap-2">
           <Button
@@ -178,16 +173,6 @@ export default function DaftarAnggota({ tipeTetap }: { tipeTetap?: TipeAnggota }
             className="flex-1 sm:flex-none bg-[#075489] hover:bg-[#075489]/90 text-white"
           >
             {loading ? t("nafsulAnggota.loading") : t("common.search")}
-          </Button>
-          <Button
-            type="button"
-            variant="outline"
-            onClick={handleReset}
-            disabled={loading}
-            suppressHydrationWarning
-            className="flex-1 sm:flex-none"
-          >
-            {t("common.reset")}
           </Button>
         </div>
       </form>
