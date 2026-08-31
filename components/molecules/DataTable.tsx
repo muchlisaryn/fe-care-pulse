@@ -45,6 +45,12 @@ type DataTableProps<T extends object> = {
   rowNumber?: (row: T, index: number) => ReactNode
   // Sembunyikan kolom "No" (mis. saat tabel sudah punya kolom urutan sendiri).
   hideRowNumber?: boolean
+  // Tabel selebar ISINYA, bukan dipaksa penuh (w-full). Dipakai saat kolomnya
+  // banyak: ruang sisa jatuh di tepi kanan (di luar kolom), bukan tersebar jadi
+  // celah antar-kolom — mis. celah lebar sebelum kolom Aksi.
+  autoWidth?: boolean
+  // Perataan isi kolom Aksi. Bawaan "end" (kanan) — sesuai kebanyakan tabel.
+  actionsAlign?: "start" | "center" | "end"
   // Jumlah baris di halaman-halaman sebelumnya, mis. `(page - 1) * perPage`.
   // Tanpa ini penomoran mengulang dari 1 di tiap halaman.
   rowNumberOffset?: number
@@ -65,8 +71,15 @@ export function DataTable<T extends object>({
   rowNumber,
   hideRowNumber = false,
   rowNumberOffset = 0,
+  autoWidth = false,
+  actionsAlign = "end",
   labels,
 }: DataTableProps<T>) {
+  // Kelas perataan Aksi — dipakai di header (teks) & sel (flex) tabel & kartu.
+  const actionsThAlign =
+    actionsAlign === "center" ? "text-center" : actionsAlign === "start" ? "text-left" : "text-right"
+  const actionsJustify =
+    actionsAlign === "center" ? "justify-center" : actionsAlign === "start" ? "justify-start" : "justify-end"
   // Teks bawaan mengikuti BAHASA AKTIF; `labels`/`emptyMessage` dari halaman tetap
   // menang karena banyak tabel perlu kalimat kosong yang khas halamannya.
   const t = useT()
@@ -147,7 +160,7 @@ export function DataTable<T extends object>({
                   ))}
                 </dl>
                 {hasActions && (
-                  <div className="flex flex-wrap justify-end gap-2 border-t border-gray-100 bg-gray-50/50 px-4 py-2.5">
+                  <div className={cn("flex flex-wrap gap-2 border-t border-gray-100 bg-gray-50/50 px-4 py-2.5", actionsJustify)}>
                     {renderActions(row, rowLoading)}
                   </div>
                 )}
@@ -159,7 +172,7 @@ export function DataTable<T extends object>({
 
       {/* Desktop: tabel penuh (scroll horizontal bila perlu). */}
       <div className="hidden overflow-x-auto md:block">
-      <table className="w-full text-sm">
+      <table className={cn("text-sm", autoWidth ? "w-auto" : "w-full")}>
         <thead>
           <tr className="border-b border-gray-100">
             {!hideRowNumber && (
@@ -179,7 +192,7 @@ export function DataTable<T extends object>({
               </th>
             ))}
             {hasActions && (
-              <th className="py-3 pl-3 pr-4 text-right text-xs font-semibold uppercase tracking-wide text-gray-400 w-36">
+              <th className={cn("py-3 pl-3 pr-4 text-xs font-semibold uppercase tracking-wide text-gray-400 w-36", actionsThAlign)}>
                 {actionsLabel}
               </th>
             )}
@@ -218,7 +231,7 @@ export function DataTable<T extends object>({
                   ))}
                   {hasActions && (
                     <td className="py-3 pl-3 pr-4">
-                      <div className="flex justify-end gap-2">{renderActions(row, rowLoading)}</div>
+                      <div className={cn("flex gap-2", actionsJustify)}>{renderActions(row, rowLoading)}</div>
                     </td>
                   )}
                 </tr>

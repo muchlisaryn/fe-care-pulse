@@ -3,11 +3,13 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, type ReactNode } from "react";
+import { Printer } from "lucide-react";
 import { formatDate, kunciJenisKelamin } from "@/lib/nafsul/format";
 import { localeOf, useLanguage } from "@/lib/i18n";
 import type { Anggota } from "@/lib/nafsul/types";
+import { cetakKartuAnggota } from "@/lib/nafsul/kartuAnggota";
 import { Badge } from "@/components/atoms/Badge";
-import { DataTable, type Column } from "@/components/molecules/DataTable";
+import { DataTable, type Column, type ExtraAction } from "@/components/molecules/DataTable";
 import RiwayatIuranModal from "@/components/nafsul/RiwayatIuranModal";
 
 /** Sel kosong seragam dengan tabel lain di aplikasi. */
@@ -180,13 +182,27 @@ export default function TabelAnggota({
     );
   }
 
+  // Cetak kartu peserta — muncul di KIRI tombol Ubah (extraActions dirender lebih
+  // dulu). Hanya pada tampilan aksi penuh, bukan di modal anggota per kelompok.
+  const aksiCetak: ExtraAction<Anggota>[] = [
+    {
+      label: t("nafsulAnggota.printCard"),
+      onClick: (a) => cetakKartuAnggota(a),
+      icon: () => <Printer className="h-3.5 w-3.5" />,
+      className: "gap-1 text-[#075489]",
+    },
+  ];
+
   return (
     <>
       <DataTable
         columns={columns}
         data={rows}
         hideRowNumber
+        autoWidth
+        actionsAlign="center"
         emptyMessage={pesanKosong ?? t("nafsulAnggota.empty")}
+        extraActions={tampilkanAksi ? aksiCetak : undefined}
         onEdit={
           tampilkanAksi ? (a) => router.push(`/nafsul/master/anggota/${a.id}/edit`) : undefined
         }

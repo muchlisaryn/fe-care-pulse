@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { Combine, User, Users } from "lucide-react";
+import { Combine, User, Users, UsersRound } from "lucide-react";
 import { api, ApiError } from "@/lib/nafsul/api";
 import { Button } from "@/components/atoms/Button";
 import { PageHeader } from "@/components/molecules/PageHeader";
@@ -85,7 +85,26 @@ export default function AnggotaListPage() {
 
       {/* Angka kartu berasal dari COUNT di server; kliknya membuka halaman
           tersendiri per tipe, bukan menyaring tabel di bawahnya. */}
-      <div className="mb-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
+      <div className="mb-4 grid grid-cols-1 gap-4 sm:grid-cols-3">
+        {/*
+          Total ditaruh PALING DEPAN dan TIDAK bisa diklik.
+
+          Paling depan karena ia angka pokoknya — dua kartu di sebelahnya adalah
+          pecahannya, dan pecahan yang mendahului keseluruhannya memaksa pembaca
+          menjumlah sendiri untuk tahu berapa anggotanya.
+
+          Tidak bisa diklik karena tidak ada halaman "semua anggota" untuk
+          dituju: daftarnya sudah ada tepat di bawah kartu ini. Karena itu pula
+          ia tidak memakai keterangan "Klik untuk lihat detail" seperti dua
+          tetangganya — janji yang tidak bisa ditepati lebih buruk daripada
+          tidak ada keterangan sama sekali.
+        */}
+        <StatCard
+          title={t("nafsulAnggota.statTotal")}
+          value={statistik ? statistik.total.toLocaleString(localeOf(lang)) : "…"}
+          icon={UsersRound}
+        />
+
         {KARTU.map(({ tipe, judul, ikon }) => (
           <Link
             key={tipe}

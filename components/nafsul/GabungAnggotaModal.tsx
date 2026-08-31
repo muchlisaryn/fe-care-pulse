@@ -310,15 +310,20 @@ export default function GabungAnggotaModal({ open, onClose, onSuccess }: Props) 
   /** Jumlah rincian & nominal yang benar-benar akan berpindah. */
   const pilihan = (ringkasan?.groups ?? []).filter((g) => terpilih.has(kunci(g)));
   const jumlahRincian = pilihan.reduce((a, g) => a + g.transaction_count, 0);
-  const jumlahNominal = pilihan.reduce((a, g) => a + g.amount, 0);
 
   /**
-   * Anggota asal akan dinonaktifkan bila TIDAK ada transaksi yang tersisa —
-   * yaitu ketika seluruh kelompok, termasuk yang bentrok, ikut berpindah.
-   * Ditampilkan sebagai peringatan supaya akibatnya tidak mengejutkan.
+   * Anggota asal sama sekali belum punya transaksi.
+   *
+   * Keadaan ini TETAP boleh digabungkan — justru bentuk data ganda yang paling
+   * sepele: dua kartu untuk orang yang sama, salah satunya belum pernah dipakai
+   * menyetor. Yang terjadi cuma anggota asalnya dinonaktifkan.
+   *
+   * Dibedakan dari "punya transaksi tapi belum satu pun dicentang", yang tetap
+   * dikunci: yang itu salah pakai, dan meloloskannya cuma menghasilkan riwayat
+   * penggabungan kosong sementara transaksinya masih tertinggal di kartu lama.
    */
-  const akanNonaktif =
-    ringkasan !== null && jumlahRincian === ringkasan.total_transactions && jumlahRincian > 0;
+  const tanpaTransaksi = ringkasan !== null && ringkasan.total_transactions === 0;
+  const jumlahNominal = pilihan.reduce((a, g) => a + g.amount, 0);
 
   async function simpan() {
     if (!asal || !tujuan) return;
@@ -445,7 +450,10 @@ export default function GabungAnggotaModal({ open, onClose, onSuccess }: Props) 
               </div>
 
               {ringkasan.groups.length === 0 ? (
-                <div className="py-10 text-center text-sm text-gray-400">
+                // Bukan jalan buntu: tombol Gabungkan tetap hidup, dan
+                // kalimatnya menyebutkan apa yang akan terjadi supaya petugas
+                // tidak mengira layarnya sedang menolak.
+                <div className="py-10 text-center text-sm text-gray-500">
                   {t("gabungAnggota.noTransactions")}
                 </div>
               ) : (
@@ -532,13 +540,6 @@ export default function GabungAnggotaModal({ open, onClose, onSuccess }: Props) 
                     ))}
                   </ul>
 
-                  {akanNonaktif && (
-                    <p className="mt-3 flex items-start gap-2 rounded-lg border border-[#075489]/30 bg-[#075489]/5 px-3 py-2 text-xs text-[#075489]">
-                      <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
-                      {t("gabungAnggota.willDisable", { name: asal?.nama ?? "" })}
-                    </p>
-                  )}
-
                   <div className="mt-3 space-y-1">
                     <label className="text-xs font-semibold uppercase tracking-wide text-gray-400">
                       {t("gabungAnggota.note")}
@@ -588,7 +589,7 @@ export default function GabungAnggotaModal({ open, onClose, onSuccess }: Props) 
               ) : (
                 <Button
                   onClick={simpan}
-                  disabled={menyimpan || jumlahRincian === 0}
+                  disabled={menyimpan || (jumlahRincian === 0 && !tanpaTransaksi)}
                   className="flex items-center gap-1.5"
                 >
                   <Combine className="h-4 w-4" />

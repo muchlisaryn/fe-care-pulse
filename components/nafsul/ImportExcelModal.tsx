@@ -149,19 +149,12 @@ interface GagalRow {
 
 interface ImportResponse {
   berhasil: number;
-  /**
-   * Baris yang SUDAH ada sebelumnya, jadi tidak ditulis ulang.
-   *
-   * Opsional: hanya impor transaksi yang mengenali keadaan ini. Impor master
-   * lain menolak duplikat sebagai galat biasa dan tidak mengirim angka ini.
-   */
-  dilewati?: number;
   gagal: number;
   hasil: {
     /** Nama sheet asal baris ini. Kosong pada impor satu sheet. */
     sheet?: string;
     baris: number;
-    status: "ok" | "gagal" | "lewati";
+    status: "ok" | "gagal";
     nama?: string;
     pesan?: string;
   }[];
@@ -233,7 +226,6 @@ export default function ImportExcelModal({
   const [batchKe, setBatchKe] = useState(0);
   const [diproses, setDiproses] = useState(0);
   const [berhasil, setBerhasil] = useState(0);
-  const [dilewati, setDilewati] = useState(0);
   const [gagal, setGagal] = useState<GagalRow[]>([]);
 
   const [masters, setMasters] = useState<MasterSheet[] | null>(null);
@@ -338,7 +330,6 @@ export default function ImportExcelModal({
     setBatchKe(0);
     setDiproses(0);
     setBerhasil(0);
-    setDilewati(0);
     setGagal([]);
     if (fileRef.current) fileRef.current.value = "";
   }
@@ -470,12 +461,10 @@ export default function ImportExcelModal({
     setTotalBatch(sumber.totalBatch);
     setBatchKe(0);
     setBerhasil(0);
-    setDilewati(0);
     // Baris tanpa kolom wajib tidak perlu dikirim ke server — sudah dicatat gagal.
     setDiproses(sumber.tanpaWajib.length);
 
     let sukses = 0;
-    let dilewat = 0;
     let batch = 0;
     let terkirim = 0;
 
@@ -497,9 +486,6 @@ export default function ImportExcelModal({
 
         sukses += res.berhasil;
         setBerhasil(sukses);
-
-        dilewat += res.dilewati ?? 0;
-        setDilewati(dilewat);
 
         // Baris potongan diindeks per nomor baris sekali per batch. Sebelumnya
         // tiap galat mencari barisnya dengan `find()` di seluruh daftar — pada
@@ -791,10 +777,6 @@ export default function ImportExcelModal({
       }
     >
       <div className="space-y-5">
-        <p className="text-sm text-slate-500">
-          {t(kunciGrup ? "nafsulImport.batchNoteGroup" : "nafsulImport.batchNote", { size: ukuranBatch })}
-        </p>
-
         {!namaFile ? (
             <div
               onDragOver={(e) => {
@@ -910,17 +892,6 @@ export default function ImportExcelModal({
                   {t("nafsulImport.success")}{" "}
                   <span className="font-semibold text-emerald-700">{berhasil}</span>
                 </span>
-                {/*
-                  Hanya muncul bila ada isinya. Impor master lain tidak mengenal
-                  keadaan "sudah ada" sama sekali, dan angka nol yang selalu
-                  nongol di sana cuma menimbulkan pertanyaan.
-                */}
-                {dilewati > 0 && (
-                  <span>
-                    {t("nafsulImport.skipped")}{" "}
-                    <span className="font-semibold text-amber-700">{dilewati}</span>
-                  </span>
-                )}
                 <span>
                   {t("nafsulImport.failed")}{" "}
                   <span className="font-semibold text-rose-700">{gagal.length}</span>

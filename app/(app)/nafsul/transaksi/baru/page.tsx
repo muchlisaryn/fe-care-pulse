@@ -1213,7 +1213,6 @@ function TransaksiBaruForm() {
             value={header.date}
             onChange={(e) => setHeader((h) => ({ ...h, date: e.target.value }))}
           />
-          <p className="text-xs text-slate-500">{t("nafsulTransaksi.dateHint")}</p>
         </div>
 
         <div className="grid gap-5 p-5 lg:grid-cols-5">
@@ -1236,9 +1235,6 @@ function TransaksiBaruForm() {
                 >
                   {rupiah(totalDiskon)}
                 </div>
-                <p className="text-xs text-slate-500">
-                  {t("nafsulTransaksi.memberDeductionAuto")}
-                </p>
               </div>
 
               <div className="space-y-1.5">
@@ -1515,14 +1511,11 @@ function TransaksiBaruForm() {
               </p>
             </div>
 
-            <p className="rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-500 sm:col-span-2">
-              {t("nafsulTransaksi.leaderFeeNote")}
-            </p>
           </div>
         </div>
       )}
 
-      <div className="flex gap-3">
+      <div className="flex justify-end gap-3">
         <Button
           type="submit"
           disabled={!siapSimpan}

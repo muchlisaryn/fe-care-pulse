@@ -426,7 +426,6 @@ export default function TransaksiEditPage() {
             value={header.date}
             onChange={(e) => setHeader((h) => (h ? { ...h, date: e.target.value } : h))}
           />
-          <p className="text-xs text-slate-500">{t("nafsulTransaksi.dateHint")}</p>
         </div>
 
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">

@@ -86,6 +86,16 @@ type TransaksiState = {
   search: string
   /** Kosong = semua cara bayar. */
   paymentMethod: string
+  /**
+   * Rentang tanggal transaksi, "YYYY-MM-DD". Kosong = tanpa batas di sisi itu.
+   *
+   * Menyaring kolom `date` (tanggal uang DITERIMA), bukan `created_at` — dua
+   * hal yang sering berbeda, dan yang dicari orang di daftar kuitansi selalu
+   * yang pertama. Keduanya berdiri sendiri: mengisi salah satu saja sah, dan
+   * berarti "sejak" atau "sampai" tanpa ujung yang lain.
+   */
+  dateFrom: string
+  dateTo: string
   loading: boolean
   loaded: boolean
   dirty: boolean
@@ -98,6 +108,8 @@ const initialState: TransaksiState = {
   page: 1,
   search: "",
   paymentMethod: "",
+  dateFrom: "",
+  dateTo: "",
   loading: false,
   loaded: false,
   dirty: false,
@@ -106,7 +118,7 @@ const initialState: TransaksiState = {
 export const fetchTransaksi = createAsyncThunk(
   "nafsulTransaksi/fetch",
   async (_, { getState }) => {
-    const { page, search, paymentMethod } = (
+    const { page, search, paymentMethod, dateFrom, dateTo } = (
       getState() as { nafsulTransaksi: TransaksiState }
     ).nafsulTransaksi
 
@@ -116,6 +128,8 @@ export const fetchTransaksi = createAsyncThunk(
         per_page: PER_PAGE,
         search: search || undefined,
         payment_method: paymentMethod || undefined,
+        date_from: dateFrom || undefined,
+        date_to: dateTo || undefined,
       },
     })
   }
@@ -132,6 +146,22 @@ const nafsulTransaksiSlice = createSlice({
     },
     setTransaksiPaymentMethod(state, action: PayloadAction<string>) {
       state.paymentMethod = action.payload
+      state.page = 1
+      state.loaded = false
+    },
+    /**
+     * Rentang tanggal disetel SEKALIGUS, bukan lewat dua reducer terpisah.
+     *
+     * Keduanya berubah bersama saat tombol Cari ditekan; dua reducer berarti
+     * dua kali `loaded = false` dan karenanya dua permintaan untuk satu kali
+     * pencarian — yang kedua membatalkan hasil yang pertama.
+     */
+    setTransaksiDateRange(
+      state,
+      action: PayloadAction<{ from: string; to: string }>
+    ) {
+      state.dateFrom = action.payload.from
+      state.dateTo = action.payload.to
       state.page = 1
       state.loaded = false
     },
@@ -165,6 +195,7 @@ const nafsulTransaksiSlice = createSlice({
 export const {
   setTransaksiSearch,
   setTransaksiPaymentMethod,
+  setTransaksiDateRange,
   setTransaksiPage,
   invalidateTransaksi,
 } = nafsulTransaksiSlice.actions
