@@ -39,3 +39,29 @@ export const PAYMENT_METHOD_COLORS: Record<string, string> = {
   cash: CHART_COLORS[1],
   other: CHART_COLORS[2],
 }
+
+/**
+ * Warna seri KATEGORI untuk grafik bertumpuk (mis. peminjaman per ruangan per
+ * hari). Empat, dan tidak lebih.
+ *
+ * Batasnya bukan selera: pada batang bertumpuk setiap potongan bisa bersebelahan
+ * dengan potongan mana pun, jadi SEMUA pasangan harus terpisah — bukan cuma yang
+ * berdekatan di daftar. Empat warna ini lulus seluruh pemeriksaan pada pengujian
+ * semua-pasangan (pita terang-gelap, chroma minimum, keterpisahan pada simulasi
+ * protan/deutan/tritan, dan kontras ≥ 3:1 terhadap kartu putih); menambah warna
+ * kelima menjatuhkan salah satu pasangan di bawah ambang. Entitas ke-5 dan
+ * seterusnya karena itu dilipat backend jadi satu seri "Lainnya".
+ *
+ * URUTANNYA TETAP, sama seperti CHART_COLORS: warna mengikuti ENTITAS menurut
+ * urutan seri yang dikirim backend, tidak pernah digilir mengikuti data yang
+ * tersisa setelah penyaringan.
+ */
+export const CHART_SERIES = ["#075489", "#0d8b7d", "#b45309", "#7c3aed"] as const
+
+/**
+ * Warna seri "Lainnya" — abu netral, SENGAJA di luar CHART_SERIES.
+ *
+ * Kelompok sisa bukan sebuah entitas, jadi ia tidak boleh mendapat warna yang
+ * setara dengan ruangan bernama; abu membuatnya terbaca sebagai latar sisa.
+ */
+export const CHART_OTHER = "#6b7280"

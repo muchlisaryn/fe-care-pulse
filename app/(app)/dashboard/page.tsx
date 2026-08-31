@@ -133,7 +133,10 @@ export default function DashboardPage() {
               not_returned: number
               overdue: number
             }
-            borrow_chart: { day: number; total: number }[]
+            room_chart: {
+              rooms: { key: string; name: string }[]
+              points: { day: number; values: Record<string, number> }[]
+            }
           }
           return {
             stats: [
@@ -143,9 +146,17 @@ export default function DashboardPage() {
               { label: t("dashboardNurse.statOverdue"), value: angka(x.summary.overdue) },
             ],
             chart: {
+              kind: "stacked",
               title: t("dashboardNurse.chartTitle"),
-              variant: "bar",
-              data: x.borrow_chart.map((h) => ({ label: String(h.day), value: h.total })),
+              // Nama seri "Lainnya" diterjemahkan di sini — ia satu-satunya seri
+              // yang bukan nama dari database.
+              series: x.room_chart.rooms.map((r) => ({
+                key: r.key,
+                name: r.key === "lainnya" ? t("dashboardNurse.otherRooms") : r.name,
+              })),
+              data: x.room_chart.points.map((h) => ({ label: String(h.day), values: h.values })),
+              otherKey: "lainnya",
+              totalLabel: t("dashboardNurse.chartUnit"),
               formatValue: (n) => angka(n),
               formatAxis: (n) => angka(Math.round(n)),
               emptyLabel: t("dashboardCssd.emptyChart"),

@@ -4,20 +4,41 @@ import { useEffect, useState } from "react"
 import { Modal } from "@/components/molecules/Modal"
 import { Button } from "@/components/atoms/Button"
 import { TrendChart, type TrendPoint } from "@/components/molecules/TrendChart"
+import {
+  StackedBarChart,
+  type StackedPoint,
+  type StackedSeries,
+} from "@/components/molecules/StackedBarChart"
 import { useT } from "@/lib/i18n"
 import api from "@/lib/axios"
+
+type PreviewChartBase = {
+  title: string
+  formatValue?: (n: number) => string
+  formatAxis?: (n: number) => string
+  emptyLabel: string
+}
+
+/**
+ * Grafik intip — bentuknya mengikuti grafik di halaman aslinya.
+ *
+ * `kind` boleh dilewatkan untuk grafik tren satu seri (bentuk yang paling
+ * banyak dipakai) supaya pemanggil lama tidak perlu diubah.
+ */
+export type PreviewChart =
+  | (PreviewChartBase & { kind?: "trend"; variant: "bar" | "line"; data: TrendPoint[] })
+  | (PreviewChartBase & {
+      kind: "stacked"
+      series: StackedSeries[]
+      data: StackedPoint[]
+      otherKey?: string
+      totalLabel?: string
+    })
 
 /** Bentuk ringkas yang dipahami modal ini — hasil pemetaan respons dashboard. */
 export type DashboardPreview = {
   stats: { label: string; value: string; hint?: string }[]
-  chart?: {
-    title: string
-    variant: "bar" | "line"
-    data: TrendPoint[]
-    formatValue?: (n: number) => string
-    formatAxis?: (n: number) => string
-    emptyLabel: string
-  }
+  chart?: PreviewChart
 }
 
 type DashboardPreviewModalProps = {
@@ -123,13 +144,25 @@ export function DashboardPreviewModal({
           {isi.chart && (
             <div>
               <h3 className="mb-2 text-sm font-semibold text-gray-800">{isi.chart.title}</h3>
-              <TrendChart
-                variant={isi.chart.variant}
-                data={isi.chart.data}
-                formatValue={isi.chart.formatValue}
-                formatAxis={isi.chart.formatAxis}
-                emptyLabel={isi.chart.emptyLabel}
-              />
+              {isi.chart.kind === "stacked" ? (
+                <StackedBarChart
+                  series={isi.chart.series}
+                  data={isi.chart.data}
+                  otherKey={isi.chart.otherKey}
+                  totalLabel={isi.chart.totalLabel}
+                  formatValue={isi.chart.formatValue}
+                  formatAxis={isi.chart.formatAxis}
+                  emptyLabel={isi.chart.emptyLabel}
+                />
+              ) : (
+                <TrendChart
+                  variant={isi.chart.variant}
+                  data={isi.chart.data}
+                  formatValue={isi.chart.formatValue}
+                  formatAxis={isi.chart.formatAxis}
+                  emptyLabel={isi.chart.emptyLabel}
+                />
+              )}
             </div>
           )}
         </div>

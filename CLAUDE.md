@@ -31,6 +31,8 @@ Larger, composed UI blocks built from atoms or other molecules:
 - `ResultDialog` - success/error result popup built on `Modal`; props: `open`, `onClose`, `variant` ("success" | "error"), `title?`, `description?`, `actionLabel?`; use it after every create/update/delete so the user always gets a clear result — pair with `apiErrorMessage()` from `lib/apiError.ts` for the failure text
 - `ConfirmDialog` - delete confirmation popup built on `Modal`; props: `open`, `onClose`, `onConfirm`, `title?`, `description?`, `loading?`; always use this before any delete action — never delete on a single click
 - `Pagination` - page navigation with prev/next, numbered pages, ellipsis, and item count; renders nothing when totalPages ≤ 1; always place inside the Card below DataTable
+- `TrendChart` - single-series trend, `variant` "bar" or "line"; no legend (the card title names the series)
+- `StackedBarChart` - stacked bar chart for one period per column split by entity (e.g. loans per day by room); props: `series` ({ key, name }[], fixed order = fixed colors), `data` ({ label, title?, values })[], `otherKey?` for the neutral "Others" bucket. Colors come from `CHART_SERIES` in `lib/chartPalette.ts` - max 4 entity series, the rest must be folded into "Others" by the backend
 
 ## Rules
 
