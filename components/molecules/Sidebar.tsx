@@ -20,6 +20,7 @@ import {
   Warehouse,
   WashingMachine,
   Printer,
+  FileText,
   ChevronRight,
   X,
   Circle,
@@ -51,6 +52,7 @@ const ICON_MAP: Record<string, LucideIcon> = {
   "washing-machine": WashingMachine,
   printer: Printer,
   wallet: Wallet,
+  "file-text": FileText,
 }
 
 function getIcon(name: string | null): LucideIcon {

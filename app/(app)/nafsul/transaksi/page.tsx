@@ -17,6 +17,7 @@ import {
   Wallet,
 } from "lucide-react";
 import { Button } from "@/components/atoms/Button";
+import { CurrencyCell } from "@/components/atoms/CurrencyCell";
 import { Input } from "@/components/atoms/Input";
 import { Label } from "@/components/atoms/Label";
 import { Select } from "@/components/atoms/Select";
@@ -41,32 +42,6 @@ import {
 import { api, apiBlob, ApiError } from "@/lib/nafsul/api";
 import { formatDate } from "@/lib/nafsul/format";
 import { localeOf, useLanguage } from "@/lib/i18n";
-
-/**
- * Sel rupiah pada tabel: "Rp" dipatok di kiri, angka di kanan (justify-between)
- * agar antar-baris "Rp"-nya sejajar di kiri dan digitnya sejajar di kanan —
- * tidak ikut bergeser saat panjang angkanya berbeda.
- */
-function SelRupiah({
-  nilai,
-  className,
-}: {
-  nilai: string | number;
-  className?: string;
-}) {
-  const angka = Number(nilai);
-  if (!Number.isFinite(angka)) {
-    return <span className={`tabular-nums ${className ?? ""}`}>—</span>;
-  }
-  return (
-    <span
-      className={`flex justify-between gap-3 tabular-nums ${className ?? ""}`}
-    >
-      <span>Rp</span>
-      <span>{angka.toLocaleString("id-ID", { maximumFractionDigits: 0 })}</span>
-    </span>
-  );
-}
 
 export default function NafsulTransaksiPage() {
   // `lang` ikut diambil supaya nama bulan pada kolom tanggal mengikuti
@@ -317,14 +292,14 @@ export default function NafsulTransaksiPage() {
       // (`payment − member_deduction`), jadi mengurangi sekali lagi di layar
       // membuat potongannya terhitung dua kali. Potongan tetap terbaca di
       // Sisa/`balance`, yang dihitung server.
-      cell: (row) => <SelRupiah nilai={row.total} className="text-gray-700" />,
+      cell: (row) => <CurrencyCell value={row.total} className="text-gray-700" />,
     },
     {
       header: t("nafsulTransaksi.colPayment"),
       className: "text-right",
       cell: (row) => (
-        <SelRupiah
-          nilai={row.payment}
+        <CurrencyCell
+          value={row.payment}
           className="font-semibold text-gray-900"
         />
       ),
