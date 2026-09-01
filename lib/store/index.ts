@@ -32,6 +32,7 @@ import sterileExpiryReducer from "./slices/sterileExpirySlice"
 import distributeReducer from "./slices/distributeSlice"
 import trackingCountReducer from "./slices/trackingCountSlice"
 import nafsulTransaksiReducer from "./slices/nafsulTransaksiSlice"
+import nafsulLaporanReducer from "./slices/nafsulLaporanSlice"
 
 export const store = configureStore({
   reducer: {
@@ -64,6 +65,7 @@ export const store = configureStore({
     distribute: distributeReducer,
     trackingCount: trackingCountReducer,
     nafsulTransaksi: nafsulTransaksiReducer,
+    nafsulLaporan: nafsulLaporanReducer,
     icd10: icd10Reducer,
     categoriCP: categoriCPReducer,
     templateCP: templateCPReducer,
