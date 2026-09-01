@@ -53,11 +53,8 @@ const ICON_MAP: Record<string, LucideIcon> = {
   "washing-machine": WashingMachine,
   printer: Printer,
   wallet: Wallet,
-<<<<<<< HEAD
   "hand-coins": HandCoins,
-=======
   "file-text": FileText,
->>>>>>> 827e0fec05dea727f8dc109a89b8534acb09ec64
 }
 
 function getIcon(name: string | null): LucideIcon {
