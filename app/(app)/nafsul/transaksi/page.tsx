@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import {
   BadgeCheck,
@@ -37,6 +37,7 @@ import {
   invalidateTransaksi,
   PER_PAGE,
   type TransaksiHeader,
+  type TransaksiRincian,
 } from "@/lib/store/slices/nafsulTransaksiSlice";
 import { api, apiBlob, ApiError } from "@/lib/nafsul/api";
 import { formatDate } from "@/lib/nafsul/format";
@@ -112,6 +113,23 @@ export default function NafsulTransaksiPage() {
   const [validatingUuid, setValidatingUuid] = useState<string | null>(null);
   const [pesanSukses, setPesanSukses] = useState<string | null>(null);
 
+  // Daftar anggota di balik chip "(+n)" pada kolom Nama.
+  //
+  // Nama-namanya TIDAK ikut dimuat bersama daftar kuitansi: response index cuma
+  // membawa `member_name` (anggota pertama) + `members_count`. Rinciannya baru
+  // ditembak saat chipnya diklik, satu kuitansi saja — daftar 25 baris tidak
+  // perlu menanggung 25 permintaan detail yang mungkin tak satupun dibuka.
+  const [anggotaRow, setAnggotaRow] = useState<TransaksiHeader | null>(null);
+  const [anggotaList, setAnggotaList] = useState<TransaksiRincian[] | null>(
+    null,
+  );
+  const [anggotaLoading, setAnggotaLoading] = useState(false);
+  const [anggotaError, setAnggotaError] = useState<string | null>(null);
+  // Hasil yang sudah pernah diambil disimpan per-uuid supaya membuka ulang
+  // kuitansi yang sama tidak menembak API lagi. `useRef`, bukan state: isinya
+  // tidak boleh memicu render sendiri.
+  const anggotaCache = useRef<Map<string, TransaksiRincian[]>>(new Map());
+
   // Pratinjau biling. `bilingUrl` adalah object URL blob — wajib dibebaskan
   // saat modal ditutup dan saat komponen dilepas, kalau tidak blob PDF-nya
   // menetap di memori tab sampai halaman ditinggalkan.
@@ -173,6 +191,52 @@ export default function NafsulTransaksiPage() {
     } finally {
       setValidatingUuid(null);
     }
+  }
+
+  /**
+   * Buka daftar anggota sebuah kuitansi. Modalnya dibuka SEKARANG (dengan
+   * keadaan memuat) lalu isinya menyusul — menunggu response dulu baru membuka
+   * membuat chipnya terasa tidak merespons saat jaringan lambat.
+   */
+  const bukaAnggota = useCallback(async (row: TransaksiHeader) => {
+    setAnggotaRow(row);
+    setAnggotaError(null);
+
+    const cached = anggotaCache.current.get(row.uuid);
+    if (cached) {
+      setAnggotaList(cached);
+      return;
+    }
+
+    setAnggotaList(null);
+    setAnggotaLoading(true);
+    try {
+      const detail = await api<TransaksiHeader & { transactions?: TransaksiRincian[] }>(
+        `/transaksi/header/${row.uuid}`,
+      );
+      // Satu anggota bisa punya beberapa baris rincian (mis. iuran 3 bulan),
+      // sedangkan `members_count` menghitung anggota BERBEDA. Tanpa dedup ini
+      // panjang daftarnya tidak akan cocok dengan angka pada chipnya.
+      const unik = new Map<number, TransaksiRincian>();
+      for (const r of detail.transactions ?? []) {
+        if (!unik.has(r.member_id)) unik.set(r.member_id, r);
+      }
+      const daftar = Array.from(unik.values());
+      anggotaCache.current.set(row.uuid, daftar);
+      setAnggotaList(daftar);
+    } catch (e) {
+      setAnggotaError(
+        e instanceof ApiError ? e.message : t("nafsulTransaksi.membersFailed"),
+      );
+    } finally {
+      setAnggotaLoading(false);
+    }
+  }, [t]);
+
+  function tutupAnggota() {
+    setAnggotaRow(null);
+    setAnggotaList(null);
+    setAnggotaError(null);
   }
 
   /**
@@ -274,14 +338,16 @@ export default function NafsulTransaksiPage() {
             <span className="text-gray-700">
               {row.member_name}
               {row.members_count > 1 ? (
-                <span
-                  className="ml-1 text-xs text-gray-400"
+                <button
+                  type="button"
+                  onClick={() => bukaAnggota(row)}
+                  className="ml-1 rounded text-xs text-gray-400 underline decoration-dotted underline-offset-2 transition-colors hover:text-[#075489] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#075489]/40"
                   title={t("nafsulTransaksi.othersCount", {
                     count: row.members_count - 1,
                   })}
                 >
                   (+{row.members_count - 1})
-                </span>
+                </button>
               ) : null}
             </span>
           ) : (
@@ -546,6 +612,61 @@ export default function NafsulTransaksiPage() {
         />
       </Card>
 
+      {/* Daftar anggota sebuah kuitansi — isinya diambil saat dibuka */}
+      <Modal
+        open={anggotaRow !== null}
+        onClose={tutupAnggota}
+        title={
+          anggotaRow
+            ? t("nafsulTransaksi.membersTitle", {
+                number: anggotaRow.transaction_number,
+              })
+            : ""
+        }
+        size="md"
+        footer={
+          <Button variant="outline" onClick={tutupAnggota}>
+            {t("common.close")}
+          </Button>
+        }
+      >
+        {anggotaLoading ? (
+          <div className="flex items-center justify-center gap-2 py-10 text-sm text-gray-400">
+            <Loader2 className="h-4 w-4 animate-spin" />
+            {t("nafsulTransaksi.membersLoading")}
+          </div>
+        ) : anggotaError ? (
+          <div className="py-10 text-center text-sm text-red-600">
+            {anggotaError}
+          </div>
+        ) : anggotaList && anggotaList.length > 0 ? (
+          <ol className="divide-y divide-gray-100">
+            {anggotaList.map((r, i) => (
+              <li key={r.member_id} className="flex items-center gap-3 py-2.5">
+                <span className="w-5 shrink-0 text-right text-xs tabular-nums text-gray-400">
+                  {i + 1}
+                </span>
+                <User className="h-4 w-4 shrink-0 text-gray-300" />
+                <div className="min-w-0 leading-tight">
+                  <p className="truncate text-sm text-gray-800">
+                    {r.member_name ?? "—"}
+                  </p>
+                  {r.member_number ? (
+                    <p className="text-[11px] tabular-nums text-gray-400">
+                      {r.member_number}
+                    </p>
+                  ) : null}
+                </div>
+              </li>
+            ))}
+          </ol>
+        ) : (
+          <div className="py-10 text-center text-sm text-gray-400">
+            {t("nafsulTransaksi.membersEmpty")}
+          </div>
+        )}
+      </Modal>
+
       {/* Pratinjau biling PDF */}
       <Modal
         open={bilingRow !== null}
@@ -662,20 +783,19 @@ export default function NafsulTransaksiPage() {
         }
         title={
           validasiTarget?.validation_at
-            ? t("nafsulTransaksi.unvalidateTitle")
-            : // Nomornya pindah ke judul. Keterangannya kini pertanyaan polos
-              // tanpa nomor, dan dialog konfirmasi untuk tindakan yang mengunci
-              // kuitansi tidak boleh menyembunyikan kuitansi MANA yang dikunci.
-              t("nafsulTransaksi.validateTitle", {
+            ? // Nomornya ikut di judul pada KEDUA arah: dialog untuk tindakan
+              // yang mengunci/membuka kuitansi tidak boleh menyembunyikan
+              // kuitansi MANA yang sedang dikenai tindakan itu.
+              t("nafsulTransaksi.unvalidateTitle", {
+                number: validasiTarget?.transaction_number ?? "",
+              })
+            : t("nafsulTransaksi.validateTitle", {
                 number: validasiTarget?.transaction_number ?? "",
               })
         }
         description={
           validasiTarget?.validation_at
-            ? t("nafsulTransaksi.unvalidateConfirm", {
-                number: validasiTarget?.transaction_number ?? "",
-                name: validasiTarget?.validation_by ?? "—",
-              })
+            ? t("nafsulTransaksi.unvalidateConfirm")
             : t("nafsulTransaksi.validateConfirm", {
                 number: validasiTarget?.transaction_number ?? "",
               })

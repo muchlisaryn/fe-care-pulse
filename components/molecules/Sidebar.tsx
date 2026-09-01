@@ -24,6 +24,7 @@ import {
   X,
   Circle,
   Wallet,
+  HandCoins,
   type LucideIcon,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
@@ -51,6 +52,7 @@ const ICON_MAP: Record<string, LucideIcon> = {
   "washing-machine": WashingMachine,
   printer: Printer,
   wallet: Wallet,
+  "hand-coins": HandCoins,
 }
 
 function getIcon(name: string | null): LucideIcon {
