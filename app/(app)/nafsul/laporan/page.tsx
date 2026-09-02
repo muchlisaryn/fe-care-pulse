@@ -5,10 +5,12 @@ import { Loader2, Search, Sheet } from "lucide-react"
 import { Button } from "@/components/atoms/Button"
 import { CurrencyCell } from "@/components/atoms/CurrencyCell"
 import { Input } from "@/components/atoms/Input"
-import { PeriodPicker } from "@/components/atoms/PeriodPicker"
+import { DateRangeFields } from "@/components/molecules/DateRangeFields"
 import { Select } from "@/components/atoms/Select"
 import { Card } from "@/components/molecules/Card"
 import { PageHeader } from "@/components/molecules/PageHeader"
+import { Pagination } from "@/components/molecules/Pagination"
+import { api } from "@/lib/nafsul/api"
 import { formatDate } from "@/lib/nafsul/format"
 import { downloadXlsxSections, type XlsxSection } from "@/lib/excel"
 import { localeOf, useLanguage } from "@/lib/i18n"
@@ -17,7 +19,10 @@ import {
   fetchLaporanRekap,
   retryLaporan,
   setLaporanFilter,
+  setLaporanPage,
+  PER_HALAMAN_EXPORT,
   type RekapBlock,
+  type RekapResponse,
   type RekapRow,
 } from "@/lib/store/slices/nafsulLaporanSlice"
 
@@ -34,21 +39,22 @@ function Kosong() {
 
 /** Kolom lembar rekap, dari kiri ke kanan. Dipakai layar DAN berkas. */
 const KOLOM = [
-  "nafsulLaporan.colNo",
   "nafsulTransaksi.colDate",
   "nafsulLaporan.colPaymentNumber",
   "nafsulLaporan.colTransaction",
   "nafsulLaporan.colLeader",
   "nafsulLaporan.colMemberName",
   "nafsulLaporan.colMemberNumber",
-  "nafsulLaporan.colVisit",
   "nafsulLaporan.colAmountPaid",
   "nafsulLaporan.colMemberDeduction",
 ] as const
 
-/** Indeks kolom nominal & kolom yang ditengahkan. */
-const KOLOM_NOMINAL = [8, 9]
-const KOLOM_TENGAH = [0, 3, 7]
+/**
+ * Indeks kolom nominal & kolom yang ditengahkan — MENGACU pada urutan `KOLOM`
+ * di atas, jadi ikut bergeser tiap kali ada kolom yang ditambah atau dibuang.
+ */
+const KOLOM_NOMINAL = [6, 7]
+const KOLOM_TENGAH = [2]
 
 /**
  * Satu baris lembar beserta keputusan APA YANG DITAMPILKAN padanya.
@@ -65,7 +71,6 @@ const KOLOM_TENGAH = [0, 3, 7]
  */
 type BarisRekap = {
   row: RekapRow
-  no: number
   tampilTanggal: boolean
   tampilKuitansi: boolean
 }
@@ -74,28 +79,46 @@ function barisRekap(rows: readonly RekapRow[]): BarisRekap[] {
   let tanggalSebelum: string | null = null
   let kuitansiSebelum: string | null = null
 
-  return rows.map((row, i) => {
+  return rows.map((row) => {
     const tampilTanggal = row.date !== tanggalSebelum
     const tampilKuitansi = row.transaction_number !== kuitansiSebelum
     tanggalSebelum = row.date
     kuitansiSebelum = row.transaction_number
-    return { row, no: i + 1, tampilTanggal, tampilKuitansi }
+    return { row, tampilTanggal, tampilKuitansi }
   })
 }
 
 export default function NafsulLaporanPage() {
   const { t, lang } = useLanguage()
   const dispatch = useAppDispatch()
-  const { blocks, period, search, method, truncated, loading, loaded, dirty, error } =
-    useAppSelector((s) => s.nafsulLaporan)
+  const {
+    blocks,
+    period,
+    search,
+    method,
+    dateFrom,
+    dateTo,
+    appliedFrom,
+    appliedTo,
+    page,
+    perPage,
+    total,
+    lastPage,
+    truncated,
+    loading,
+    loaded,
+    dirty,
+    error,
+  } = useAppSelector((s) => s.nafsulLaporan)
 
   // Draft isian — baru masuk Redux saat tombolnya ditekan, sama seperti kotak
   // pencarian di halaman list lain. Ikut menyesuaikan saat nilai commit-nya
   // berganti, yang di sini terjadi tepat sekali: bawaan diisi dari jam peramban
   // setelah mount.
-  const [formPeriode, setFormPeriode] = useDraft(period)
   const [formCari, setFormCari] = useDraft(search)
   const [formMetode, setFormMetode] = useDraft(method)
+  const [formDari, setFormDari] = useDraft(dateFrom)
+  const [formSampai, setFormSampai] = useDraft(dateTo)
 
   const [exporting, setExporting] = useState(false)
   const [galat, setGalat] = useState<string | null>(null)
@@ -120,9 +143,15 @@ export default function NafsulLaporanPage() {
     e.preventDefault()
     dispatch(
       setLaporanFilter({
-        period: formPeriode,
+        // `period` dipertahankan di state sebagai jawaban server, tapi tidak
+        // lagi bisa diubah dari layar: rentang tanggal sudah mencakup segala
+        // yang bisa dipilih pemilih bulan, dan dua penyaring waktu yang saling
+        // menimpa cuma bikin petugas menebak mana yang sedang berlaku.
+        period: "",
         search: formCari,
         method: formMetode,
+        dateFrom: formDari,
+        dateTo: formSampai,
       }),
     )
   }
@@ -146,6 +175,38 @@ export default function NafsulLaporanPage() {
     [lang],
   )
 
+  /**
+   * Judul periode pada blok & berkas.
+   *
+   * Menyebut satu nama bulan ("APRIL 2026") HANYA bila rentang yang dipakai
+   * server benar-benar sebulan penuh. Begitu rentangnya dipersempit atau
+   * memotong dua bulan, nama bulan itu berbohong — yang tampil lalu tanggal
+   * awal dan akhirnya apa adanya.
+   */
+  const labelRentang = useCallback(() => {
+    if (!appliedFrom || !appliedTo) return labelPeriode(period)
+
+    const awal = new Date(appliedFrom)
+    const akhir = new Date(appliedTo)
+    const sebulanPenuh =
+      awal.getDate() === 1 &&
+      awal.getMonth() === akhir.getMonth() &&
+      awal.getFullYear() === akhir.getFullYear() &&
+      akhir.getDate() ===
+        new Date(akhir.getFullYear(), akhir.getMonth() + 1, 0).getDate()
+
+    if (sebulanPenuh) {
+      return labelPeriode(
+        `${awal.getFullYear()}-${String(awal.getMonth() + 1).padStart(2, "0")}`,
+      )
+    }
+
+    return `${formatDate(appliedFrom, localeOf(lang))} - ${formatDate(
+      appliedTo,
+      localeOf(lang),
+    )}`.toUpperCase()
+  }, [appliedFrom, appliedTo, labelPeriode, lang, period])
+
   /** "transfer" → "TRANSFER", lewat kamus supaya "cash" jadi "TUNAI". */
   const labelMetode = useCallback(
     (metode: string) => t(`nafsulTransaksi.method_${metode}`).toUpperCase(),
@@ -156,9 +217,9 @@ export default function NafsulLaporanPage() {
     (block: RekapBlock) =>
       t("nafsulLaporan.recapSectionTitle", {
         method: labelMetode(block.payment_method),
-        period: labelPeriode(period),
+        period: labelRentang(),
       }),
-    [labelMetode, labelPeriode, period, t],
+    [labelMetode, labelRentang, t],
   )
 
   /**
@@ -177,8 +238,7 @@ export default function NafsulLaporanPage() {
         sheetName: t(`nafsulTransaksi.method_${block.payment_method}`),
         title: judulBlok(block),
         headers: KOLOM.map((k) => t(k)),
-        rows: barisRekap(block.rows).map(({ row, no, tampilTanggal, tampilKuitansi }) => [
-          no,
+        rows: barisRekap(block.rows).map(({ row, tampilTanggal, tampilKuitansi }) => [
           tampilTanggal ? tanggal(row.date) : "",
           tampilKuitansi ? row.transaction_number : "",
           tampilKuitansi ? t(`nafsulLaporan.typeShort_${row.transaction_type}`) : "",
@@ -189,7 +249,6 @@ export default function NafsulLaporanPage() {
             : "",
           row.member_name ?? "",
           row.member_number ?? "",
-          row.visit ?? "",
           // Angka dikirim sebagai NUMBER; formatnya diurus penulis .xlsx.
           Number(row.amount),
           Number(row.deduction),
@@ -203,9 +262,24 @@ export default function NafsulLaporanPage() {
     setExporting(true)
     setGalat(null)
     try {
+      // Diminta ulang ke server dengan `per_page` sebesar mungkin, BUKAN dirakit
+      // dari `blocks` di state: sejak lembar ini dipaginasi, state cuma memuat
+      // halaman yang sedang tampil, dan berkas yang berisi 50 baris dari 188
+      // tidak akan ketahuan salah sampai ada yang menjumlahkannya.
+      const penuh = await api<RekapResponse>("/laporan/rekap-pembayaran", {
+        params: {
+          date_from: dateFrom || undefined,
+          date_to: dateTo || undefined,
+          search,
+          payment_method: method,
+          page: 1,
+          per_page: PER_HALAMAN_EXPORT,
+        },
+      })
+
       downloadXlsxSections(
-        `${t("nafsulLaporan.fileRecap")}-${period}.xlsx`,
-        blocks.map(seksi),
+        `${t("nafsulLaporan.fileRecap")}-${appliedFrom}_sd_${appliedTo}.xlsx`,
+        penuh.blocks.map(seksi),
         KOLOM_NOMINAL,
         KOLOM_TENGAH,
       )
@@ -265,21 +339,15 @@ export default function NafsulLaporanPage() {
             </div>
           </Isian>
 
-          {/* Sebulan penuh, atau satu tanggal di dalamnya — tapi tidak pernah
-              rentang yang memotong dua bulan: judul dan baris total lembar ini
-              menyebut satu nama bulan, dan rentang seperti itu membuat keduanya
-              berbohong. */}
-          <Isian
-            label={t("nafsulLaporan.recapPeriod")}
-            htmlFor="laporan-bulan"
-            className="w-full sm:w-48"
-          >
-            <PeriodPicker
-              id="laporan-bulan"
-              value={formPeriode}
-              onChange={setFormPeriode}
-            />
-          </Isian>
+          {/* Satu-satunya penyaring waktu lembar ini. Sepotong saja diabaikan
+              server: lembar ditutup baris total, dan rentang setengah terbuka
+              membuat totalnya tidak punya batas yang bisa disebutkan. */}
+          <DateRangeFields
+            from={formDari}
+            to={formSampai}
+            onFromChange={setFormDari}
+            onToChange={setFormSampai}
+          />
 
           {/* Tanpa label di atasnya: pilihan kosongnya sudah berbunyi "Cara
               Bayar", jadi label terpisah hanya mengulang kata yang sama persis
@@ -308,15 +376,18 @@ export default function NafsulLaporanPage() {
             {t("common.search")}
           </Button>
 
-          {/* Unduhan berdiri di samping tombol Cari, bukan di barisnya sendiri:
-              yang diunduh persis lembar hasil penyaringan di atasnya, jadi
-              tombolnya berada di tempat penyaringan itu diputuskan. */}
+          {/* Unduhan tetap di baris penyaring — yang diunduh persis lembar hasil
+              penyaringan di atasnya, jadi tombolnya berada di tempat
+              penyaringan itu diputuskan. Tapi didorong ke TEPI KANAN dengan
+              `ml-auto`: ia bukan bagian dari merangkai penyaring, melainkan
+              tindakan atas hasilnya, dan berdiri menempel tombol Cari membuat
+              keduanya terbaca sebagai sepasang pilihan yang setara. */}
           <Button
             type="button"
             variant="outline"
             onClick={exportExcel}
             disabled={exporting || memuat || blocks.length === 0}
-            className="w-full justify-center sm:w-auto"
+            className="w-full justify-center sm:w-auto lg:ml-auto"
           >
             <Sheet className="h-4 w-4" />
             {exporting ? t("nafsulLaporan.exporting") : t("nafsulLaporan.exportExcel")}
@@ -360,10 +431,19 @@ export default function NafsulLaporanPage() {
               <BlokRekap
                 key={block.payment_method}
                 block={block}
-                judul={judulBlok(block)}
                 tanggal={tanggal}
               />
             ))}
+
+            {/* Satuannya SATU BARIS lembar — satu pasangan kuitansi+anggota,
+                berapa pun rincian periode di dalamnya. */}
+            <Pagination
+              currentPage={page}
+              totalPages={lastPage}
+              totalItems={total}
+              itemsPerPage={perPage}
+              onPageChange={(p) => dispatch(setLaporanPage(p))}
+            />
           </div>
         )}
       </Card>
@@ -434,11 +514,9 @@ function Th({ children, right }: { children: React.ReactNode; right?: boolean })
  */
 function BlokRekap({
   block,
-  judul,
   tanggal,
 }: {
   block: RekapBlock
-  judul: string
   tanggal: (value: string | null) => string
 }) {
   const { t } = useLanguage()
@@ -446,12 +524,12 @@ function BlokRekap({
 
   return (
     <section className="space-y-0">
-      <h3 className="rounded-t-lg border border-gray-200 bg-gray-50 px-4 py-3 text-center text-sm font-bold uppercase tracking-wide text-gray-800">
-        {judul}
-      </h3>
-
-      <div className="overflow-x-auto border-x border-gray-200">
-        <table className="w-full min-w-[1180px] text-sm">
+      {/* Judul blok TIDAK dicetak di layar. Ia tetap ditulis ke berkas .xlsx —
+          baris judul yang digabung di puncak tiap tab adalah bentuk lembar yang
+          dipakai Binroh selama ini, sedangkan di layar tabelnya sudah cukup
+          dikenali dari penyaring cara bayar di atasnya. */}
+      <div className="overflow-x-auto rounded-t-lg border-x border-t border-gray-200">
+        <table className="w-full min-w-[980px] text-sm">
           <thead>
             <tr className={KEPALA}>
               {KOLOM.map((kunci, i) => (
@@ -461,26 +539,77 @@ function BlokRekap({
               ))}
             </tr>
           </thead>
-          <tbody className="divide-y divide-gray-50">
-            {baris.map(({ row, no, tampilTanggal, tampilKuitansi }) => (
-              <tr key={row.key}>
-                <td className={`${SEL} text-center tabular-nums text-gray-500`}>{no}</td>
+          {/*
+            TANPA `divide-y`: pemisah bawaan itu menggambar garis di antara SETIAP
+            baris, dan pada baris kepala kuitansi garis milik baris berikutnya
+            muncul tepat di bawahnya — terbaca sebagai border-bottom yang tidak
+            pernah diminta.
+
+            Satu-satunya garis di badan tabel kini `border-t` pada baris kepala
+            kuitansi, yaitu batas antar kuitansi. Baris anggota di dalam satu
+            kuitansi memang tidak perlu dipisahkan garis: kolom kuitansi yang
+            dikosongkan sudah menyatakan mereka satu kelompok.
+          */}
+          <tbody>
+            {baris.map(({ row, tampilTanggal, tampilKuitansi }, i) => {
+              // Kepala kuitansi: SATU warna untuk semua jenis. Yang membedakan
+              // pribadi dari kelompok sudah ada di kolom Jenis ("P"/"K") dan
+              // kolom Nama Ketua — warna kedua di sini cuma menambah kode yang
+              // harus dihafal tanpa menjawab pertanyaan baru.
+              //
+              // Hanya pada baris pertama tiap kuitansi: baris berikutnya
+              // mengosongkan keempat kolom itu sebagai tanda "sama dengan di
+              // atas", dan mewarnainya membuat satu kuitansi berisi sepuluh
+              // anggota terbaca seperti sepuluh kuitansi.
+              const sorot = tampilKuitansi ? "bg-amber-100" : ""
+
+              return (
+              // Garis ATAS pada baris kepala kuitansi — satu-satunya garis tegas
+              // di tabel ini, menandai MULAINYA kuitansi baru. Melintasi seluruh
+              // lebar tabel, tidak berhenti di empat kolom berwarna.
+              //
+              // Di atas, bukan di bawah: garis bawah akan memisahkan kepala
+              // kuitansi dari daftar anggotanya sendiri, padahal keduanya satu
+              // kesatuan. Yang perlu dipisahkan justru kuitansi yang satu dari
+              // kuitansi berikutnya.
+              //
+              // Garis pemisah bawaan antar baris (`divide-gray-50`) terlalu
+              // samar untuk peran ini: batas antar anggota dan batas antar
+              // kuitansi jadi terlihat sama tebal.
+              <tr
+                key={row.key}
+                className={
+                  // `i > 0`: baris PERTAMA tabel tidak diberi garis atas. Ia
+                  // selalu kepala kuitansi, dan garisnya akan jatuh tepat di
+                  // bawah garis bawah baris nama kolom — terbaca sebagai garis
+                  // dobel di bawah header, bukan sebagai batas kuitansi.
+                  tampilKuitansi && i > 0
+                    ? "border-t border-gray-300"
+                    : undefined
+                }
+              >
                 {/* Kolom kuitansi sengaja dibiarkan KOSONG saat mengulang, bukan
                     diisi em dash seperti nilai null di tabel lain: di sini
                     kosongnya berarti "sama dengan baris di atas", bukan "tidak
-                    ada datanya". */}
-                <td className={`${SEL} text-gray-600`}>
+                    ada datanya".
+
+                    Empat kolom inilah yang disorot kuning pada kuitansi PRIBADI
+                    — dan hanya di baris pertama kuitansinya, baris yang benar-
+                    benar memuat nomor & jenisnya. Sorotan tidak diteruskan ke
+                    kolom anggota & nominal: yang ditandai adalah kuitansinya,
+                    bukan tiap anggota di dalamnya. */}
+                <td className={`${SEL} ${sorot} text-gray-600`}>
                   {tampilTanggal ? tanggal(row.date) : ""}
                 </td>
-                <td className={`${SEL} font-mono text-xs text-gray-700`}>
+                <td className={`${SEL} ${sorot} font-mono text-xs text-gray-700`}>
                   {tampilKuitansi ? row.transaction_number : ""}
                 </td>
-                <td className={`${SEL} text-center font-medium text-gray-700`}>
+                <td className={`${SEL} ${sorot} text-center font-medium text-gray-700`}>
                   {tampilKuitansi
                     ? t(`nafsulLaporan.typeShort_${row.transaction_type}`)
                     : ""}
                 </td>
-                <td className={`${SEL} text-gray-800`}>
+                <td className={`${SEL} ${sorot} text-gray-800`}>
                   {!tampilKuitansi ? (
                     ""
                   ) : row.transaction_type === "pribadi" ? (
@@ -497,9 +626,6 @@ function BlokRekap({
                 <td className={`${SEL} font-mono text-xs text-gray-700`}>
                   {row.member_number || <Kosong />}
                 </td>
-                <td className={`${SEL} text-center text-gray-700`}>
-                  {row.visit || <Kosong />}
-                </td>
                 <td className={SEL}>
                   <CurrencyCell
                     value={row.amount}
@@ -510,7 +636,8 @@ function BlokRekap({
                   <CurrencyCell value={row.deduction} className="text-gray-600" />
                 </td>
               </tr>
-            ))}
+              )
+            })}
           </tbody>
         </table>
       </div>

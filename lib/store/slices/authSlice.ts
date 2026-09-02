@@ -1,5 +1,6 @@
 import { createAsyncThunk, createSlice, type PayloadAction } from "@reduxjs/toolkit";
 import api from "@/lib/axios";
+import { loadAuth, saveAuth } from "@/lib/auth";
 
 export type AuthSubMenu = {
   name: string;
@@ -105,7 +106,36 @@ const authSlice = createSlice({
     builder
       .addCase(fetchMe.fulfilled, (state, action) => {
         state.username = action.payload.username;
-        state.menus = action.payload.menus;
+        // Menu hanya DIGANTI bila jawabannya benar-benar membawa daftar berisi.
+        //
+        // Tanpa penjaga ini, satu jawaban `/auth/me` yang tidak membawa `menus`
+        // (bentuk respons meleset, proxy membalas apa adanya, otoritas sesaat
+        // tidak terbaca) langsung mengosongkan sidebar — dan Sidebar merender
+        // daftar kosong itu TANPA bunyi apa pun, karena bagi komponen "tidak
+        // punya menu" dan "menunya belum sempat datang" terlihat sama persis.
+        // Yang tampak ke pemakai: menu hilang tiba-tiba dan baru kembali
+        // setelah halaman di-refresh, karena refresh membacanya lagi dari
+        // localStorage yang isinya tidak pernah ikut terhapus.
+        //
+        // Daftar yang benar-benar kosong tetap harus bisa masuk lewat login &
+        // setCredentials — di situ memang berarti "otoritas ini tanpa menu".
+        if (Array.isArray(action.payload.menus) && action.payload.menus.length > 0) {
+          state.menus = action.payload.menus;
+
+          // Simpanan lokal ikut disegarkan supaya keduanya tidak berbeda:
+          // sebelumnya `fetchMe` hanya memperbarui Redux, sehingga perubahan
+          // otoritas baru terlihat sampai refresh berikutnya — lalu hilang lagi.
+          const tersimpan = loadAuth();
+          if (tersimpan) {
+            saveAuth(
+              action.payload.username ?? tersimpan.username,
+              tersimpan.token,
+              action.payload.menus,
+              action.payload.name ?? tersimpan.name,
+              tersimpan.email,
+            );
+          }
+        }
         // Sinkronkan nama & email dari server agar selalu tersedia (mis. untuk
         // prefill "Dipinjam Oleh"). Hanya timpa bila dikirim server.
         if (action.payload.name !== undefined) state.name = action.payload.name ?? null;

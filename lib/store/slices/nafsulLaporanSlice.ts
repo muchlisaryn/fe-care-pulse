@@ -1,5 +1,6 @@
 import { createAsyncThunk, createSlice, type PayloadAction } from "@reduxjs/toolkit"
 import { api } from "@/lib/nafsul/api"
+import { rentangSebulanTerakhir } from "@/lib/dateRange"
 
 /**
  * Laporan Nafsul — rekap pembayaran bulanan Binroh, satu-satunya bentuk laporan
@@ -96,8 +97,37 @@ type LaporanState = {
   search: string
   /** Cara bayar yang ditampilkan; kosong berarti semuanya. */
   method: string
+  /**
+   * Rentang tanggal bebas, "YYYY-MM-DD". Keduanya harus terisi agar dipakai;
+   * salah satu saja diabaikan server, karena rentang setengah terbuka pada
+   * lembar yang ditutup baris total tidak punya arti yang jelas.
+   *
+   * MENANG atas `period`: begitu rentangnya terisi, pemilih bulan tidak lagi
+   * menentukan isi lembar.
+   */
+  dateFrom: string
+  dateTo: string
+  /**
+   * Rentang yang BENAR-BENAR dipakai server, dari responsnya.
+   *
+   * Dipakai menulis judul blok: dengan rentang bebas, judul tidak boleh lagi
+   * menyebut satu nama bulan begitu saja — rentang yang memotong dua bulan
+   * membuat judul dan baris totalnya berbohong.
+   */
+  appliedFrom: string
+  appliedTo: string
   /** Backend memotong di `MAX_ROWS`; ditampilkan sebagai peringatan. */
   truncated: boolean
+  /**
+   * Paginasi lembar. Satuannya SATU BARIS lembar = satu pasangan
+   * kuitansi+anggota, berapa pun rincian periode di dalamnya — itu yang
+   * dikelompokkan server, jadi rincian sebuah baris tidak pernah dihitung
+   * sebagai baris tersendiri.
+   */
+  page: number
+  perPage: number
+  total: number
+  lastPage: number
   loading: boolean
   /** true setelah pemuatan pertama yang berhasil. */
   loaded: boolean
@@ -117,11 +147,36 @@ type LaporanState = {
   error: string | null
 }
 
+// Rentang bawaan sebulan terakhir — sama dengan daftar transaksi & rekap jasa,
+// supaya "sebulan terakhir" berarti hal yang sama di seluruh modul. Dipakai
+// sebagai isi awal, bukan dibiarkan kosong: lembar ini tanpa penyaring akan
+// jatuh ke bulan berjalan, yang pada tanggal 1 tampil kosong dan tidak bisa
+// dibedakan dari data hilang.
+const bawaan = rentangSebulanTerakhir()
+
+/** Baris per halaman; disamakan dengan bawaan server. */
+export const PER_HALAMAN = 50
+
+/**
+ * Batas atas `per_page` yang diterima server. Dipakai export untuk menarik
+ * SELURUH lembar dalam satu permintaan — berkasnya harus memuat semua baris
+ * hasil penyaringan, bukan hanya halaman yang kebetulan sedang tampil.
+ */
+export const PER_HALAMAN_EXPORT = 5000
+
 const initialState: LaporanState = {
   blocks: [],
   period: "",
   search: "",
   method: "",
+  dateFrom: bawaan.from,
+  dateTo: bawaan.to,
+  page: 1,
+  perPage: PER_HALAMAN,
+  total: 0,
+  lastPage: 1,
+  appliedFrom: "",
+  appliedTo: "",
   truncated: false,
   loading: false,
   loaded: false,
@@ -133,14 +188,21 @@ const initialState: LaporanState = {
 export type RekapResponse = {
   period: { month: number; year: number; date_from: string; date_to: string }
   blocks: RekapBlock[]
+  pagination: { page: number; per_page: number; total: number; last_page: number }
   truncated: boolean
 }
 
 export const fetchLaporanRekap = createAsyncThunk(
   "nafsulLaporan/rekap",
   async (_, { getState }) => {
-    const { period, search, method } = (getState() as { nafsulLaporan: LaporanState })
-      .nafsulLaporan
+    const { period, search, method, dateFrom, dateTo, page, perPage } = (
+      getState() as { nafsulLaporan: LaporanState }
+    ).nafsulLaporan
+
+    // Rentang hanya dikirim bila LENGKAP: sepotong saja akan diabaikan server,
+    // dan mengirimnya tetap cuma membuat query string yang menyesatkan saat
+    // ditelusuri di log.
+    const rentangUtuh = dateFrom !== "" && dateTo !== ""
 
     return api<RekapResponse>("/laporan/rekap-pembayaran", {
       // Ketiganya opsional, dan `api()` sudah membuang nilai kosong dari query
@@ -150,8 +212,12 @@ export const fetchLaporanRekap = createAsyncThunk(
       params: {
         period: periodeApi(period),
         date: tanggalApi(period),
+        date_from: rentangUtuh ? dateFrom : undefined,
+        date_to: rentangUtuh ? dateTo : undefined,
         search,
         payment_method: method,
+        page,
+        per_page: perPage,
       },
     })
   }
@@ -170,11 +236,23 @@ const nafsulLaporanSlice = createSlice({
      */
     setLaporanFilter(
       state,
-      action: PayloadAction<{ period: string; search: string; method: string }>,
+      action: PayloadAction<{
+        period: string
+        search: string
+        method: string
+        dateFrom: string
+        dateTo: string
+      }>,
     ) {
       state.period = action.payload.period
       state.search = action.payload.search.trim()
       state.method = action.payload.method
+      state.dateFrom = action.payload.dateFrom
+      state.dateTo = action.payload.dateTo
+      // Penyaring berubah → jumlah barisnya berubah, jadi kembali ke halaman
+      // pertama. Tanpa ini penyaringan yang hasilnya sedikit bisa mendarat di
+      // halaman kosong yang tidak bisa dibedakan dari "tidak ada data".
+      state.page = 1
       state.loaded = false
     },
 
@@ -186,6 +264,12 @@ const nafsulLaporanSlice = createSlice({
      */
     invalidateLaporan(state) {
       state.dirty = true
+    },
+
+    /** Pindah halaman tanpa menyentuh penyaring lain. */
+    setLaporanPage(state, action: PayloadAction<number>) {
+      state.page = action.payload
+      state.loaded = false
     },
 
     /**
@@ -216,7 +300,11 @@ const nafsulLaporanSlice = createSlice({
         // membuang tanggal yang barusan dipilih petugas — jawaban server hanya
         // menyebut bulan tempat tanggal itu berada.
         if (!state.period) state.period = periodeInput(action.payload.period)
+        state.appliedFrom = action.payload.period.date_from
+        state.appliedTo = action.payload.period.date_to
         state.blocks = action.payload.blocks
+        state.total = action.payload.pagination.total
+        state.lastPage = action.payload.pagination.last_page
         state.truncated = action.payload.truncated
         state.loading = false
         state.loaded = true
@@ -235,6 +323,7 @@ const nafsulLaporanSlice = createSlice({
 
 export const {
   setLaporanFilter,
+  setLaporanPage,
   invalidateLaporan,
   retryLaporan,
 } = nafsulLaporanSlice.actions
