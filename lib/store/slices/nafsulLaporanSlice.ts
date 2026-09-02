@@ -1,294 +1,107 @@
 import { createAsyncThunk, createSlice, type PayloadAction } from "@reduxjs/toolkit"
 import { api } from "@/lib/nafsul/api"
-import type { Paginated } from "@/lib/nafsul/types"
 
 /**
- * Laporan Nafsul — dua sudut pandang atas data iuran yang sama, masing-masing
- * dengan penyaring, halaman, dan cache sendiri:
+ * Laporan Nafsul — rekap pembayaran bulanan Binroh, satu-satunya bentuk laporan
+ * modul ini.
  *
- *  - `penerimaan` — per KUITANSI: uang yang masuk, potongan, jasa ketua.
- *  - `anggota`    — per RINCIAN: siapa membayar periode apa.
- *
- * Keduanya dipisah, bukan satu state bersama, supaya berpindah tab tidak
- * menghapus hasil saring tab sebelumnya — petugas kerap membandingkan keduanya
- * bolak-balik untuk satu pertanyaan yang sama.
+ * Sebulan pembayaran dipecah per CARA BAYAR — TRANSFER, TUNAI, lalu LAIN-LAIN
+ * — dan tiap blok ditutup total kotor, total potongan, dan total bersih. Blok
+ * ketiga menampung setoran 2014–2024 dari sistem lama yang masuk tanpa penanda
+ * cara bayar; blok itu hilang sendiri begitu tidak ada lagi kuitansi `other`. Satu baris =
+ * satu ANGGOTA pada satu KUITANSI, bukan satu periode iuran: orang yang
+ * melunasi dua belas bulan sekaligus tetap satu baris dengan nominal yang sudah
+ * dijumlahkan — itu yang ditanyakan lembar ini ("siapa menyetor berapa"), bukan
+ * "bulan apa saja yang tertutup".
  *
  * Angka rupiah datang sebagai STRING: itu kolom DECIMAL, dan mengubahnya jadi
  * float akan membuang ketepatan nilai rupiah.
  */
 
-/** Satu baris tab Penerimaan = satu kuitansi. */
-export type LaporanPenerimaanRow = {
-  id: number
-  uuid: string
+/** Satu baris lembar = satu anggota pada satu kuitansi. */
+export type RekapRow = {
+  /** Kunci render, dari pasangan kuitansi+anggota; tidak dipakai selain itu. */
+  key: string
+  /** Tanggal kuitansi ("YYYY-MM-DD"). */
+  date: string
   transaction_number: string
-  /** Tanggal uang diterima ("YYYY-MM-DD"); null pada baris lama. */
-  date: string | null
   transaction_type: "kelompok" | "pribadi"
   /** Diabaikan pada kuitansi pribadi — yang tampil "Pribadi". */
   group_leader_name: string | null
-  transactions_count: number
-  total: string
-  member_deduction: string
-  group_leader_deduction: string
-  group_leader_fee: string
-  payment: string
-  payment_method: "transfer" | "cash" | "other"
-  /** null = belum divalidasi; tidak ada boolean terpisah. */
-  validation_at: string | null
-  validation_by: string | null
-}
-
-/** Satu baris tab Per Anggota = satu rincian iuran. */
-export type LaporanAnggotaRow = {
-  id: number
-  uuid: string
-  member_number: string | null
   member_name: string | null
-  region_name: string | null
-  group_leader_name: string | null
-  /** "MM/YYYY"; null untuk tarif SEKALI BAYAR yang tak berperiode. */
-  payment_period: string | null
-  rate_code: string | null
-  rate_name: string | null
+  member_number: string | null
+  /** "L"/"B" pada data berjalan, tapi kolomnya string bebas dan boleh kosong. */
+  visit: string | null
   amount: string
-  discount: string
-  total: string
-  /** null = rincian ini masih tagihan, belum masuk kuitansi mana pun. */
-  transaction_number: string | null
-  transaction_date: string | null
-  payment_method: string | null
-  validation_at: string | null
+  deduction: string
 }
 
-/** Rekap tab Penerimaan atas SELURUH baris hasil saring, bukan satu halaman. */
-export type LaporanPenerimaanSummary = {
-  receipts: number
-  total: string
-  member_deduction: string
-  group_leader_deduction: string
-  group_leader_fee: string
-  payment: string
-}
-
-/** Rekap tab Per Anggota atas SELURUH baris hasil saring. */
-export type LaporanAnggotaSummary = {
-  rows: number
-  /** Jumlah ORANG, bukan jumlah baris — satu anggota bisa punya banyak periode. */
-  members: number
-  amount: string
-  discount: string
-  total: string
-}
-
-export type LaporanTab = "penerimaan" | "anggota"
-
-export const PER_PAGE = 25
-
-/**
- * Batas baris sekali unduh, sama dengan `MAX_PER_PAGE` di backend.
- *
- * Export meminta satu halaman sebesar ini dengan penyaring yang sedang aktif —
- * bukan lewat endpoint tersendiri — supaya isi berkas dan isi layar tidak
- * mungkin berangkat dari angka yang berbeda.
- */
-export const EXPORT_PER_PAGE = 5000
-
-export type PenerimaanFilters = {
-  search: string
-  /** "YYYY-MM-DD"; kosong = tanpa batas di sisi itu. */
-  dateFrom: string
-  dateTo: string
-  /** Kosong = semua jenis. */
-  transactionType: string
-  /** Kosong = semua cara bayar. */
-  paymentMethod: string
-  /** "" | "validated" | "unvalidated". */
-  validation: string
-}
-
-export type AnggotaFilters = {
-  search: string
-  /** Kode wilayah / ketua kelompok / tarif; kosong = semua. */
-  regionCode: string
-  groupLeaderCode: string
-  rateCode: string
-  /**
-   * Rentang periode iuran, disimpan sebagai "YYYY-MM" (nilai `<input
-   * type="month">`) dan diterjemahkan ke "MM/YYYY" saat dikirim — itu format
-   * yang dipakai kontrak API transaksi.
-   */
-  periodFrom: string
-  periodTo: string
-  /** Rentang tanggal KUITANSI — berbeda dari periode iuran di atas. */
-  dateFrom: string
-  dateTo: string
-  /** "" | "paid" | "unpaid". */
-  status: string
-}
-
-/** Hari ini sebagai "YYYY-MM-DD", dirakit dari komponen tanggal LOKAL. */
-function hariIni(): string {
-  const d = new Date()
-  const pad = (n: number) => String(n).padStart(2, "0")
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
-}
-
-/** Tanggal `mundur` hari yang lalu sebagai "YYYY-MM-DD". */
-function mundurHari(mundur: number): string {
-  const d = new Date()
-  d.setDate(d.getDate() - mundur)
-  const pad = (n: number) => String(n).padStart(2, "0")
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
-}
-
-/**
- * Penyaring KOSONG — satu-satunya bentuk yang boleh jadi `initialState`.
- *
- * Bawaan yang berbasis jam (lihat `penerimaanAwal`) tidak boleh dihitung di
- * sini: `initialState` dievaluasi sekali saat modul dimuat, dan di server
- * Next modul itu hidup selama prosesnya hidup. Server yang sudah menyala sejak
- * kemarin akan terus menanam tanggal KEMARIN ke HTML hasil SSR, sedangkan
- * peramban menghitung tanggal hari ini saat hidrasi — mismatch yang muncul
- * setiap hari, bahkan ketika zona waktu keduanya sama. Peramban di zona waktu
- * yang berbeda dari server berselisih tanpa menunggu ganti hari.
- *
- * Jadi render pertama selalu kosong di kedua sisi, lalu `seedLaporanDefaults`
- * mengisinya dari jam PERAMBAN setelah mount — pola yang sama dengan
- * `LanguageProvider`, yang juga selalu merender `DEFAULT_LANG` lebih dulu.
- */
-function penerimaanKosong(): PenerimaanFilters {
-  return {
-    search: "",
-    dateFrom: "",
-    dateTo: "",
-    transactionType: "",
-    paymentMethod: "",
-    validation: "",
+/** Satu blok cara bayar beserta angka penutupnya. */
+export type RekapBlock = {
+  payment_method: string
+  rows: RekapRow[]
+  summary: {
+    rows: number
+    amount: string
+    deduction: string
+    /** `amount - deduction`; dihitung backend agar tidak ada dua versinya. */
+    net: string
   }
 }
 
-/** Penyaring kosong tab Per Anggota — alasannya sama dengan di atas. */
-function anggotaKosong(): AnggotaFilters {
-  return {
-    search: "",
-    regionCode: "",
-    groupLeaderCode: "",
-    rateCode: "",
-    periodFrom: "",
-    periodTo: "",
-    dateFrom: "",
-    dateTo: "",
-    status: "",
-  }
+/** `{ month: 8, year: 2026 }` → "2026-08", bentuk `<input type="month">`. */
+function periodeInput(p: { month: number; year: number }): string {
+  return `${p.year}-${String(p.month).padStart(2, "0")}`
 }
 
-/**
- * Bawaan tab Penerimaan: 30 HARI TERAKHIR (H-30 s.d. hari ini).
- *
- * HANYA boleh dipanggil dari peramban (lewat `seedLaporanDefaults`), tidak
- * pernah saat modul dimuat — lihat `penerimaanKosong`.
- *
- * SENGAJA bukan "bulan berjalan" seperti Dashboard Nafsul. Rentang bulan
- * berjalan membuat laporan ini terbuka KOSONG setiap awal bulan — pada tanggal
- * 1 rentangnya cuma satu hari, dan setoran terakhir hampir selalu jatuh di
- * bulan sebelumnya. Layar kosong pada laporan tidak terbaca sebagai "belum ada
- * setoran bulan ini", melainkan sebagai laporannya yang rusak.
- *
- * Rentang bergulir tidak punya batas bulan untuk ditabrak, dan angkanya cocok
- * dengan bawaan laporan CSSD yang memakai jendela yang sama.
- *
- * Rentang kosong juga bukan pilihan: permintaan pertamanya akan memindai
- * seluruh riwayat kuitansi hanya untuk menampilkan 25 baris pertama.
- */
-function penerimaanAwal(): PenerimaanFilters {
-  return {
-    search: "",
-    dateFrom: mundurHari(30),
-    dateTo: hariIni(),
-    transactionType: "",
-    paymentMethod: "",
-    validation: "",
-  }
-}
-
-/**
- * Bawaan tab Per Anggota: SETAHUN BERJALAN, disaring pada PERIODE iuran.
- *
- * Sama seperti `penerimaanAwal`, hanya dipanggil dari peramban.
- *
- * Sengaja bukan rentang tanggal kuitansi seperti tab sebelah: menyaring tanggal
- * kuitansi otomatis membuang rincian yang belum dibayar (baris itu memang belum
- * punya kuitansi), padahal justru tagihan itulah yang dicari saat laporan ini
- * dibuka untuk menelusuri siapa yang belum menyetor.
- */
-function anggotaAwal(): AnggotaFilters {
-  const tahun = new Date().getFullYear()
-  return {
-    search: "",
-    regionCode: "",
-    groupLeaderCode: "",
-    rateCode: "",
-    periodFrom: `${tahun}-01`,
-    periodTo: `${tahun}-12`,
-    dateFrom: "",
-    dateTo: "",
-    status: "",
-  }
-}
-
-/** "YYYY-MM" (nilai `<input type="month">`) → "MM/YYYY" yang diminta API. */
+/** "2026-08" / "2026-08-14" → "08/2026" yang diminta API. */
 function periodeApi(value: string): string | undefined {
-  const m = /^(\d{4})-(\d{2})$/.exec(value)
+  const m = /^(\d{4})-(\d{2})/.exec(value)
   return m ? `${m[2]}/${m[1]}` : undefined
 }
 
 /**
- * Parameter permintaan tab Penerimaan.
+ * Tanggal yang dikirim ke API, atau undefined bila yang dipilih sebulan penuh.
  *
- * Diekspor supaya export .xlsx memakai fungsi yang SAMA dengan yang mengisi
- * tabel — hanya `per_page`-nya yang berbeda. Kalau keduanya merakit parameter
- * sendiri-sendiri, cepat atau lambat ada penyaring yang terpasang di satu sisi
- * saja dan berkasnya berisi baris yang tidak ada di layar.
+ * Dibedakan dari BENTUK nilainya, bukan disimpan sebagai penanda terpisah:
+ * penanda terpisah bisa menyala untuk nilai yang tidak punya tanggal.
  */
-export function paramsPenerimaan(f: PenerimaanFilters, page: number, perPage: number) {
-  return {
-    page,
-    per_page: perPage,
-    search: f.search || undefined,
-    date_from: f.dateFrom || undefined,
-    date_to: f.dateTo || undefined,
-    transaction_type: f.transactionType || undefined,
-    payment_method: f.paymentMethod || undefined,
-    validation: f.validation || undefined,
-  }
+function tanggalApi(value: string): string | undefined {
+  return /^\d{4}-\d{2}-\d{2}$/.test(value) ? value : undefined
 }
 
-/** Parameter permintaan tab Per Anggota — lihat alasannya di `paramsPenerimaan`. */
-export function paramsAnggota(f: AnggotaFilters, page: number, perPage: number) {
-  return {
-    page,
-    per_page: perPage,
-    search: f.search || undefined,
-    region_code: f.regionCode || undefined,
-    group_leader_code: f.groupLeaderCode || undefined,
-    rate_code: f.rateCode || undefined,
-    period_from: periodeApi(f.periodFrom),
-    period_to: periodeApi(f.periodTo),
-    date_from: f.dateFrom || undefined,
-    date_to: f.dateTo || undefined,
-    status: f.status || undefined,
-  }
-}
-
-type TabState<TRow, TSummary> = {
-  items: TRow[]
-  summary: TSummary | null
-  totalItems: number
-  totalPages: number
-  page: number
+type LaporanState = {
+  blocks: RekapBlock[]
+  /**
+   * Periode yang direkap: "YYYY-MM" untuk sebulan penuh, "YYYY-MM-DD" untuk
+   * satu tanggal saja.
+   *
+   * KOSONG saat halaman baru dibuka, dan kosong itu berarti "biar server yang
+   * memilih": backend menjawabnya dengan bulan terakhir yang ada setorannya,
+   * lalu nilai ini diisi dari jawaban tersebut. Memilih sendiri bulan berjalan
+   * hanya benar kalau setoran bulan ini sudah masuk — pada tanggal 1, atau pada
+   * basis data yang datanya berhenti beberapa bulan lalu, yang tampil justru
+   * lembar kosong yang tidak bisa dibedakan dari data hilang, lengkap dengan
+   * pencarian yang selalu nihil karena mencari di dalam bulan yang kosong.
+   */
+  period: string
+  /**
+   * Kata kunci yang sedang dipakai — nama/no. anggota, no. pembayaran, atau
+   * nama ketua. Kosong berarti seluruh bulan.
+   *
+   * Dicari di SERVER, bukan disaring di peramban atas baris yang sudah ada:
+   * tiap blok ditutup baris total, dan total hasil hitungan ulang di frontend
+   * akan jadi versi kedua dari angka yang sama.
+   */
+  search: string
+  /** Cara bayar yang ditampilkan; kosong berarti semuanya. */
+  method: string
+  /** Backend memotong di `MAX_ROWS`; ditampilkan sebagai peringatan. */
+  truncated: boolean
   loading: boolean
+  /** true setelah pemuatan pertama yang berhasil. */
   loaded: boolean
+  /** true setelah ada mutasi transaksi — memicu muat ulang. */
   dirty: boolean
   /**
    * Sebab permintaan terakhir gagal, atau null bila tidak gagal.
@@ -304,70 +117,43 @@ type TabState<TRow, TSummary> = {
   error: string | null
 }
 
-type LaporanState = {
-  tab: LaporanTab
-  /**
-   * Bawaan penyaring sudah diisi dari jam peramban.
-   *
-   * Pemuatan data menunggu ini. Tanpa penantian itu, permintaan pertama
-   * berangkat dengan rentang tanggal KOSONG — memindai seluruh riwayat
-   * kuitansi hanya untuk menampilkan 25 baris pertama, persis yang dihindari
-   * dengan memberi bawaan.
-   */
-  seeded: boolean
-  penerimaan: TabState<LaporanPenerimaanRow, LaporanPenerimaanSummary> & {
-    filters: PenerimaanFilters
-  }
-  anggota: TabState<LaporanAnggotaRow, LaporanAnggotaSummary> & {
-    filters: AnggotaFilters
-  }
-}
-
-const tabKosong = {
-  items: [],
-  summary: null,
-  totalItems: 0,
-  totalPages: 1,
-  page: 1,
+const initialState: LaporanState = {
+  blocks: [],
+  period: "",
+  search: "",
+  method: "",
+  truncated: false,
   loading: false,
   loaded: false,
   dirty: false,
   error: null,
 }
 
-const initialState: LaporanState = {
-  tab: "penerimaan",
-  seeded: false,
-  penerimaan: { ...tabKosong, items: [], summary: null, filters: penerimaanKosong() },
-  anggota: { ...tabKosong, items: [], summary: null, filters: anggotaKosong() },
+/** Respons rekap bulanan: blok per cara bayar, bukan paginator. */
+export type RekapResponse = {
+  period: { month: number; year: number; date_from: string; date_to: string }
+  blocks: RekapBlock[]
+  truncated: boolean
 }
 
-/** Respons laporan = paginator biasa + rekap seluruh hasil saring. */
-type LaporanResponse<TRow, TSummary> = Paginated<TRow> & { summary: TSummary }
-
-export const fetchLaporanPenerimaan = createAsyncThunk(
-  "nafsulLaporan/penerimaan",
+export const fetchLaporanRekap = createAsyncThunk(
+  "nafsulLaporan/rekap",
   async (_, { getState }) => {
-    const { page, filters } = (getState() as { nafsulLaporan: LaporanState }).nafsulLaporan
-      .penerimaan
+    const { period, search, method } = (getState() as { nafsulLaporan: LaporanState })
+      .nafsulLaporan
 
-    return api<LaporanResponse<LaporanPenerimaanRow, LaporanPenerimaanSummary>>(
-      "/laporan/penerimaan",
-      { params: paramsPenerimaan(filters, page, PER_PAGE) }
-    )
-  }
-)
-
-export const fetchLaporanAnggota = createAsyncThunk(
-  "nafsulLaporan/anggota",
-  async (_, { getState }) => {
-    const { page, filters } = (getState() as { nafsulLaporan: LaporanState }).nafsulLaporan
-      .anggota
-
-    return api<LaporanResponse<LaporanAnggotaRow, LaporanAnggotaSummary>>(
-      "/laporan/per-anggota",
-      { params: paramsAnggota(filters, page, PER_PAGE) }
-    )
+    return api<RekapResponse>("/laporan/rekap-pembayaran", {
+      // Ketiganya opsional, dan `api()` sudah membuang nilai kosong dari query
+      // string. Kosong berarti "tanpa penyaring" — untuk `period` artinya bulan
+      // terakhir yang ada setorannya, dipilih backend lalu dikembalikan lewat
+      // `period` pada responsnya.
+      params: {
+        period: periodeApi(period),
+        date: tanggalApi(period),
+        search,
+        payment_method: method,
+      },
+    })
   }
 )
 
@@ -375,133 +161,80 @@ const nafsulLaporanSlice = createSlice({
   name: "nafsulLaporan",
   initialState,
   reducers: {
-    setLaporanTab(state, action: PayloadAction<LaporanTab>) {
-      state.tab = action.payload
-    },
-
     /**
-     * Isi bawaan penyaring dari jam PERAMBAN, sekali saja seumur sesi.
+     * Setel SELURUH penyaring sekaligus — bulan, kata kunci, cara bayar.
      *
-     * Dipanggil dari efek mount halaman — jadi tidak pernah ikut jalan saat
-     * SSR, dan HTML server tidak pernah memuat tanggal apa pun untuk
-     * diperselisihkan saat hidrasi.
-     *
-     * Dijaga agar tidak mengulang: berpindah halaman lalu kembali tidak boleh
-     * menimpa rentang yang sudah diubah petugas.
+     * Satu action untuk ketiganya, bukan tiga action berurutan: masing-masing
+     * mengosongkan `loaded`, dan tiga kali berturut-turut membuat efek pemuatan
+     * di halaman berangkat tiga kali untuk satu penekanan tombol Cari.
      */
-    seedLaporanDefaults(state) {
-      if (state.seeded) return
-      state.seeded = true
-      state.penerimaan.filters = penerimaanAwal()
-      state.anggota.filters = anggotaAwal()
+    setLaporanFilter(
+      state,
+      action: PayloadAction<{ period: string; search: string; method: string }>,
+    ) {
+      state.period = action.payload.period
+      state.search = action.payload.search.trim()
+      state.method = action.payload.method
+      state.loaded = false
     },
 
     /**
-     * Seluruh penyaring tab Penerimaan disetel SEKALIGUS, saat tombol Cari
-     * ditekan.
-     *
-     * Satu reducer per penyaring berarti satu kali Cari memicu beberapa kali
-     * `loaded = false`, dan karenanya beberapa permintaan yang saling
-     * membatalkan hasil.
-     */
-    setPenerimaanFilters(state, action: PayloadAction<PenerimaanFilters>) {
-      state.penerimaan.filters = action.payload
-      state.penerimaan.page = 1
-      state.penerimaan.loaded = false
-    },
-    setPenerimaanPage(state, action: PayloadAction<number>) {
-      state.penerimaan.page = action.payload
-      state.penerimaan.loaded = false
-    },
-
-    setAnggotaFilters(state, action: PayloadAction<AnggotaFilters>) {
-      state.anggota.filters = action.payload
-      state.anggota.page = 1
-      state.anggota.loaded = false
-    },
-    setAnggotaPage(state, action: PayloadAction<number>) {
-      state.anggota.page = action.payload
-      state.anggota.loaded = false
-    },
-
-    /**
-     * Tandai kedua tab usang.
+     * Tandai laporan usang.
      *
      * Dipakai halaman lain setelah mengubah transaksi (simpan, hapus,
-     * validasi): laporannya menghitung baris yang sama, jadi keduanya ikut
-     * basi — bukan hanya yang kebetulan sedang dibuka.
+     * validasi): laporan ini menghitung baris yang sama, jadi ikut basi.
      */
     invalidateLaporan(state) {
-      state.penerimaan.dirty = true
-      state.anggota.dirty = true
+      state.dirty = true
     },
 
     /**
-     * Muat ulang satu tab setelah gagal.
+     * Muat ulang setelah gagal.
      *
      * `error` dikosongkan lebih dulu supaya efek pemuatan di halaman melihat
      * keadaan "belum dimuat dan tidak sedang bergalat", lalu berangkat lagi.
      */
-    retryLaporan(state, action: PayloadAction<LaporanTab>) {
-      const t = state[action.payload]
-      t.error = null
-      t.loaded = false
+    retryLaporan(state) {
+      state.error = null
+      state.loaded = false
     },
   },
   extraReducers: (builder) => {
     builder
-      .addCase(fetchLaporanPenerimaan.pending, (state) => {
-        state.penerimaan.loading = true
-        state.penerimaan.error = null
+      .addCase(fetchLaporanRekap.pending, (state) => {
+        state.loading = true
+        state.error = null
       })
-      .addCase(fetchLaporanPenerimaan.fulfilled, (state, action) => {
-        state.penerimaan.items = action.payload.data
-        state.penerimaan.summary = action.payload.summary
-        state.penerimaan.totalItems = action.payload.total
-        state.penerimaan.totalPages = action.payload.last_page
-        state.penerimaan.loading = false
-        state.penerimaan.loaded = true
-        state.penerimaan.dirty = false
-        state.penerimaan.error = null
+      .addCase(fetchLaporanRekap.fulfilled, (state, action) => {
+        // Bulan diambil dari JAWABAN, bukan dari yang dikirim: permintaan
+        // pertama sengaja tidak menyebut bulan, dan bulan yang dipilih backend
+        // harus terbaca di pemilih bulan — kalau tidak, isiannya kosong
+        // sementara tabelnya berisi, dan menekan Cari untuk kata kunci apa pun
+        // akan diam-diam melompat ke bulan lain.
+        // Hanya diisi saat masih kosong, yaitu pada permintaan PERTAMA yang
+        // memang sengaja tidak menyebut periode. Menimpanya tiap kali akan
+        // membuang tanggal yang barusan dipilih petugas — jawaban server hanya
+        // menyebut bulan tempat tanggal itu berada.
+        if (!state.period) state.period = periodeInput(action.payload.period)
+        state.blocks = action.payload.blocks
+        state.truncated = action.payload.truncated
+        state.loading = false
+        state.loaded = true
+        state.dirty = false
+        state.error = null
       })
-      .addCase(fetchLaporanPenerimaan.rejected, (state, action) => {
-        state.penerimaan.loading = false
+      .addCase(fetchLaporanRekap.rejected, (state, action) => {
+        state.loading = false
         // `dirty` dilepas juga: kalau dibiarkan menyala, efek pemuatan di
         // halaman langsung mencoba lagi dan gagal lagi tanpa henti.
-        state.penerimaan.dirty = false
-        state.penerimaan.error = action.error.message || "nafsulLaporan.loadFailed"
-      })
-      .addCase(fetchLaporanAnggota.pending, (state) => {
-        state.anggota.loading = true
-        state.anggota.error = null
-      })
-      .addCase(fetchLaporanAnggota.fulfilled, (state, action) => {
-        state.anggota.items = action.payload.data
-        state.anggota.summary = action.payload.summary
-        state.anggota.totalItems = action.payload.total
-        state.anggota.totalPages = action.payload.last_page
-        state.anggota.loading = false
-        state.anggota.loaded = true
-        state.anggota.dirty = false
-        state.anggota.error = null
-      })
-      .addCase(fetchLaporanAnggota.rejected, (state, action) => {
-        state.anggota.loading = false
-        // `dirty` dilepas juga: kalau dibiarkan menyala, efek pemuatan di
-        // halaman langsung mencoba lagi dan gagal lagi tanpa henti.
-        state.anggota.dirty = false
-        state.anggota.error = action.error.message || "nafsulLaporan.loadFailed"
+        state.dirty = false
+        state.error = action.error.message || "nafsulLaporan.loadFailed"
       })
   },
 })
 
 export const {
-  setLaporanTab,
-  seedLaporanDefaults,
-  setPenerimaanFilters,
-  setPenerimaanPage,
-  setAnggotaFilters,
-  setAnggotaPage,
+  setLaporanFilter,
   invalidateLaporan,
   retryLaporan,
 } = nafsulLaporanSlice.actions
