@@ -236,6 +236,29 @@ const CENTER_CELL_STYLE = {
   border: BORDER_THIN,
 } as const
 
+/**
+ * Latar baris yang DISOROT — kuning muda, dipakai menandai baris pertama tiap
+ * kuitansi pada lembar rekap.
+ *
+ * Sorotannya melintasi SELURUH kolom, termasuk kolom anggota & nominal yang
+ * nilainya milik anggota pertama: yang ditandai adalah tempat kuitansi baru
+ * DIMULAI, dan tanda yang berhenti di tengah baris terbaca sebagai dua bagian
+ * yang berbeda, bukan sebagai satu garis awal.
+ */
+const HIGHLIGHT_FILL = { patternType: "solid", fgColor: { rgb: "FFF2CC" } } as const
+
+/**
+ * Gaya sel yang sama, ditambah latar sorot.
+ *
+ * Latar ditambahkan ke gaya yang SUDAH dipilih (nominal / tengah / teks), bukan
+ * menggantinya: sel nominal yang kehilangan `numFmt`-nya akan tampil sebagai
+ * angka telanjang, dan baris pertama tiap kuitansi justru baris yang paling
+ * sering dibaca.
+ */
+function disorot<T extends object>(gaya: T) {
+  return { ...gaya, fill: HIGHLIGHT_FILL }
+}
+
 export type XlsxCell = string | number | null | undefined
 
 /**
@@ -250,6 +273,16 @@ export type XlsxSection = {
   title: string
   headers: readonly string[]
   rows: readonly XlsxCell[][]
+  /**
+   * Indeks baris di dalam `rows` yang diberi latar kuning — pada lembar rekap,
+   * baris pertama tiap kuitansi.
+   *
+   * Disebut sebagai indeks, bukan ditebak dari isi selnya: baris pertama sebuah
+   * kuitansi dikenali dari kolom kuitansinya yang terisi, dan menebak lewat
+   * "sel pertama tidak kosong" akan ikut menyorot baris mana pun yang kebetulan
+   * bertanggal — aturan yang diam-diam meleset begitu susunan kolomnya berubah.
+   */
+  highlightRows?: readonly number[]
 }
 
 /**
@@ -343,7 +376,13 @@ function lembarSeksi(
   aoa.push([...section.headers, ...kosong().slice(section.headers.length)])
 
   const barisIsi: number[] = []
-  section.rows.forEach((row) => {
+  // Nomor baris SHEET yang disorot, diterjemahkan dari indeks baris `rows`:
+  // lembar punya baris judul & baris nama kolom di atas isinya, jadi keduanya
+  // tidak pernah bernomor sama.
+  const barisSorot = new Set<number>()
+
+  section.rows.forEach((row, i) => {
+    if (section.highlightRows?.includes(i)) barisSorot.add(aoa.length)
     barisIsi.push(aoa.length)
     aoa.push([...row.map((c) => c ?? ""), ...kosong().slice(row.length)])
   })
@@ -364,14 +403,17 @@ function lembarSeksi(
   }
 
   barisIsi.forEach((r) => {
+    const sorot = barisSorot.has(r)
+
     for (let c = 0; c < lebar; c++) {
       const cell = sel(r, c)
       if (!cell) continue
-      cell.s = moneyColumns.includes(c)
+      const gaya = moneyColumns.includes(c)
         ? MONEY_CELL_STYLE
         : centerColumns.includes(c)
           ? CENTER_CELL_STYLE
           : TEXT_CELL_STYLE
+      cell.s = sorot ? disorot(gaya) : gaya
     }
   })
 

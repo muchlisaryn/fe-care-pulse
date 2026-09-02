@@ -37,10 +37,31 @@ export type RekapRow = {
   deduction: string
 }
 
+/**
+ * Satu baris layar rekap = satu KUITANSI.
+ *
+ * Hanya memuat yang ada di `transaction_headers`. Anggota beserta nominalnya
+ * TIDAK ikut: sebuah halaman berisi 50 kuitansi bisa memuat ribuan baris
+ * anggota yang hampir semuanya tidak pernah dibuka, jadi rinciannya diminta
+ * terpisah lewat `/laporan/rekap-pembayaran/{uuid}/anggota` saat barisnya
+ * benar-benar dibuka.
+ */
+export type RekapKuitansi = {
+  /** Kunci render; sama dengan `uuid`. */
+  key: string
+  /** Dipakai meminta rincian anggotanya. */
+  uuid: string
+  date: string
+  transaction_number: string
+  transaction_type: "kelompok" | "pribadi"
+  group_leader_name: string | null
+  members_count: number
+}
+
 /** Satu blok cara bayar beserta angka penutupnya. */
 export type RekapBlock = {
   payment_method: string
-  rows: RekapRow[]
+  rows: RekapKuitansi[]
   summary: {
     rows: number
     amount: string
@@ -191,6 +212,22 @@ export type RekapResponse = {
   pagination: { page: number; per_page: number; total: number; last_page: number }
   truncated: boolean
 }
+
+/**
+ * Respons `detail=1` — satu baris per ANGGOTA per kuitansi, bentuk datar yang
+ * dipakai export .xlsx.
+ *
+ * Lembar .xlsx memang merentangkan seluruh anggota: baris yang di layar
+ * tersembunyi di balik lipatan tidak akan pernah bisa dibuka di dalam Excel.
+ */
+export type RekapDetailBlock = Omit<RekapBlock, "rows"> & { rows: RekapRow[] }
+
+export type RekapDetailResponse = Omit<RekapResponse, "blocks"> & {
+  blocks: RekapDetailBlock[]
+}
+
+/** Respons rincian satu kuitansi. */
+export type AnggotaKuitansiResponse = { rows: RekapRow[] }
 
 export const fetchLaporanRekap = createAsyncThunk(
   "nafsulLaporan/rekap",

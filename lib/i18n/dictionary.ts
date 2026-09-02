@@ -2226,6 +2226,9 @@ export const dictionary = {
       noResult: "No payments in this month match that filter.",
       loadFailed: "Failed to load the report.",
       retry: "Try Again",
+      detailLoading: "Loading members...",
+      detailEmpty: "This receipt has no member lines.",
+      detailFailed: "Member details could not be loaded.",
     },
     nafsulImport: {
       titleMember: "Import Members from Excel",
@@ -4485,6 +4488,9 @@ export const dictionary = {
       noResult: "Tidak ada pembayaran pada bulan ini yang cocok dengan penyaring.",
       loadFailed: "Laporan gagal dimuat.",
       retry: "Coba Lagi",
+      detailLoading: "Memuat anggota...",
+      detailEmpty: "Kuitansi ini belum punya rincian anggota.",
+      detailFailed: "Rincian anggota tidak bisa dimuat.",
     },
     nafsulImport: {
       titleMember: "Impor Anggota dari Excel",
