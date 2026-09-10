@@ -58,17 +58,24 @@ export type RekapKuitansi = {
   members_count: number
 }
 
-/** Satu blok cara bayar beserta angka penutupnya. */
+/**
+ * Satu blok cara bayar di LAYAR — kuitansi saja, tanpa angka penutup.
+ *
+ * Backend mengambilnya langsung dari `transaction_headers` tanpa menjumlahkan
+ * rincian, jadi `summary` hanya ada pada blok export (`RekapDetailBlock`).
+ */
 export type RekapBlock = {
   payment_method: string
   rows: RekapKuitansi[]
-  summary: {
-    rows: number
-    amount: string
-    deduction: string
-    /** `amount - deduction`; dihitung backend agar tidak ada dua versinya. */
-    net: string
-  }
+}
+
+/** Angka penutup satu blok export. */
+export type RekapSummary = {
+  rows: number
+  amount: string
+  deduction: string
+  /** `amount - deduction`; dihitung backend agar tidak ada dua versinya. */
+  net: string
 }
 
 /** `{ month: 8, year: 2026 }` → "2026-08", bentuk `<input type="month">`. */
@@ -176,7 +183,7 @@ type LaporanState = {
 const bawaan = rentangSebulanTerakhir()
 
 /** Baris per halaman; disamakan dengan bawaan server. */
-export const PER_HALAMAN = 50
+export const PER_HALAMAN = 10
 
 /**
  * Batas atas `per_page` yang diterima server. Dipakai export untuk menarik
@@ -220,7 +227,11 @@ export type RekapResponse = {
  * Lembar .xlsx memang merentangkan seluruh anggota: baris yang di layar
  * tersembunyi di balik lipatan tidak akan pernah bisa dibuka di dalam Excel.
  */
-export type RekapDetailBlock = Omit<RekapBlock, "rows"> & { rows: RekapRow[] }
+export type RekapDetailBlock = {
+  payment_method: string
+  rows: RekapRow[]
+  summary: RekapSummary
+}
 
 export type RekapDetailResponse = Omit<RekapResponse, "blocks"> & {
   blocks: RekapDetailBlock[]

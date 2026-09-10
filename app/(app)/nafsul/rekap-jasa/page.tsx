@@ -352,7 +352,7 @@ export default function NafsulRekapJasaPage() {
 
   /**
    * Unduh SATU berkas PDF berisi kuitansi jasa seluruh baris hasil penyaringan,
-   * satu kuitansi per halaman.
+   * dua kuitansi per halaman A4 melintang dengan garis potong di tengahnya.
    *
    * Dirakit di server, bukan dengan menembak endpoint per baris lalu mengunduh
    * puluhan berkas: yang dibawa petugas ke ketua-ketua kelompok adalah setumpuk

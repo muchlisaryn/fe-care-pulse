@@ -41,6 +41,12 @@ type ReportGroup = {
   temperature: string | number | null
   duration_minutes: number | null
   operator: string | null
+  /** Petugas tiap tahap pipeline; beberapa nama digabung ", ". null = tidak tercatat. */
+  production_officer: string | null
+  washing_officer: string | null
+  packaging_officer: string | null
+  sterilization_officer: string | null
+  storage_officer: string | null
   sterilized_at: string | null
   /** Hasil validasi batch — null bila batch belum divalidasi. */
   chemical_indicator: string | null
@@ -52,6 +58,25 @@ type ReportGroup = {
   failed: boolean
   units: ReportUnit[]
 }
+
+type OfficerField =
+  | "production_officer"
+  | "washing_officer"
+  | "packaging_officer"
+  | "sterilization_officer"
+  | "storage_officer"
+
+/**
+ * Kolom petugas, urut mengikuti alur pipeline: produksi → gudang steril. Satu
+ * daftar dipakai tabel, kartu, dan export supaya urutannya tidak pernah berbeda.
+ */
+const OFFICER_COLUMNS: { field: OfficerField; labelKey: string }[] = [
+  { field: "production_officer", labelKey: "report.officerProduction" },
+  { field: "washing_officer", labelKey: "report.officerWashing" },
+  { field: "packaging_officer", labelKey: "report.officerPackaging" },
+  { field: "sterilization_officer", labelKey: "report.officerSterilization" },
+  { field: "storage_officer", labelKey: "report.officerStorage" },
+]
 
 const RESULT_OPTIONS = [
   { value: "berhasil", labelKey: "report.resultPassed" },
@@ -258,8 +283,8 @@ export default function LaporanPerAlatPage() {
         t("report.chemicalIndicator"),
         t("report.bioControlFull"),
         t("report.bioTestFull"),
-        t("report.operator"),
         t("report.expiry"),
+        ...OFFICER_COLUMNS.map((c) => t(c.labelKey)),
       ]
       // Isi file tetap per aset (per unit): baris gabungan diuraikan jadi baris-baris unitnya.
       const rows = data.flatMap((g) =>
@@ -279,8 +304,8 @@ export default function LaporanPerAlatPage() {
           g.chemical_indicator ?? "-",
           g.bio_indicator_control ?? "-",
           g.bio_indicator_test ?? "-",
-          g.operator ?? "",
           formatDate(g.expiry_date, lang),
+          ...OFFICER_COLUMNS.map((c) => g[c.field] ?? "-"),
         ]),
       )
       downloadXlsx(
@@ -457,7 +482,7 @@ export default function LaporanPerAlatPage() {
                 pembungkusnya digeser horizontal — lebih baik digeser daripada kolom
                 terhimpit sampai teksnya terpotong. */}
             <div className="hidden overflow-x-auto md:block">
-            <table className="w-full min-w-[1640px] text-sm">
+            <table className="w-full min-w-[2560px] text-sm">
               <thead>
                 <tr className="border-b border-gray-100 bg-gray-50 text-xs font-semibold uppercase tracking-wide text-gray-400">
                   <th className="whitespace-nowrap py-2.5 px-4 text-left">{t("report.sterilizedAt")}</th>
@@ -474,6 +499,11 @@ export default function LaporanPerAlatPage() {
                   <th className="whitespace-nowrap py-2.5 px-4 text-left">{t("report.bioControl")}</th>
                   <th className="whitespace-nowrap py-2.5 px-4 text-left">{t("report.bioTest")}</th>
                   <th className="whitespace-nowrap py-2.5 px-4 text-left">{t("report.expiry")}</th>
+                  {OFFICER_COLUMNS.map((c) => (
+                    <th key={c.field} className="whitespace-nowrap py-2.5 px-4 text-left">
+                      {t(c.labelKey)}
+                    </th>
+                  ))}
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-50">
@@ -498,7 +528,10 @@ export default function LaporanPerAlatPage() {
   )
 }
 
-/** Nilai indikator batch; batch yang belum divalidasi tidak pernah tampil kosong. */
+/**
+ * Nilai sel yang boleh kosong — indikator batch (belum divalidasi) maupun nama
+ * petugas (tidak tercatat). Null tidak pernah tampil sebagai sel kosong.
+ */
 function IndicatorValue({ value }: { value: string | null }) {
   return value ? <>{value}</> : <span className="text-xs text-gray-400">—</span>
 }
@@ -548,6 +581,11 @@ function ReportRows({ group: g }: { group: ReportGroup }) {
         <IndicatorValue value={g.bio_indicator_test} />
       </td>
       <td className="whitespace-nowrap py-2.5 px-4 text-gray-600">{formatDate(g.expiry_date, lang)}</td>
+      {OFFICER_COLUMNS.map((c) => (
+        <td key={c.field} className="whitespace-nowrap py-2.5 px-4 text-gray-700">
+          <IndicatorValue value={g[c.field]} />
+        </td>
+      ))}
     </tr>
   )
 }
@@ -597,6 +635,11 @@ function ReportCard({ group: g }: { group: ReportGroup }) {
           <IndicatorValue value={g.bio_indicator_test} />
         </ReportField>
         <ReportField label={t("report.expiry")}>{formatDate(g.expiry_date, lang)}</ReportField>
+        {OFFICER_COLUMNS.map((c) => (
+          <ReportField key={c.field} label={t(c.labelKey)}>
+            <IndicatorValue value={g[c.field]} />
+          </ReportField>
+        ))}
       </dl>
     </div>
   )
