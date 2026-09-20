@@ -28,6 +28,28 @@ export type TransaksiRincian = {
   total: string
 }
 
+/**
+ * Satu baris rincian dalam susunan LEMBAR BILING — satu baris per ANGGOTA,
+ * bukan per bulan seperti `TransaksiRincian`.
+ *
+ * Datang jadi dari server (`/transaksi/header/{uuid}/rincian-biling`):
+ * periodenya sudah dipadatkan jadi rentang "09/2026-12/2026", rupiahnya sudah
+ * diformat, dan potongan kuitansi sudah dibagi ke tiap anggota. Tidak ada yang
+ * perlu dihitung ulang di sini — kolom Kunjungan bahkan mustahil dihitung di
+ * klien karena dasarnya seluruh riwayat anggota, bukan kuitansi ini saja.
+ */
+export type BarisBiling = {
+  no_anggota: string | null
+  nama: string
+  /** "09/2026-12/2026", "09/2026", atau "sekali bayar" untuk tarif tak berperiode. */
+  periode: string
+  /** "B" = baru (iuran paling awal anggota ini), "L" = lama. */
+  kunjungan: "B" | "L"
+  /** Sudah berformat "Rp 28.000". */
+  jumlah: string
+  potongan: string
+}
+
 /** Satu kuitansi pembayaran — menaungi banyak rincian. */
 export type TransaksiHeader = {
   id: number
