@@ -113,6 +113,12 @@ const KOLOM_KUITANSI: ImportColumn[] = [
  * `amount` boleh kosong — server
  * memakai harga tarifnya, sehingga petugas tidak perlu menyalin angka yang sama
  * ratusan kali.
+ *
+ * `discount` nol — dikosongkan maupun diketik `0` — berarti "hitungkan
+ * bonusnya": tiap 12 periode seorang anggota dalam satu `transaction_number`
+ * memberi satu bulan gratis pada periode terakhirnya (discount = amount), sama
+ * seperti rencana pembayaran di form. Hanya diskon di atas nol yang dipakai apa
+ * adanya, karena itu potongan yang sudah tercetak di kuitansi lamanya.
  */
 const KOLOM_RINCIAN: ImportColumn[] = [
   // Menunjuk ke baris sheet Kuitansi yang bernomor sama.
