@@ -581,12 +581,20 @@ function Isian({
   )
 }
 
-function Th({ children, right }: { children: React.ReactNode; right?: boolean }) {
-  return (
-    <th className={`whitespace-nowrap px-4 py-2.5 ${right ? "text-right" : "text-left"}`}>
-      {children}
-    </th>
-  )
+function Th({
+  children,
+  right,
+  center,
+}: {
+  children: React.ReactNode
+  right?: boolean
+  center?: boolean
+}) {
+  // Perataan judul kolom mengikuti ISI kolomnya: judul rata kiri di atas sel
+  // yang ditengahkan terbaca sebagai dua kolom yang saling bergeser.
+  const rata = right ? "text-right" : center ? "text-center" : "text-left"
+
+  return <th className={`whitespace-nowrap px-4 py-2.5 ${rata}`}>{children}</th>
 }
 
 /**
@@ -710,8 +718,14 @@ function BlokRekap({
         <table className="w-full min-w-[820px] text-sm">
           <thead>
             <tr className={KEPALA}>
-              {KOLOM_KUITANSI.map((kunci) => (
-                <Th key={kunci}>{t(kunci)}</Th>
+              {/* Transaksi & Cara Bayar ditengahkan, mengikuti selnya di bawah —
+                  isinya label pendek (PRIBADI/KELOMPOK, TUNAI/TRANSFER), bukan
+                  teks yang panjangnya berbeda-beda tiap baris. Indeksnya
+                  mengacu urutan `KOLOM_KUITANSI`. */}
+              {KOLOM_KUITANSI.map((kunci, i) => (
+                <Th key={kunci} center={i === 2 || i === 3}>
+                  {t(kunci)}
+                </Th>
               ))}
             </tr>
           </thead>
