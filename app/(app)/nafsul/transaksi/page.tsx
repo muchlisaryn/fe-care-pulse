@@ -28,6 +28,7 @@ import { ResultDialog } from "@/components/molecules/ResultDialog";
 import { Modal } from "@/components/molecules/Modal";
 import { Pagination } from "@/components/molecules/Pagination";
 import ImportTransaksiModal from "@/components/nafsul/ImportTransaksiModal";
+import RincianBiling from "@/components/nafsul/RincianBiling";
 import { useAppDispatch, useAppSelector } from "@/lib/store/hooks";
 import {
   fetchTransaksi,
@@ -37,6 +38,7 @@ import {
   setTransaksiPage,
   invalidateTransaksi,
   PER_PAGE,
+  type BarisBiling,
   type TransaksiHeader,
   type TransaksiRincian,
 } from "@/lib/store/slices/nafsulTransaksiSlice";
@@ -104,6 +106,23 @@ export default function NafsulTransaksiPage() {
   // kuitansi yang sama tidak menembak API lagi. `useRef`, bukan state: isinya
   // tidak boleh memicu render sendiri.
   const anggotaCache = useRef<Map<string, TransaksiRincian[]>>(new Map());
+
+  // Baris lipatan: rincian kuitansi dalam susunan LEMBAR BILING — satu baris
+  // per anggota, periodenya sudah dipadatkan jadi rentang. Bentuknya disamakan
+  // dengan lembar yang dipegang penyetor supaya yang dilihat petugas di layar
+  // dan yang dipegang anggota bisa dibandingkan baris per baris.
+  //
+  // Hanya SATU baris boleh terbuka sekaligus: membuka yang lain menutup yang
+  // sebelumnya. Beberapa lipatan terbuka bersamaan mendorong baris-baris
+  // berikutnya jauh ke bawah, dan daftarnya jadi lebih sulit dibaca daripada
+  // sebelum dibuka.
+  const [rincianUuid, setRincianUuid] = useState<string | null>(null);
+  const [rincianList, setRincianList] = useState<BarisBiling[] | null>(null);
+  const [rincianLoading, setRincianLoading] = useState(false);
+  const [rincianError, setRincianError] = useState<string | null>(null);
+  // Sama seperti `anggotaCache`: membuka ulang kuitansi yang sama tidak
+  // menembak API lagi.
+  const rincianCache = useRef<Map<string, BarisBiling[]>>(new Map());
 
   // Pratinjau biling. `bilingUrl` adalah object URL blob — wajib dibebaskan
   // saat modal ditutup dan saat komponen dilepas, kalau tidak blob PDF-nya
@@ -213,6 +232,48 @@ export default function NafsulTransaksiPage() {
     setAnggotaList(null);
     setAnggotaError(null);
   }
+
+  /**
+   * Buka/tutup baris lipatan sebuah kuitansi.
+   *
+   * Menekan panah baris yang sedang terbuka akan menutupnya — panah yang sama
+   * bekerja dua arah, sesuai dengan ikonnya yang ikut berubah.
+   *
+   * Isinya baru ditembak saat panahnya ditekan, bukan ikut dimuat bersama
+   * daftarnya: alasannya sama dengan chip "(+n)" di atas — 25 baris yang boleh
+   * jadi tak satu pun dibuka tidak perlu menanggung 25 permintaan detail.
+   */
+  const bukaRincian = useCallback(async (row: TransaksiHeader) => {
+    if (rincianUuid === row.uuid) {
+      setRincianUuid(null);
+      return;
+    }
+
+    setRincianUuid(row.uuid);
+    setRincianError(null);
+
+    const cached = rincianCache.current.get(row.uuid);
+    if (cached) {
+      setRincianList(cached);
+      return;
+    }
+
+    setRincianList(null);
+    setRincianLoading(true);
+    try {
+      const hasil = await api<{ data: BarisBiling[] }>(
+        `/transaksi/header/${row.uuid}/rincian-biling`,
+      );
+      rincianCache.current.set(row.uuid, hasil.data);
+      setRincianList(hasil.data);
+    } catch (e) {
+      setRincianError(
+        e instanceof ApiError ? e.message : t("nafsulTransaksi.detailFailed"),
+      );
+    } finally {
+      setRincianLoading(false);
+    }
+  }, [rincianUuid, t]);
 
   /**
    * Buka pratinjau biling: ambil PDF sebagai blob (supaya token Bearer ikut
@@ -526,10 +587,20 @@ export default function NafsulTransaksiPage() {
           </div>
         ) : (
           <DataTable
-            rowNumberOffset={(page - 1) * PER_PAGE}
+            // `rowNumberOffset` tidak lagi dipakai: kolom "No" sudah berganti
+            // jadi kolom panah begitu `renderExpanded` diberikan.
             actionsAlign="center"
             columns={columns}
             data={items}
+            isRowExpanded={(row) => rincianUuid === row.uuid}
+            onToggleExpand={bukaRincian}
+            renderExpanded={(row) => (
+              <RincianBiling
+                baris={rincianUuid === row.uuid ? rincianList : null}
+                loading={rincianLoading}
+                error={rincianError}
+              />
+            )}
             extraActions={[
               {
                 // Satu tombol dua arah, dan ikonnya menggambarkan AKSI-nya —

@@ -1,11 +1,11 @@
 "use client"
 
-import { Pencil, Trash2 } from "lucide-react"
+import { ChevronDown, ChevronRight, Pencil, Trash2 } from "lucide-react"
 import { Button } from "@/components/atoms/Button"
 import { RowActionsMenu, type RowActionItem } from "@/components/molecules/RowActionsMenu"
 import { useT } from "@/lib/i18n"
 import { cn } from "@/lib/utils"
-import type { ReactNode } from "react"
+import { Fragment, type ReactNode } from "react"
 
 export type Column<T> = {
   header: string
@@ -47,6 +47,17 @@ type DataTableProps<T extends object> = {
   rowNumber?: (row: T, index: number) => ReactNode
   // Sembunyikan kolom "No" (mis. saat tabel sudah punya kolom urutan sendiri).
   hideRowNumber?: boolean
+  // Isi baris lipatan sebuah baris. Begitu prop ini diberikan, kolom "No"
+  // BERGANTI jadi kolom tanda panah — nomor urutnya tidak ikut ditampilkan di
+  // sebelahnya. Itu disengaja: kolom paling kiri hanya punya ruang untuk satu
+  // hal, dan pada tabel yang barisnya bisa dibuka, panah lebih berguna daripada
+  // nomor urut yang sudah tidak dipakai untuk menunjuk baris.
+  renderExpanded?: (row: T, index: number) => ReactNode
+  // Baris mana yang sedang terbuka. Dipegang HALAMAN, bukan tabel ini, karena
+  // halamannya juga yang memuat isi lipatannya — kalau keadaannya di sini,
+  // tidak ada yang bisa memicu pengambilan datanya saat panahnya ditekan.
+  isRowExpanded?: (row: T) => boolean
+  onToggleExpand?: (row: T) => void
   // Tabel selebar ISINYA, bukan dipaksa penuh (w-full). Dipakai saat kolomnya
   // banyak: ruang sisa jatuh di tepi kanan (di luar kolom), bukan tersebar jadi
   // celah antar-kolom — mis. celah lebar sebelum kolom Aksi.
@@ -76,6 +87,9 @@ export function DataTable<T extends object>({
   isRowLoading,
   rowNumber,
   hideRowNumber = false,
+  renderExpanded,
+  isRowExpanded,
+  onToggleExpand,
   rowNumberOffset = 0,
   autoWidth = false,
   actionsAlign = "end",
@@ -96,6 +110,27 @@ export function DataTable<T extends object>({
   const editLabel = labels?.edit ?? t("common.edit")
   const deleteLabel = labels?.delete ?? t("common.delete")
   const emptyText = emptyMessage ?? t("common.noData")
+  // Kolom paling kiri: panah lipatan bila tabel ini punya isi lipatan, kalau
+  // tidak nomor urut seperti sebelumnya. Keduanya tidak pernah muncul bersama.
+  const expandable = !!renderExpanded
+  const showRowNumber = !hideRowNumber && !expandable
+
+  // Tombol panah — sama persis di tampilan tabel & kartu, jadi ditulis sekali.
+  function renderExpandToggle(row: T) {
+    const open = isRowExpanded?.(row) ?? false
+    return (
+      <button
+        type="button"
+        onClick={() => onToggleExpand?.(row)}
+        aria-expanded={open}
+        aria-label={open ? t("common.collapse") : t("common.expand")}
+        title={open ? t("common.collapse") : t("common.expand")}
+        className="inline-flex h-6 w-6 items-center justify-center rounded text-gray-400 transition-colors hover:bg-[#075489]/10 hover:text-[#075489] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#075489]/40"
+      >
+        {open ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+      </button>
+    )
+  }
 
   // Tombol aksi baris — dipakai bersama oleh tampilan tabel (desktop) & kartu (mobile).
   function renderActions(row: T, rowLoading: boolean) {
@@ -185,10 +220,18 @@ export function DataTable<T extends object>({
                   rowLoading && "opacity-60"
                 )}
               >
-                {!hideRowNumber && (
+                {showRowNumber && (
                   <div className="flex items-center border-b border-gray-100 bg-gray-50/70 px-4 py-2">
                     <span className="inline-flex h-6 items-center justify-center rounded-full bg-[#075489]/10 px-2.5 text-xs font-semibold text-[#075489]">
                       {rowNumberLabel} {rowNumber ? rowNumber(row, i) : rowNumberOffset + i + 1}
+                    </span>
+                  </div>
+                )}
+                {expandable && (
+                  <div className="flex items-center gap-2 border-b border-gray-100 bg-gray-50/70 px-4 py-2">
+                    {renderExpandToggle(row)}
+                    <span className="text-[11px] font-medium uppercase tracking-wide text-gray-400">
+                      {t("common.detail")}
                     </span>
                   </div>
                 )}
@@ -204,6 +247,11 @@ export function DataTable<T extends object>({
                     </div>
                   ))}
                 </dl>
+                {expandable && (isRowExpanded?.(row) ?? false) && (
+                  <div className="border-t border-gray-100 bg-gray-50/40 px-4 py-3">
+                    {renderExpanded!(row, i)}
+                  </div>
+                )}
                 {hasActions && (
                   <div className={cn("flex flex-wrap gap-2 border-t border-gray-100 bg-gray-50/50 px-4 py-2.5", actionsJustify)}>
                     {renderActions(row, rowLoading)}
@@ -220,11 +268,15 @@ export function DataTable<T extends object>({
       <table className={cn("text-sm", autoWidth ? "w-auto" : "w-full")}>
         <thead>
           <tr className="border-b border-gray-100">
-            {!hideRowNumber && (
+            {showRowNumber && (
               <th className="py-3 pl-4 pr-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-400 w-12">
                 {rowNumberLabel}
               </th>
             )}
+            {/* Kolom panah: judulnya sengaja KOSONG. Kolomnya cuma selebar satu
+                ikon, dan kata apa pun di situ akan memaksanya melebar atau
+                terpotong — panahnya sendiri sudah menjelaskan fungsinya. */}
+            {expandable && <th className="w-10 py-3 pl-4 pr-1" aria-hidden />}
             {columns.map((col, i) => (
               <th
                 key={i}
@@ -247,7 +299,7 @@ export function DataTable<T extends object>({
           {data.length === 0 ? (
             <tr>
               <td
-                colSpan={columns.length + (hasActions ? 1 : 0) + (hideRowNumber ? 0 : 1)}
+                colSpan={columns.length + (hasActions ? 1 : 0) + (showRowNumber || expandable ? 1 : 0)}
                 className="py-10 text-center text-sm text-gray-400"
               >
                 {emptyText}
@@ -256,30 +308,48 @@ export function DataTable<T extends object>({
           ) : (
             data.map((row, i) => {
               const rowLoading = isRowLoading?.(row) ?? false
+              const expanded = expandable && (isRowExpanded?.(row) ?? false)
               return (
-                <tr
-                  key={i}
-                  className={cn(
-                    "transition-colors",
-                    rowLoading ? "bg-gray-50 cursor-wait" : "hover:bg-gray-50"
+                <Fragment key={i}>
+                  <tr
+                    className={cn(
+                      "transition-colors",
+                      rowLoading ? "bg-gray-50 cursor-wait" : "hover:bg-gray-50",
+                      // Baris yang sedang terbuka diberi latar tetap supaya
+                      // terlihat menyatu dengan baris lipatannya di bawahnya.
+                      expanded && "bg-[#075489]/[0.04]"
+                    )}
+                  >
+                    {showRowNumber && (
+                      <td className="py-3 pl-4 pr-3 text-gray-400">
+                        {rowNumber ? rowNumber(row, i) : rowNumberOffset + i + 1}
+                      </td>
+                    )}
+                    {expandable && (
+                      <td className="py-3 pl-4 pr-1 align-top">{renderExpandToggle(row)}</td>
+                    )}
+                    {columns.map((col, j) => (
+                      <td key={j} className={cn("py-3 px-3 text-gray-700", col.className)}>
+                        {col.cell(row, i)}
+                      </td>
+                    ))}
+                    {hasActions && (
+                      <td className="py-3 pl-3 pr-4">
+                        <div className={cn("flex gap-2", actionsJustify)}>{renderActions(row, rowLoading)}</div>
+                      </td>
+                    )}
+                  </tr>
+                  {expanded && (
+                    <tr className="bg-[#075489]/[0.04]">
+                      <td
+                        colSpan={columns.length + (hasActions ? 1 : 0) + 1}
+                        className="px-4 pb-4 pt-0"
+                      >
+                        {renderExpanded!(row, i)}
+                      </td>
+                    </tr>
                   )}
-                >
-                  {!hideRowNumber && (
-                    <td className="py-3 pl-4 pr-3 text-gray-400">
-                      {rowNumber ? rowNumber(row, i) : rowNumberOffset + i + 1}
-                    </td>
-                  )}
-                  {columns.map((col, j) => (
-                    <td key={j} className={cn("py-3 px-3 text-gray-700", col.className)}>
-                      {col.cell(row, i)}
-                    </td>
-                  ))}
-                  {hasActions && (
-                    <td className="py-3 pl-3 pr-4">
-                      <div className={cn("flex gap-2", actionsJustify)}>{renderActions(row, rowLoading)}</div>
-                    </td>
-                  )}
-                </tr>
+                </Fragment>
               )
             })
           )}
