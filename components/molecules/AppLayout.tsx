@@ -210,7 +210,12 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
           <Sidebar onClose={() => setMobileOpen(false)} />
         </div>
 
-        <main className="flex-1 overflow-y-auto bg-gray-50 p-4 sm:p-6">{children}</main>
+        {/* min-w-0: tanpa ini item flex memakai min-width:auto, sehingga tabel
+            lebar (mis. daftar anggota) melebarkan <main> melampaui layar. Induknya
+            overflow-hidden, jadi kolom kanan terpotong TANPA bisa digulir — wadah
+            overflow-x-auto di dalam tabel pun tidak pernah aktif karena ikut
+            selebar isinya. */}
+        <main className="min-w-0 flex-1 overflow-y-auto bg-gray-50 p-4 sm:p-6">{children}</main>
       </div>
     </div>
   )

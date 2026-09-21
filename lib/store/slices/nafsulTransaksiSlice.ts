@@ -39,6 +39,8 @@ export type TransaksiRincian = {
  * klien karena dasarnya seluruh riwayat anggota, bukan kuitansi ini saja.
  */
 export type BarisBiling = {
+  /** Anggota pemilik baris ini — dipakai menunjuk rincian siapa yang diubah/dibuang. */
+  member_id: number
   no_anggota: string | null
   nama: string
   /** "09/2026-12/2026", "09/2026", atau "sekali bayar" untuk tarif tak berperiode. */
@@ -107,6 +109,13 @@ export type TransaksiHeader = {
   balance: string
   transactions_count: number
   created_at: string | null
+  /**
+   * Kode ketua kelompok pemilik kuitansi, hanya pada respons `show`.
+   *
+   * Dipakai halaman edit untuk menyaring dropdown anggota saat menambah
+   * rincian — satu kuitansi kelompok hanya untuk satu ketua.
+   */
+  group_leader_code?: string | null
   /** Hanya terisi pada respons `show`. */
   transactions?: TransaksiRincian[]
 }

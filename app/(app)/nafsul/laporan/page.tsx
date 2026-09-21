@@ -868,7 +868,11 @@ function TabelAnggota({
 
   return (
     <div className="overflow-hidden rounded-lg border border-gray-200 bg-white">
-      <table className="w-full text-sm">
+      {/* Pembungkus penggulir tersendiri: `overflow-hidden` di atasnya menjaga
+          sudut membulat, tapi ia MEMOTONG tabel yang lebih lebar dari layar
+          alih-alih membiarkannya digulir. */}
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[560px] text-sm">
         <thead>
           <tr className={KEPALA}>
             {KOLOM_ANGGOTA.map((kunci, i) => (
@@ -896,7 +900,8 @@ function TabelAnggota({
             </tr>
           ))}
         </tbody>
-      </table>
+        </table>
+      </div>
     </div>
   )
 }

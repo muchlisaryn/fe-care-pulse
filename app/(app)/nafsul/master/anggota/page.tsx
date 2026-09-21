@@ -54,7 +54,11 @@ export default function AnggotaListPage() {
     return () => {
       aktif = false;
     };
-  }, []);
+    // `versi` ikut jadi dependensi: penggabungan bisa menonaktifkan anggota
+    // asal, jadi angka di kartu Total/Pribadi/Kelompok ikut berubah. Tanpa ini
+    // daftarnya sudah diperbarui sementara kartunya masih memajang hitungan
+    // sebelum penggabungan — dua angka yang saling bertentangan di satu layar.
+  }, [versi]);
 
   return (
     <div>

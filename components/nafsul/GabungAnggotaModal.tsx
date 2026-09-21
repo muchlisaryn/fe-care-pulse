@@ -12,6 +12,9 @@ import { DataTable, type Column } from "@/components/molecules/DataTable";
 import { Pagination } from "@/components/molecules/Pagination";
 import { ResultDialog } from "@/components/molecules/ResultDialog";
 import MasterSelect from "@/components/nafsul/MasterSelect";
+import { useAppDispatch } from "@/lib/store/hooks";
+import { invalidateLaporan } from "@/lib/store/slices/nafsulLaporanSlice";
+import { invalidateTransaksi } from "@/lib/store/slices/nafsulTransaksiSlice";
 import { useT } from "@/lib/i18n";
 import { rupiah } from "@/lib/format";
 
@@ -98,6 +101,7 @@ type Props = {
  * ikut — nomor kuitansi di sini hanya cara mengelompokkan pilihan.
  */
 export default function GabungAnggotaModal({ open, onClose, onSuccess }: Props) {
+  const dispatch = useAppDispatch();
   const t = useT();
 
   const [langkah, setLangkah] = useState<1 | 2 | 3>(1);
@@ -349,6 +353,22 @@ export default function GabungAnggotaModal({ open, onClose, onSuccess }: Props) 
       // bawahnya dimuat ulang sehingga penggabungan yang barusan langsung
       // terlihat sebagai baris baru — itulah gunanya riwayat ada di sini.
       // Dialog hasil muncul di atasnya karena dirender setelah modal.
+      /*
+        Penggabungan MEMINDAHKAN rincian iuran dari satu anggota ke anggota
+        lain. Daftar transaksi & laporan iuran menghitung baris yang sama itu
+        dan keduanya disinggahi Redux, jadi tanpa ditandai usang keduanya masih
+        menampilkan nama anggota LAMA sampai tabnya dimuat ulang — dan nama
+        yang salah pada uang yang sudah diterima jauh lebih merepotkan daripada
+        satu permintaan ulang.
+
+        Ditandai dari sini, bukan dari halaman yang memasang modal ini:
+        `onSuccess` dipakai tiap pemanggil untuk urusannya sendiri (halaman
+        anggota memakainya untuk memuat ulang daftarnya), sedangkan yang basi
+        karena penggabungan selalu sama di mana pun modal ini dibuka.
+      */
+      dispatch(invalidateTransaksi());
+      dispatch(invalidateLaporan());
+
       reset();
       onSuccess();
       setVersiRiwayat((v) => v + 1);
@@ -426,10 +446,7 @@ export default function GabungAnggotaModal({ open, onClose, onSuccess }: Props) 
 
           {/* ── Langkah 3 & 4: pilih nomor transaksi yang dipindahkan ──────── */}
           {langkah === 3 && ringkasan && (
-            <Langkah
-              judul={t("gabungAnggota.step3Title")}
-              keterangan={t("gabungAnggota.step3Desc")}
-            >
+            <Langkah judul={t("gabungAnggota.step3Title")}>
               <div className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-lg bg-gray-50 px-3 py-2 text-sm">
                 <span className="text-gray-600">
                   <span className="font-semibold text-gray-900">
@@ -696,20 +713,27 @@ export default function GabungAnggotaModal({ open, onClose, onSuccess }: Props) 
   );
 }
 
-/** Kepala tiap langkah — judul + keterangan, seragam di ketiganya. */
+/** Kepala tiap langkah — judul, dengan keterangan bila langkahnya perlu. */
 function Langkah({
   judul,
   keterangan,
   children,
 }: {
   judul: string;
-  keterangan: string;
+  /** Boleh dikosongkan untuk langkah yang judulnya sudah cukup menjelaskan. */
+  keterangan?: string;
   children: React.ReactNode;
 }) {
   return (
     <div>
       <h3 className="text-sm font-semibold text-gray-800">{judul}</h3>
-      <p className="mb-3 mt-0.5 text-xs text-gray-500">{keterangan}</p>
+      {keterangan ? (
+        <p className="mb-3 mt-0.5 text-xs text-gray-500">{keterangan}</p>
+      ) : (
+        // Jarak bawah judulnya tetap dipertahankan supaya isi langkah ini
+        // tidak menempel ke judulnya, beda sendiri dari langkah lain.
+        <div className="mb-3" />
+      )}
       {children}
     </div>
   );

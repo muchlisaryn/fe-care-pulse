@@ -904,8 +904,11 @@ export default function ImportExcelModal({
                   </Button>
                 </div>
               </div>
-              <div className="max-h-56 overflow-y-auto">
-                <table className="w-full text-sm">
+              {/* `overflow-auto`, bukan `overflow-y-auto`: pratinjau impor
+                  memuat sebanyak kolom yang ada di berkasnya, dan tanpa gulir
+                  mendatar kolom terakhirnya terpotong di layar sempit. */}
+              <div className="max-h-56 overflow-auto">
+                <table className="w-full min-w-[640px] text-sm">
                   {/* Border pada <th> sticky tidak selalu ikut menempel — pakai inset shadow. */}
                   <thead className="sticky top-0 bg-white text-left text-slate-500 shadow-[inset_0_-1px_0_#e2e8f0]">
                     <tr>

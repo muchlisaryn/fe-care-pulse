@@ -1,5 +1,7 @@
 "use client";
 
+import { Pencil, Trash2 } from "lucide-react";
+import { RowActionsMenu } from "@/components/molecules/RowActionsMenu";
 import { useT } from "@/lib/i18n";
 import type { BarisBiling } from "@/lib/store/slices/nafsulTransaksiSlice";
 
@@ -8,6 +10,22 @@ type RincianBilingProps = {
   baris: BarisBiling[] | null;
   loading: boolean;
   error: string | null;
+  /**
+   * Aksi per ANGGOTA. Kolom Aksi baru muncul bila keduanya diisi — di tempat
+   * yang hanya menampilkan rincian (mis. pratinjau) kolomnya tidak ada sama
+   * sekali, bukan ada tapi kosong.
+   */
+  onEdit?: (baris: BarisBiling) => void;
+  onDelete?: (baris: BarisBiling) => void;
+  /**
+   * Kuitansi yang sudah divalidasi TIDAK menampilkan tombol apa pun — isinya
+   * tidak boleh bergeser setelah diperiksa, dan server menolaknya juga. Alasan
+   * hilangnya tombol dijelaskan lewat satu baris keterangan di bawah tabel,
+   * supaya tidak terbaca seperti fitur yang rusak.
+   */
+  tervalidasi?: boolean;
+  /** Anggota yang rinciannya sedang dibuang — barisnya dikunci selama itu. */
+  memberSedangDihapus?: number | null;
 };
 
 /**
@@ -23,8 +41,14 @@ export default function RincianBiling({
   baris,
   loading,
   error,
+  onEdit,
+  onDelete,
+  tervalidasi = false,
+  memberSedangDihapus = null,
 }: RincianBilingProps) {
   const t = useT();
+  const adaAksi = !!(onEdit && onDelete);
+  const tampilkanAksi = adaAksi && !tervalidasi;
 
   if (loading) {
     return (
@@ -49,7 +73,9 @@ export default function RincianBiling({
   return (
     <div className="overflow-hidden rounded-lg border border-gray-200 bg-white">
       <div className="overflow-x-auto">
-        <table className="w-full text-sm">
+        {/* `min-w`: tujuh kolom yang dimampatkan ke lebar ponsel membuat nama
+            anggota pecah per huruf. Lebih baik digulir. */}
+        <table className="w-full min-w-[640px] text-sm">
           <thead>
             <tr className="border-b border-gray-100 bg-gray-50/70">
               <th className="px-3 py-2 text-left text-[11px] font-semibold uppercase tracking-wide text-gray-400">
@@ -72,11 +98,16 @@ export default function RincianBiling({
               <th className="px-3 py-2 text-right text-[11px] font-semibold uppercase tracking-wide text-gray-400">
                 {t("nafsulTransaksi.detailDeduction")}
               </th>
+              {tampilkanAksi && (
+                <th className="w-24 px-3 py-2 text-center text-[11px] font-semibold uppercase tracking-wide text-gray-400">
+                  {t("nafsulTransaksi.detailActions")}
+                </th>
+              )}
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-50">
             {baris.map((b, i) => (
-              <tr key={i}>
+              <tr key={i} className={memberSedangDihapus === b.member_id ? "opacity-60" : undefined}>
                 <td className="whitespace-nowrap px-3 py-2 tabular-nums text-gray-700">
                   {b.no_anggota ?? (
                     <span className="text-xs text-gray-400">—</span>
@@ -111,11 +142,53 @@ export default function RincianBiling({
                 <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums text-gray-600">
                   {b.potongan}
                 </td>
+                {tampilkanAksi && (
+                  <td className="whitespace-nowrap px-3 py-2">
+                    {/* Dilipat jadi satu tombol titik-tiga, sama seperti kolom
+                        Aksi tabel induknya. Deretan tombol per baris membuat
+                        kolomnya lebih lebar daripada datanya, dan baris lipatan
+                        ini sudah berbagi lebar dengan tabel di atasnya.
+
+                        Menunya dirender lewat portal, jadi panelnya tidak
+                        terpotong tepi baris lipatan yang ber-`overflow`. */}
+                    <div className="flex justify-center">
+                      <RowActionsMenu
+                        disabled={memberSedangDihapus === b.member_id}
+                        items={[
+                          {
+                            label: t("nafsulTransaksi.detailEditMember", {
+                              member: b.nama,
+                            }),
+                            icon: <Pencil className="h-3.5 w-3.5" />,
+                            onClick: () => onEdit!(b),
+                          },
+                          {
+                            label: t("nafsulTransaksi.detailDeleteMember", {
+                              member: b.nama,
+                            }),
+                            icon: <Trash2 className="h-3.5 w-3.5" />,
+                            tone: "danger",
+                            onClick: () => onDelete!(b),
+                          },
+                        ]}
+                      />
+                    </div>
+                  </td>
+                )}
               </tr>
             ))}
           </tbody>
         </table>
       </div>
+
+      {/* Tombolnya hilang karena kuitansinya terkunci, bukan karena tidak ada.
+          Tanpa kalimat ini petugas mengira baris lipatan kuitansi tervalidasi
+          kehilangan fiturnya. */}
+      {adaAksi && tervalidasi && (
+        <p className="border-t border-gray-100 bg-gray-50/70 px-3 py-2 text-[11px] text-gray-500">
+          {t("nafsulTransaksi.detailValidatedHint")}
+        </p>
+      )}
     </div>
   );
 }

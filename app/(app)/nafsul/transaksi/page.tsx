@@ -2,8 +2,8 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import {
-  BadgeCheck,
   ChevronRight,
   Download,
   Loader2,
@@ -43,13 +43,14 @@ import {
   type TransaksiRincian,
 } from "@/lib/store/slices/nafsulTransaksiSlice";
 import { api, apiBlob, ApiError } from "@/lib/nafsul/api";
-import { formatDate } from "@/lib/nafsul/format";
+import { formatCurrency, formatDate } from "@/lib/nafsul/format";
 import { localeOf, useLanguage } from "@/lib/i18n";
 
 export default function NafsulTransaksiPage() {
   // `lang` ikut diambil supaya nama bulan pada kolom tanggal mengikuti
   // bahasa yang sedang dipilih, bukan dipatok ke Indonesia.
   const { t, lang } = useLanguage();
+  const router = useRouter();
   const dispatch = useAppDispatch();
   const {
     items,
@@ -124,6 +125,15 @@ export default function NafsulTransaksiPage() {
   // menembak API lagi.
   const rincianCache = useRef<Map<string, BarisBiling[]>>(new Map());
 
+  // Anggota yang sedang dikeluarkan dari sebuah kuitansi lewat baris lipatannya.
+  // Header-nya ikut disimpan: pesan konfirmasi menyebut nomor kuitansinya, dan
+  // penghapusannya perlu tahu kuitansi mana yang rinciannya disusun ulang.
+  const [buangAnggota, setBuangAnggota] = useState<{
+    header: TransaksiHeader;
+    baris: BarisBiling;
+  } | null>(null);
+  const [membuangMember, setMembuangMember] = useState<number | null>(null);
+
   // Pratinjau biling. `bilingUrl` adalah object URL blob — wajib dibebaskan
   // saat modal ditutup dan saat komponen dilepas, kalau tidak blob PDF-nya
   // menetap di memori tab sampai halaman ditinggalkan.
@@ -184,6 +194,139 @@ export default function NafsulTransaksiPage() {
       setGalat((e as ApiError).message ?? t("nafsulTransaksi.saveFailed"));
     } finally {
       setValidatingUuid(null);
+    }
+  }
+
+  /**
+   * Keluarkan SELURUH rincian milik satu anggota dari sebuah kuitansi.
+   *
+   * Dikerjakan lewat `PUT` header dengan rincian yang tersisa, BUKAN lewat
+   * `DELETE /transaksi/{uuid}` per baris: endpoint per-baris tidak menyentuh
+   * headernya, jadi `total` & `balance` kuitansi akan membeku di angka yang
+   * sudah tidak cocok dengan isinya. Lewat header, servernya yang menjumlah
+   * ulang — persis seperti yang terjadi di halaman edit.
+   *
+   * Rinciannya ditembak ulang lebih dulu (`show`) karena daftar hanya membawa
+   * ringkasan per anggota; kiriman `transactions` harus memuat baris yang
+   * DIPERTAHANKAN, bukan yang dibuang.
+   */
+  async function handleBuangAnggota() {
+    if (!buangAnggota || membuangMember !== null) return;
+    const { header, baris } = buangAnggota;
+
+    setMembuangMember(baris.member_id);
+    try {
+      const detail = await api<TransaksiHeader>(
+        `/transaksi/header/${header.uuid}`,
+      );
+      const sisa = (detail.transactions ?? []).filter(
+        (r) => r.member_id !== baris.member_id,
+      );
+
+      // Kuitansi tanpa rincian ditolak server, dan memang tidak punya arti.
+      // Dihentikan di sini supaya pesannya menyebut jalan keluarnya (hapus
+      // kuitansinya) alih-alih memantulkan galat validasi yang tidak menolong.
+      if (sisa.length === 0) {
+        setBuangAnggota(null);
+        setGalat(
+          t("nafsulTransaksi.detailRemoveLast", { member: baris.nama }),
+        );
+        return;
+      }
+
+      const totalSisa = sisa.reduce(
+        (n, r) => n + Math.max(0, Number(r.amount) - Number(r.discount)),
+        0,
+      );
+
+      const sesudah = await api<TransaksiHeader>(`/transaksi/header/${header.uuid}`, {
+        method: "PUT",
+        body: {
+          date: detail.date,
+          transaction_type: detail.transaction_type,
+          // Dikirim untuk memenuhi validasi; angka yang DIPAKAI dihitung ulang
+          // server dari rinciannya.
+          total: totalSisa,
+          // Pembayaran dibiarkan apa adanya: yang berubah isi kuitansinya,
+          // bukan uang yang sudah diterima. Selisihnya muncul sendiri di
+          // `balance` supaya petugas melihat kuitansinya kini lebih bayar dan
+          // bisa membetulkannya di halaman edit.
+          //
+          // Potongan anggota DIPANGKAS ke total yang tersisa: server menolak
+          // potongan yang melebihi total, dan kuitansi yang potongannya besar
+          // akan gagal dikeluarkan anggotanya dengan pesan validasi yang tidak
+          // menjelaskan apa-apa tentang tindakan yang barusan ditekan.
+          member_deduction: Math.min(
+            Number(detail.member_deduction),
+            totalSisa,
+          ),
+          group_leader_fee_percent:
+            detail.transaction_type === "kelompok"
+              ? Number(detail.group_leader_fee_percent)
+              : 0,
+          payment: Number(detail.payment),
+          payment_method: detail.payment_method,
+          transactions: sisa.map((r) => ({
+            uuid: r.uuid,
+            member_id: r.member_id,
+            rate_id: r.rate_id,
+            payment_period: r.payment_period,
+            amount: Number(r.amount),
+            discount: Number(r.discount),
+          })),
+        },
+      });
+
+      // Dua singgahan ini memegang isi kuitansi yang barusan berubah; tanpa
+      // dibuang, membuka ulang barisnya akan menampilkan anggota yang sudah
+      // tidak ada di sana.
+      rincianCache.current.delete(header.uuid);
+      anggotaCache.current.delete(header.uuid);
+      dispatch(invalidateTransaksi());
+      setBuangAnggota(null);
+
+      // Membuang rincian menurunkan tagihan tanpa menyentuh uang yang sudah
+      // diterima, jadi kuitansi yang tadinya pas bisa jadi lebih bayar. Itu
+      // disebutkan di pesan berhasilnya — kalau tidak, selisihnya baru
+      // ketahuan jauh belakangan saat kuitansinya dibuka lagi.
+      const sisaSelisih = Math.round(Number(sesudah.balance) * 100) / 100;
+      const catatan =
+        sisaSelisih === 0
+          ? ""
+          : " " +
+            t(
+              sisaSelisih > 0
+                ? "nafsulTransaksi.editRemovedShort"
+                : "nafsulTransaksi.editRemovedExtra",
+              { amount: formatCurrency(Math.abs(sisaSelisih), localeOf(lang)) },
+            );
+
+      setPesanSukses(
+        t("nafsulTransaksi.detailRemoved", {
+          member: baris.nama,
+          number: header.transaction_number,
+        }) + catatan,
+      );
+
+      // Baris lipatannya masih terbuka di layar — isinya diperbarui di tempat,
+      // bukan dibiarkan menampilkan daftar lama sampai ditutup lalu dibuka lagi.
+      if (rincianUuid === header.uuid) {
+        setRincianLoading(true);
+        try {
+          const hasil = await api<{ data: BarisBiling[] }>(
+            `/transaksi/header/${header.uuid}/rincian-biling`,
+          );
+          rincianCache.current.set(header.uuid, hasil.data);
+          setRincianList(hasil.data);
+        } finally {
+          setRincianLoading(false);
+        }
+      }
+    } catch (e) {
+      setBuangAnggota(null);
+      setGalat((e as ApiError).message ?? t("nafsulTransaksi.saveFailed"));
+    } finally {
+      setMembuangMember(null);
     }
   }
 
@@ -343,22 +486,15 @@ export default function NafsulTransaksiPage() {
     },
     {
       header: t("nafsulTransaksi.colNumber"),
+      // Nomornya saja. Keterangan "Divalidasi oleh …" yang dulu menempel di
+      // bawahnya sudah dilepas: status kuncinya tetap terbaca dari tombol
+      // gembok di kolom Aksi (yang berubah jadi "Batal Validasi") dan dari
+      // tersedianya tombol Cetak Biling, jadi barisnya tidak perlu tinggi dua
+      // kali demi mengulangi hal yang sama.
       cell: (row) => (
-        <div className="leading-tight">
-          <span className="font-medium tabular-nums text-gray-900">
-            {row.transaction_number}
-          </span>
-          {/* Penanda pemeriksaan menempel pada nomornya, bukan jadi kolom
-              sendiri — daftar ini sengaja dijaga tetap ringkas. */}
-          {row.validation_at ? (
-            <span className="mt-0.5 flex items-center gap-1 text-[11px] font-medium text-emerald-600">
-              <BadgeCheck className="h-3.5 w-3.5 shrink-0" />
-              {row.validation_by
-                ? t("nafsulTransaksi.validatedBy", { name: row.validation_by })
-                : t("nafsulTransaksi.validated")}
-            </span>
-          ) : null}
-        </div>
+        <span className="font-medium tabular-nums text-gray-900">
+          {row.transaction_number}
+        </span>
       ),
     },
     {
@@ -590,6 +726,10 @@ export default function NafsulTransaksiPage() {
             // `rowNumberOffset` tidak lagi dipakai: kolom "No" sudah berganti
             // jadi kolom panah begitu `renderExpanded` diberikan.
             actionsAlign="center"
+            // Empat aksi per baris (Validasi, Cetak Biling, Ubah, Hapus) —
+            // dilipat jadi satu tombol titik-tiga supaya kolom Aksi tidak
+            // lebih lebar daripada datanya sendiri.
+            actionsAsMenu
             columns={columns}
             data={items}
             isRowExpanded={(row) => rincianUuid === row.uuid}
@@ -599,6 +739,20 @@ export default function NafsulTransaksiPage() {
                 baris={rincianUuid === row.uuid ? rincianList : null}
                 loading={rincianLoading}
                 error={rincianError}
+                // Tombol Ubah & Hapus per anggota hanya untuk kuitansi yang
+                // BELUM divalidasi; server menolaknya juga.
+                tervalidasi={row.validation_at !== null}
+                memberSedangDihapus={membuangMember}
+                // Ubah membuka halaman edit kuitansi ini dengan rincian anggota
+                // yang ditekan langsung disorot — di sanalah nominal, diskon &
+                // periodenya bisa diperbaiki, jadi tidak perlu layar kedua yang
+                // mengulang formulir yang sama.
+                onEdit={(b) =>
+                  router.push(
+                    `/nafsul/transaksi/${row.uuid}/edit?anggota=${b.member_id}`,
+                  )
+                }
+                onDelete={(b) => setBuangAnggota({ header: row, baris: b })}
               />
             )}
             extraActions={[
@@ -631,10 +785,13 @@ export default function NafsulTransaksiPage() {
                 onClick: (row) => bukaBiling(row),
               },
             ]}
-            // Tombol Ubah sengaja TIDAK ditawarkan di daftar ini. Halaman
-            // editnya sendiri (`/nafsul/transaksi/{uuid}/edit`) masih hidup dan
-            // bisa dibuka lewat tautan langsung, jadi ini menyembunyikan
-            // jalannya — bukan mencabut kemampuannya.
+            // Ubah membuka halaman edit kuitansi ini — tempat rincian bisa
+            // ditambah, dikoreksi & dibuang. Ikut masuk ke tombol titik-tiga
+            // bersama aksi lainnya.
+            onEdit={(row) => router.push(`/nafsul/transaksi/${row.uuid}/edit`)}
+            // Sama alasannya dengan Hapus di bawah: kuitansi yang SUDAH
+            // divalidasi tidak boleh lagi diubah, dan server menolaknya juga.
+            canEdit={(row) => row.validation_at === null}
             onDelete={(row) => setDeleteTarget(row)}
             // Kuitansi yang SUDAH divalidasi tidak boleh lagi dihapus: jejak
             // pemeriksaannya jadi tak ada artinya kalau isinya masih bisa
@@ -808,6 +965,22 @@ export default function NafsulTransaksiPage() {
         onClose={() => setDeleteTarget(null)}
         onConfirm={handleDelete}
         loading={deletingUuid !== null}
+      />
+
+      {/* Mengeluarkan anggota membuang SELURUH rincian iurannya sekaligus —
+          bisa belasan baris — jadi nama & nomor kuitansinya disebut di dialog
+          supaya yang ditekan terlihat sebelum terjadi. */}
+      <ConfirmDialog
+        open={buangAnggota !== null}
+        onClose={() => setBuangAnggota(null)}
+        onConfirm={handleBuangAnggota}
+        loading={membuangMember !== null}
+        confirmLabel={t("nafsulTransaksi.detailRemoveConfirmLabel")}
+        title={t("nafsulTransaksi.detailRemoveTitle")}
+        description={t("nafsulTransaksi.detailRemoveConfirm", {
+          member: buangAnggota?.baris.nama ?? "—",
+          number: buangAnggota?.header.transaction_number ?? "—",
+        })}
       />
 
       {/*
