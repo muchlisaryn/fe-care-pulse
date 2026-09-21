@@ -544,14 +544,23 @@ export default function TransaksiForm({ tipe }: { tipe: Tipe }) {
   const sisa = harusDibayar - angka(header.payment)
 
   /**
-   * Anggota yang sudah masuk daftar — disembunyikan dari dropdown.
+   * Tarif yang sudah dipakai ANGGOTA YANG SEDANG DIPILIH — disembunyikan dari
+   * dropdown tarif.
    *
-   * Baris yang sedang diubah dikecualikan, kalau tidak anggotanya sendiri ikut
+   * Dulu yang disaring adalah anggotanya: begitu seorang anggota masuk daftar,
+   * ia hilang dari dropdown anggota. Itu terlalu luas — satu anggota memang
+   * boleh menagih beberapa tarif sekaligus dalam satu kuitansi, dan yang tidak
+   * boleh hanyalah tarif yang sama dua kali (periodenya akan persis sama,
+   * karena rencana dihitung dari pembayaran terakhir di database, bukan dari
+   * baris yang belum tersimpan). Penyaringan karena itu dipindahkan ke tarif,
+   * dan hanya berlaku untuk anggota yang sedang dipilih.
+   *
+   * Baris yang sedang diubah dikecualikan, kalau tidak tarifnya sendiri ikut
    * hilang dari pilihan dan tidak bisa dipilih ulang.
    */
-  const idTerpakai = daftar
-    .filter((d) => d.id !== editId)
-    .map((d) => d.member_id)
+  const tarifTerpakai = daftar
+    .filter((d) => d.id !== editId && d.member_id === entri.member_id)
+    .map((d) => d.rate_id)
 
   /**
    * Ketua kelompok juga tidak bisa diganti begitu ada rincian.
@@ -723,20 +732,21 @@ export default function TransaksiForm({ tipe }: { tipe: Tipe }) {
             ) : (
               <MasterSelect<Anggota>
                 /*
-                  `key` ikut berubah bersama seluruh saringannya — termasuk
-                  daftar anggota yang sudah terpakai. MasterSelect menahan opsi
-                  yang sudah dimuat, jadi tanpa pemasangan ulang daftarnya masih
-                  menampilkan anggota milik ketua sebelumnya, atau anggota yang
-                  baru saja masuk daftar rincian.
+                  `key` ikut berubah bersama saringannya. MasterSelect menahan
+                  opsi yang sudah dimuat, jadi tanpa pemasangan ulang daftarnya
+                  masih menampilkan anggota milik ketua sebelumnya.
+
+                  Anggota yang sudah masuk daftar rincian SENGAJA tetap
+                  ditawarkan: ia masih boleh ditagih tarif lain pada kuitansi
+                  yang sama — lihat `tarifTerpakai`.
                 */
-                key={`${tipe}-${ketua.kode}-${idTerpakai.join(".")}`}
+                key={`${tipe}-${ketua.kode}`}
                 endpoint="/anggota"
-                params={{
-                  ...(tipe === "kelompok"
+                params={
+                  tipe === "kelompok"
                     ? { noketua: ketua.kode }
-                    : { tipe: "pribadi" }),
-                  exclude_ids: idTerpakai.join(",") || undefined,
-                }}
+                    : { tipe: "pribadi" }
+                }
                 value={entri.member_id}
                 onChange={(v, row) => {
                   setEntri((e) => ({
@@ -772,6 +782,13 @@ export default function TransaksiForm({ tipe }: { tipe: Tipe }) {
               {t("nafsulTransaksi.rate")} <span className="text-red-500">*</span>
             </Label>
             <MasterSelect<Tarif & { id: number }>
+              /*
+                `key` ikut berubah bersama anggota terpilih dan daftar tarif
+                yang sudah dipakainya — MasterSelect menahan opsi yang sudah
+                dimuat, jadi tanpa pemasangan ulang daftarnya masih memuat
+                tarif milik anggota sebelumnya.
+              */
+              key={`${entri.member_id}-${tarifTerpakai.join(".")}`}
               endpoint="/tarif"
               /*
                 Hanya tarif berkategori `iuran` — isi halaman Master Tarif Iuran.
@@ -779,7 +796,10 @@ export default function TransaksiForm({ tipe }: { tipe: Tipe }) {
                 ketua kelompok) ikut muncul dan bisa tertagihkan ke anggota,
                 padahal itu pengeluaran kas, bukan iuran.
               */
-              params={{ kategori: "iuran" }}
+              params={{
+                kategori: "iuran",
+                exclude_ids: tarifTerpakai.join(",") || undefined,
+              }}
               value={entri.rate_id}
               onChange={(v, row) => {
                 const sekaliBayar = isSekaliBayar(row?.fee_type)
