@@ -62,10 +62,14 @@ export function ConfirmDialog({
       size={size}
       footer={
         <>
-          <Button variant="outline" onClick={onClose} disabled={loading}>
+          {/* `type="button"` pada keduanya: dialog ini bisa berada di dalam
+              sebuah <form>, dan atom Button tidak menyetel `type` sehingga
+              bawaannya submit — menekan Batal pun akan menyimpan formulirnya. */}
+          <Button type="button" variant="outline" onClick={onClose} disabled={loading}>
             {cancelLabel}
           </Button>
           <Button
+            type="button"
             onClick={onConfirm}
             disabled={loading}
             className={

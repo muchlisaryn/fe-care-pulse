@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import { Search } from "lucide-react";
 import { api, ApiError } from "@/lib/nafsul/api";
 import type {
   Anggota,
@@ -18,7 +19,9 @@ import { Input } from "@/components/atoms/Input";
 import { ResultDialog } from "@/components/molecules/ResultDialog";
 import { Select } from "@/components/atoms/Select";
 import { Textarea } from "@/components/atoms/Textarea";
+import CariKKModal from "@/components/nafsul/CariKKModal";
 import { apiErrorMessage } from "@/lib/apiError";
+import { salinDataKeluarga } from "@/lib/nafsul/keluarga";
 import { useT } from "@/lib/i18n";
 
 type FormState = Record<string, string>;
@@ -71,6 +74,17 @@ export default function AnggotaForm({ anggota }: { anggota?: Anggota }) {
    * pindah ke daftar / halaman edit, jadi dialognya tak sempat terbaca.
    */
   const [gagal, setGagal] = useState<string | null>(null);
+  const [cariKK, setCariKK] = useState(false);
+
+  /**
+   * Isi alamat, telepon, wilayah & penanggung jawab dari anggota sekeluarga
+   * yang sudah terdaftar. Aturan kolom mana yang ikut tersalin ada di
+   * `salinDataKeluarga` — dipakai bersama halaman pendaftaran anggota.
+   */
+  function salinDariKeluarga(sumber: Anggota) {
+    setForm((f) => salinDataKeluarga(sumber, f));
+    setCariKK(false);
+  }
 
   useEffect(() => {
     api<Wilayah[]>("/wilayah", { params: { all: 1 } }).then(setWilayahOpts);
@@ -130,6 +144,16 @@ export default function AnggotaForm({ anggota }: { anggota?: Anggota }) {
         description={gagal ?? undefined}
       />
 
+      {/* Kata kunci awalnya No. KK bila sudah diketik, kalau belum namanya —
+          keduanya sama-sama bisa dicari, dan yang mana pun sudah terisi itulah
+          yang paling mungkin menemukan keluarganya. */}
+      <CariKKModal
+        open={cariKK}
+        onClose={() => setCariKK(false)}
+        kunciAwal={form.nokk || form.nama}
+        onPilih={salinDariKeluarga}
+      />
+
       <form onSubmit={handleSubmit} className="space-y-6">
         <Section title={t("nafsulAnggotaForm.secIdentity")}>
           <FieldGroup label={t("nafsulAnggotaForm.fullName")} className="md:col-span-2">
@@ -147,7 +171,25 @@ export default function AnggotaForm({ anggota }: { anggota?: Anggota }) {
             <Input value={form.noktp} onChange={(e) => set("noktp", e.target.value)} />
           </FieldGroup>
           <FieldGroup label={t("nafsulAnggotaForm.familyCardNo")}>
-            <Input value={form.nokk} onChange={(e) => set("nokk", e.target.value)} />
+            {/* Tombol cari menempel DI DALAM kolomnya, bukan berdiri sendiri di
+                sebelahnya: ia hanya berlaku untuk No. KK, dan tombol terpisah
+                akan terbaca sebagai pencarian formulir secara umum. */}
+            <div className="relative">
+              <Input
+                value={form.nokk}
+                onChange={(e) => set("nokk", e.target.value)}
+                className="pr-10"
+              />
+              <button
+                type="button"
+                onClick={() => setCariKK(true)}
+                title={t("nafsulAnggotaForm.kkSearchTitle")}
+                aria-label={t("nafsulAnggotaForm.kkSearchTitle")}
+                className="absolute right-1 top-1/2 inline-flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-md text-gray-400 transition-colors hover:bg-[#075489]/10 hover:text-[#075489] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#075489]/40"
+              >
+                <Search className="h-4 w-4" />
+              </button>
+            </div>
           </FieldGroup>
           <FieldGroup label={t("nafsulAnggotaForm.maritalStatus")}>
             <Input value={form.status_nikah} onChange={(e) => set("status_nikah", e.target.value)} />

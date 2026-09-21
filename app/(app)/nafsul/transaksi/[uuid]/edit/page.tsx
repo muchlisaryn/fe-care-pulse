@@ -107,8 +107,6 @@ type Kelompok = {
 type HeaderForm = {
   /** "YYYY-MM-DD" — tanggal uang diterima. */
   date: string
-  /** Potongan anggota, RUPIAH — satu-satunya bentuknya. */
-  member_deduction: string
   group_leader_fee_percent: string
   payment: string
   payment_method: "cash" | "transfer" | "other"
@@ -212,7 +210,6 @@ export default function TransaksiEditPage() {
         // Baris lama bisa belum punya tanggal; jatuhkan ke tanggal barisnya
         // dibuat supaya isiannya tidak kosong dan wajib diisi ulang manual.
         date: data.date ?? (data.created_at ?? "").slice(0, 10),
-        member_deduction: String(Number(data.member_deduction)),
         group_leader_fee_percent: String(Number(data.group_leader_fee_percent)),
         payment: String(Number(data.payment)),
         payment_method: data.payment_method,
@@ -248,19 +245,34 @@ export default function TransaksiEditPage() {
   //
   // `useMemo`: penjumlahan seluruh rincian tidak perlu diulang saat yang
   // berubah cuma isian di kartu Pembayaran.
-  const totalRincian = useMemo(
-    () =>
-      baris.reduce((n, b) => n + Math.max(0, angka(b.amount) - angka(b.discount)), 0),
-    [baris],
-  )
-  const potonganAnggota = Math.round(angka(header?.member_deduction ?? "0") * 100) / 100
-  const jasaKetua =
-    Math.round(((totalRincian * angka(header?.group_leader_fee_percent ?? "0")) / 100) * 100) / 100
+  //
+  // `total` KOTOR — sebelum diskon. Diskonnya dilaporkan tersendiri sebagai
+  // Potongan Anggota, jadi "Total − Potongan = Harus Dibayar" bisa dijumlahkan
+  // pembacanya. Kalau totalnya sudah bersih, diskon yang sama terpotong dua
+  // kali. Sama dengan totalKotor()/totalDiskon() di server.
+  const { totalRincian, potonganAnggota } = useMemo(() => {
+    let kotor = 0
+    let diskon = 0
+
+    for (const b of baris) {
+      kotor += angka(b.amount)
+      diskon += angka(b.discount)
+    }
+
+    return {
+      totalRincian: Math.round(kotor * 100) / 100,
+      potonganAnggota: Math.round(diskon * 100) / 100,
+    }
+  }, [baris])
+
   const kelompok = asli?.transaction_type === "kelompok"
   // Jasa ketua TIDAK ikut mengurangi: ia catatan hak ketua, bukan pengurang
   // setoran. Sama dengan terapkanJasaKetua() di server, yang mengisi
   // `group_leader_fee` dan menolkan `group_leader_deduction`.
   const seharusnya = totalRincian - potonganAnggota
+  // Dasarnya total BERSIH, bukan yang kotor — sama dengan server.
+  const jasaKetua =
+    Math.round(((seharusnya * angka(header?.group_leader_fee_percent ?? "0")) / 100) * 100) / 100
   /**
    * Seharusnya dibayar − yang diterima. Positif = kurang bayar, negatif =
    * lebih bayar, nol = pas.
@@ -486,7 +498,9 @@ export default function TransaksiEditPage() {
           // Total dikirim untuk memenuhi validasi; angka yang DIPAKAI dihitung
           // ulang server dari rinciannya, jadi keduanya tidak bisa berselisih.
           total: totalRincian,
-          member_deduction: angka(header.member_deduction),
+          // Dikirim agar payload lengkap; server menurunkannya sendiri dari
+          // diskon tiap rincian, jadi angka ini tidak bisa berselisih dengannya.
+          member_deduction: potonganAnggota,
           group_leader_fee_percent: kelompok ? angka(header.group_leader_fee_percent) : 0,
           payment: angka(header.payment),
           payment_method: header.payment_method,
@@ -825,16 +839,28 @@ export default function TransaksiEditPage() {
           <div className="space-y-1.5">
             <Label htmlFor="ed-potongan">{t("nafsulTransaksi.memberDeduction")}</Label>
             {/*
-              Rupiah saja — pemilih satuan Rp/% dilepas bersama kolom
-              `member_deduction_type` & `member_deduction_input` yang dibuang
-              dari database. Potongan kini satu angka dengan satu arti.
+              Turunan dari DISKON tiap rincian, bukan isian tersendiri — sama
+              seperti Jasa Ketua di sebelahnya.
+
+              Diskon memang menempel pada baris tertentu (mis. bulan gratis
+              seseorang), sedangkan angka yang diketik di tingkat kuitansi tidak
+              bisa menunjuk siapa yang menerimanya. Dua tempat yang menjawab
+              "berapa potongannya" cepat atau lambat berselisih, dan lembar
+              biling yang membagi angka header itu rata ke semua anggota
+              membebankan potongan kepada yang tidak menerimanya.
+
+              Ditampilkan, bukan disembunyikan: angkanya tetap perlu terbaca
+              untuk memeriksa baris Harus Dibayar di bawahnya.
             */}
-            <NumberInput
+            <div
               id="ed-potongan"
-              prefix="Rp"
-              value={header.member_deduction}
-              onValueChange={(v) => setHeader((h) => (h ? { ...h, member_deduction: v } : h))}
-            />
+              className="flex h-[38px] items-center rounded-lg border border-slate-200 bg-slate-50 px-4 text-sm font-medium tabular-nums text-slate-700"
+            >
+              {rupiah(potonganAnggota)}
+            </div>
+            <p className="text-xs text-slate-500">
+              {t("nafsulTransaksi.memberDeductionHint")}
+            </p>
           </div>
 
           {kelompok && (

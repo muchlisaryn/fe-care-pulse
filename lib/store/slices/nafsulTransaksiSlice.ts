@@ -147,6 +147,20 @@ type TransaksiState = {
   loading: boolean
   loaded: boolean
   dirty: boolean
+  /**
+   * Kuitansi yang BARU SAJA dibuat, menunggu ditawari validasi di halaman
+   * daftar.
+   *
+   * Dititipkan lewat store, bukan ditampilkan langsung di layar pembuatannya:
+   * petugas menyelesaikan transaksinya dulu dan kembali ke daftar, baru
+   * penawarannya muncul — jadi dialognya tidak menahan halaman yang sebenarnya
+   * sudah tidak ada urusan lagi dengannya.
+   *
+   * Lewat store, bukan query string: isinya kuitansi utuh, jadi daftar tidak
+   * perlu menembak ulang detail yang datanya sudah ada di tangan — dan tidak
+   * ada pula URL yang bisa dimuat ulang lalu memunculkan dialog yang sama.
+   */
+  baruDibuat: TransaksiHeader | null
 }
 
 const bawaan = rentangSebulanTerakhir()
@@ -163,6 +177,7 @@ const initialState: TransaksiState = {
   loading: false,
   loaded: false,
   dirty: false,
+  baruDibuat: null,
 }
 
 export const fetchTransaksi = createAsyncThunk(
@@ -222,6 +237,14 @@ const nafsulTransaksiSlice = createSlice({
     invalidateTransaksi(state) {
       state.dirty = true
     },
+    /** Titipkan kuitansi yang barusan dibuat agar daftar menawarkan validasi. */
+    setTransaksiBaru(state, action: PayloadAction<TransaksiHeader>) {
+      state.baruDibuat = action.payload
+    },
+    /** Penawarannya sudah dijawab — jangan muncul lagi saat daftar dibuka. */
+    clearTransaksiBaru(state) {
+      state.baruDibuat = null
+    },
   },
   extraReducers: (builder) => {
     builder
@@ -248,6 +271,8 @@ export const {
   setTransaksiDateRange,
   setTransaksiPage,
   invalidateTransaksi,
+  setTransaksiBaru,
+  clearTransaksiBaru,
 } = nafsulTransaksiSlice.actions
 
 export default nafsulTransaksiSlice.reducer

@@ -67,7 +67,11 @@ export function Modal({
         {!hideHeader && (
         <div className="flex items-center justify-between border-b border-gray-100 px-4 py-4 sm:px-6 shrink-0">
           <h2 className="text-base font-semibold text-gray-900">{title}</h2>
+          {/* `type="button"`: modal bisa dipasang DI DALAM sebuah <form> (mis.
+              formulir pendaftaran anggota), dan tombol tanpa `type` bertipe
+              submit — menutup modal akan menyimpan formulir di belakangnya. */}
           <button
+            type="button"
             onClick={onClose}
             className="flex h-8 w-8 items-center justify-center rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-600 transition-colors"
           >

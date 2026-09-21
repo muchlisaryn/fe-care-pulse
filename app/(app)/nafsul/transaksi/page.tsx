@@ -5,7 +5,6 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
   ChevronRight,
-  Download,
   Loader2,
   Lock,
   LockOpen,
@@ -28,6 +27,7 @@ import { ResultDialog } from "@/components/molecules/ResultDialog";
 import { Modal } from "@/components/molecules/Modal";
 import { Pagination } from "@/components/molecules/Pagination";
 import ImportTransaksiModal from "@/components/nafsul/ImportTransaksiModal";
+import BilingModal from "@/components/nafsul/BilingModal";
 import RincianBiling from "@/components/nafsul/RincianBiling";
 import { useAppDispatch, useAppSelector } from "@/lib/store/hooks";
 import {
@@ -37,12 +37,13 @@ import {
   setTransaksiDateRange,
   setTransaksiPage,
   invalidateTransaksi,
+  clearTransaksiBaru,
   PER_PAGE,
   type BarisBiling,
   type TransaksiHeader,
   type TransaksiRincian,
 } from "@/lib/store/slices/nafsulTransaksiSlice";
-import { api, apiBlob, ApiError } from "@/lib/nafsul/api";
+import { api, ApiError } from "@/lib/nafsul/api";
 import { formatCurrency, formatDate } from "@/lib/nafsul/format";
 import { localeOf, useLanguage } from "@/lib/i18n";
 
@@ -64,6 +65,7 @@ export default function NafsulTransaksiPage() {
     loading,
     loaded,
     dirty,
+    baruDibuat,
   } = useAppSelector((s) => s.nafsulTransaksi);
 
   const [searchInput, setSearchInput] = useState(search);
@@ -89,6 +91,14 @@ export default function NafsulTransaksiPage() {
     null,
   );
   const [validatingUuid, setValidatingUuid] = useState<string | null>(null);
+  /**
+   * Kuitansi yang baru saja dikunci, selagi lembar bilingnya ditawarkan.
+   *
+   * Satu dialog saja untuk satu tindakan: pemberitahuan berhasil dan tawaran
+   * mencetak digabung, supaya petugas tidak perlu menutup sesuatu dua kali
+   * sebelum bisa mengerjakan apa pun.
+   */
+  const [tawarCetak, setTawarCetak] = useState<TransaksiHeader | null>(null);
   const [pesanSukses, setPesanSukses] = useState<string | null>(null);
 
   // Daftar anggota di balik chip "(+n)" pada kolom Nama.
@@ -134,13 +144,9 @@ export default function NafsulTransaksiPage() {
   } | null>(null);
   const [membuangMember, setMembuangMember] = useState<number | null>(null);
 
-  // Pratinjau biling. `bilingUrl` adalah object URL blob — wajib dibebaskan
-  // saat modal ditutup dan saat komponen dilepas, kalau tidak blob PDF-nya
-  // menetap di memori tab sampai halaman ditinggalkan.
+  // Kuitansi yang lembar bilingnya sedang dibuka. Pengambilan PDF, object URL
+  // & pembebasannya dipegang `BilingModal` — lihat komponennya.
   const [bilingRow, setBilingRow] = useState<TransaksiHeader | null>(null);
-  const [bilingUrl, setBilingUrl] = useState<string | null>(null);
-  const [bilingLoading, setBilingLoading] = useState(false);
-  const [bilingError, setBilingError] = useState<string | null>(null);
 
   useEffect(() => {
     if (loaded && !dirty) return;
@@ -178,18 +184,33 @@ export default function NafsulTransaksiPage() {
    * Daftarnya di-invalidate supaya lencana & tombol Ubah/Hapus langsung ikut
    * berubah.
    */
-  async function handleValidasi() {
-    if (!validasiTarget || validatingUuid !== null) return;
-    const membuka = validasiTarget.validation_at !== null;
-    setValidatingUuid(validasiTarget.uuid);
+  async function handleValidasi(target?: TransaksiHeader) {
+    // Barisnya boleh dioper langsung: kuitansi yang barusan dibuat ditawari
+    // validasi lewat dialognya sendiri, dan menyetel `validasiTarget` dulu
+    // berarti menunggu satu render sebelum permintaannya bisa dikirim.
+    const baris = target ?? validasiTarget;
+    if (!baris || validatingUuid !== null) return;
+    const membuka = baris.validation_at !== null;
+    setValidatingUuid(baris.uuid);
     try {
       const hasil = await api<{ message: string }>(
-        `/transaksi/header/${validasiTarget.uuid}/${membuka ? "batal-validasi" : "validasi"}`,
+        `/transaksi/header/${baris.uuid}/${membuka ? "batal-validasi" : "validasi"}`,
         { method: "POST" },
       );
       dispatch(invalidateTransaksi());
+      dispatch(clearTransaksiBaru());
       setValidasiTarget(null);
-      setPesanSukses(hasil.message);
+
+      // Baru MENGUNCI: bilingnya kini boleh dicetak, dan menawarkannya di sini
+      // menghemat satu langkah mencari kuitansi yang sama lagi di daftar.
+      // Membuka kunci tidak ditawari apa-apa — yang terjadi justru kebalikannya,
+      // bilingnya tidak lagi bisa dicetak.
+      if (membuka) {
+        setPesanSukses(hasil.message);
+        return;
+      }
+
+      setTawarCetak(baris);
     } catch (e) {
       setGalat((e as ApiError).message ?? t("nafsulTransaksi.saveFailed"));
     } finally {
@@ -234,10 +255,12 @@ export default function NafsulTransaksiPage() {
         return;
       }
 
-      const totalSisa = sisa.reduce(
-        (n, r) => n + Math.max(0, Number(r.amount) - Number(r.discount)),
-        0,
-      );
+      // KOTOR & diskonnya terpisah, sama seperti yang dihitung server:
+      // `total` menyimpan yang sebelum diskon, `member_deduction` jumlah
+      // diskonnya. Keduanya dikirim agar payload lengkap; server menghitung
+      // ulang dari rincian yang ikut dikirim di bawah.
+      const totalSisa = sisa.reduce((n, r) => n + Number(r.amount), 0);
+      const diskonSisa = sisa.reduce((n, r) => n + Number(r.discount), 0);
 
       const sesudah = await api<TransaksiHeader>(`/transaksi/header/${header.uuid}`, {
         method: "PUT",
@@ -251,15 +274,7 @@ export default function NafsulTransaksiPage() {
           // bukan uang yang sudah diterima. Selisihnya muncul sendiri di
           // `balance` supaya petugas melihat kuitansinya kini lebih bayar dan
           // bisa membetulkannya di halaman edit.
-          //
-          // Potongan anggota DIPANGKAS ke total yang tersisa: server menolak
-          // potongan yang melebihi total, dan kuitansi yang potongannya besar
-          // akan gagal dikeluarkan anggotanya dengan pesan validasi yang tidak
-          // menjelaskan apa-apa tentang tindakan yang barusan ditekan.
-          member_deduction: Math.min(
-            Number(detail.member_deduction),
-            totalSisa,
-          ),
+          member_deduction: diskonSisa,
           group_leader_fee_percent:
             detail.transaction_type === "kelompok"
               ? Number(detail.group_leader_fee_percent)
@@ -418,55 +433,6 @@ export default function NafsulTransaksiPage() {
     }
   }, [rincianUuid, t]);
 
-  /**
-   * Buka pratinjau biling: ambil PDF sebagai blob (supaya token Bearer ikut
-   * terkirim), lalu tampilkan lewat object URL di iframe.
-   */
-  async function bukaBiling(row: TransaksiHeader) {
-    setBilingRow(row);
-    setBilingError(null);
-    setBilingLoading(true);
-    setBilingUrl((lama) => {
-      if (lama) URL.revokeObjectURL(lama);
-      return null;
-    });
-    try {
-      const { blob } = await apiBlob(`/transaksi/header/${row.uuid}/biling`);
-      setBilingUrl(URL.createObjectURL(blob));
-    } catch (e) {
-      setBilingError(
-        (e as ApiError).message ?? t("nafsulTransaksi.billingFailed"),
-      );
-    } finally {
-      setBilingLoading(false);
-    }
-  }
-
-  function tutupBiling() {
-    setBilingRow(null);
-    setBilingUrl((lama) => {
-      if (lama) URL.revokeObjectURL(lama);
-      return null;
-    });
-    setBilingError(null);
-  }
-
-  function unduhBiling() {
-    if (!bilingUrl || !bilingRow) return;
-    const a = document.createElement("a");
-    a.href = bilingUrl;
-    a.download = `biling-${bilingRow.transaction_number}.pdf`;
-    a.click();
-  }
-
-  // Bebaskan object URL saat komponen dilepas — tutupBiling() hanya terpanggil
-  // bila penggunanya benar-benar menutup modalnya.
-  useEffect(() => {
-    return () => {
-      if (bilingUrl) URL.revokeObjectURL(bilingUrl);
-    };
-  }, [bilingUrl]);
-
   const columns: Column<TransaksiHeader>[] = [
     {
       // Tanggal uang DITERIMA (`date`), bukan `created_at`. Keduanya sering
@@ -550,12 +516,26 @@ export default function NafsulTransaksiPage() {
     {
       header: t("nafsulTransaksi.colTotal"),
       className: "text-right",
-      // `total` ditampilkan apa adanya — TIDAK dikurangi potongan anggota lagi
-      // di sini. Kuitansi hasil impor sudah menyimpan nilai bersihnya
-      // (`payment − member_deduction`), jadi mengurangi sekali lagi di layar
-      // membuat potongannya terhitung dua kali. Potongan tetap terbaca di
-      // Sisa/`balance`, yang dihitung server.
-      cell: (row) => <CurrencyCell value={row.total} className="text-gray-700" />,
+      /*
+        BERSIH — `total` yang kotor dikurangi potongan anggota.
+
+        Kolom `total` menyimpan yang KOTOR (Σ nominal sebelum diskon) dan
+        diskonnya dilaporkan terpisah di `member_deduction`; itu dua angka yang
+        perlu dipisah di halaman edit & lembar biling supaya potongannya bisa
+        ditelusuri. Tapi di daftar ini tidak ada kolom potongan, jadi angka
+        kotor berdiri sendiri tanpa keterangan dan terbaca lebih besar daripada
+        yang sebenarnya ditagihkan.
+
+        Dihitung di layar, bukan disimpan sebagai kolom ketiga: dua kolom yang
+        menjawab pertanyaan yang sama cepat atau lambat berselisih, dan yang ini
+        selalu turunan langsung dari keduanya.
+      */
+      cell: (row) => (
+        <CurrencyCell
+          value={Number(row.total) - Number(row.member_deduction)}
+          className="text-gray-700"
+        />
+      ),
     },
     {
       header: t("nafsulTransaksi.colPayment"),
@@ -566,6 +546,23 @@ export default function NafsulTransaksiPage() {
           className="font-semibold text-gray-900"
         />
       ),
+    },
+    {
+      // Siapa yang memeriksa kuitansi ini. Dulu menempel sebagai keterangan di
+      // bawah nomornya, yang membuat tiap baris setinggi dua baris; sebagai
+      // kolom sendiri ia bisa dibaca menurun dan dibandingkan antar-kuitansi.
+      //
+      // Kosong = BELUM divalidasi, ditulis "—" seperti sel kosong lain di
+      // aplikasi — bukan dibiarkan benar-benar kosong, yang terbaca seperti
+      // data yang gagal dimuat.
+      header: t("nafsulTransaksi.colValidator"),
+      className: "whitespace-nowrap",
+      cell: (row) =>
+        row.validation_by ? (
+          <span className="text-gray-700">{row.validation_by}</span>
+        ) : (
+          <span className="text-xs text-gray-400">—</span>
+        ),
     },
     {
       header: t("nafsulTransaksi.colMethod"),
@@ -782,7 +779,7 @@ export default function NafsulTransaksiPage() {
                 label: t("nafsulTransaksi.printBilling"),
                 icon: () => <Printer className="h-3.5 w-3.5 text-[#075489]" />,
                 visible: (row) => row.validation_at !== null,
-                onClick: (row) => bukaBiling(row),
+                onClick: (row) => setBilingRow(row),
               },
             ]}
             // Ubah membuka halaman edit kuitansi ini — tempat rincian bisa
@@ -870,52 +867,52 @@ export default function NafsulTransaksiPage() {
         )}
       </Modal>
 
-      {/* Pratinjau biling PDF */}
-      <Modal
-        open={bilingRow !== null}
-        onClose={tutupBiling}
-        title={
-          bilingRow
-            ? t("nafsulTransaksi.billingTitle", {
-                number: bilingRow.transaction_number,
-              })
-            : ""
-        }
-        size="lg"
-        panelClassName="max-w-4xl"
-        footer={
-          <>
-            <Button variant="outline" onClick={tutupBiling}>
-              {t("common.close")}
-            </Button>
-            <Button
-              onClick={unduhBiling}
-              disabled={!bilingUrl}
-              className="bg-[#075489] hover:bg-[#075489]/90 text-white"
-            >
-              <Download className="h-4 w-4" />{" "}
-              {t("nafsulTransaksi.billingDownload")}
-            </Button>
-          </>
-        }
-      >
-        {bilingLoading ? (
-          <div className="flex h-[70vh] items-center justify-center gap-2 text-sm text-gray-400">
-            <Loader2 className="h-5 w-5 animate-spin" />
-            {t("nafsulTransaksi.billingLoading")}
-          </div>
-        ) : bilingError ? (
-          <div className="flex h-[70vh] items-center justify-center px-6 text-center text-sm text-red-600">
-            {bilingError}
-          </div>
-        ) : bilingUrl ? (
-          <iframe
-            src={bilingUrl}
-            title={t("nafsulTransaksi.billingPreview")}
-            className="h-[70vh] w-full rounded-lg border"
-          />
-        ) : null}
-      </Modal>
+      {/*
+        Kuitansi yang barusan dibuat di halaman lain: transaksinya sudah
+        selesai dan petugas sudah kembali ke sini, baru penawaran validasinya
+        muncul. Menutupnya cukup membuang titipannya — kuitansinya sudah
+        tersimpan, dan gemboknya tetap ada di kolom Aksi.
+      */}
+      <ResultDialog
+        open={baruDibuat !== null}
+        onClose={() => dispatch(clearTransaksiBaru())}
+        variant="success"
+        title={t("nafsulTransaksi.createdTitle", {
+          number: baruDibuat?.transaction_number ?? "",
+        })}
+        description={t("nafsulTransaksi.createdValidateNow")}
+        secondaryLabel={t("nafsulTransaksi.validate")}
+        onSecondary={() => baruDibuat && handleValidasi(baruDibuat)}
+        actionLabel={t("nafsulTransaksi.validateLater")}
+      />
+
+      {/* Berhasil dikunci — dialog HASIL (ikon centang), bukan dialog konfirmasi:
+          yang barusan terjadi sudah selesai, dan bentuk bertanya membuatnya
+          terbaca seperti tindakan yang masih menunggu kepastian. Lembar
+          bilingnya ditawarkan sebagai langkah lanjutan di dialog yang sama. */}
+      <ResultDialog
+        open={tawarCetak !== null}
+        onClose={() => setTawarCetak(null)}
+        variant="success"
+        title={t("nafsulTransaksi.validatedTitle", {
+          number: tawarCetak?.transaction_number ?? "",
+        })}
+        // Pesan server sengaja TIDAK dipakai di sini: isinya mengulang judul
+        // ("Kuitansi X berhasil divalidasi"), jadi yang terbaca cuma kalimat
+        // yang sama dua kali. Yang berguna justru langkah berikutnya.
+        description={t("nafsulTransaksi.createdPrintNow")}
+        secondaryLabel={t("nafsulTransaksi.printBilling")}
+        onSecondary={() => {
+          if (tawarCetak) setBilingRow(tawarCetak);
+          setTawarCetak(null);
+        }}
+      />
+
+      <BilingModal
+        uuid={bilingRow?.uuid ?? null}
+        nomor={bilingRow?.transaction_number ?? ""}
+        onClose={() => setBilingRow(null)}
+      />
 
       {/*
         Pilihan jenis kuitansi. Dua tautan, bukan dua tab di dalam satu form:
@@ -991,7 +988,10 @@ export default function NafsulTransaksiPage() {
       <ConfirmDialog
         open={validasiTarget !== null}
         onClose={() => setValidasiTarget(null)}
-        onConfirm={handleValidasi}
+        // Dibungkus, bukan dioper langsung: `onClick` React menyerahkan objek
+        // event sebagai argumen pertama, dan itu akan terbaca sebagai baris
+        // yang hendak divalidasi.
+        onConfirm={() => handleValidasi()}
         loading={validatingUuid !== null}
         // Bukan aksi hapus: tanpa ini tombolnya merah dan bertuliskan "Hapus".
         tone="primary"

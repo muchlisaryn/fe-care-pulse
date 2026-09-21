@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { ChevronLeft } from "lucide-react";
+import { ChevronLeft, Search } from "lucide-react";
 import { api, ApiError } from "@/lib/nafsul/api";
 import type {
   Anggota,
@@ -13,6 +13,7 @@ import type {
   StatusAnggota,
   Wilayah,
 } from "@/lib/nafsul/types";
+import CariKKModal from "@/components/nafsul/CariKKModal";
 import ImportAnggotaModal from "@/components/nafsul/ImportAnggotaModal";
 import { Button } from "@/components/atoms/Button";
 import { FieldGroup } from "@/components/molecules/FieldGroup";
@@ -21,6 +22,7 @@ import { PageHeader } from "@/components/molecules/PageHeader";
 import { Select } from "@/components/atoms/Select";
 import MasterSelect from "@/components/nafsul/MasterSelect";
 import { Textarea } from "@/components/atoms/Textarea";
+import { salinDataKeluarga } from "@/lib/nafsul/keluarga";
 import { useT } from "@/lib/i18n";
 
 
@@ -66,9 +68,20 @@ export default function PendaftaranAnggotaPage() {
   const [flash, setFlash] = useState<{ varian: "ok" | "gagal"; pesan: string } | null>(null);
   const [lastCreated, setLastCreated] = useState<Anggota | null>(null);
   const [importOpen, setImportOpen] = useState(false);
+  const [cariKK, setCariKK] = useState(false);
 
   function set(field: string, value: string) {
     setForm((f) => ({ ...f, [field]: value }));
+  }
+
+  /**
+   * Isi alamat, telepon, wilayah & penanggung jawab dari anggota sekeluarga
+   * yang sudah terdaftar. Aturan kolom mana yang ikut tersalin ada di
+   * `salinDataKeluarga` — dipakai bersama halaman ubah anggota.
+   */
+  function pakaiDataKeluarga(sumber: Anggota) {
+    setForm((f) => salinDataKeluarga(sumber, f));
+    setCariKK(false);
   }
 
   function clearForm() {
@@ -151,6 +164,16 @@ export default function PendaftaranAnggotaPage() {
 
       <ImportAnggotaModal open={importOpen} onClose={() => setImportOpen(false)} />
 
+      {/* Kata kunci awalnya No. KK bila sudah diketik, kalau belum namanya —
+          keduanya sama-sama bisa dicari, dan yang mana pun sudah terisi itulah
+          yang paling mungkin menemukan keluarganya. */}
+      <CariKKModal
+        open={cariKK}
+        onClose={() => setCariKK(false)}
+        kunciAwal={form.nokk || form.nama}
+        onPilih={pakaiDataKeluarga}
+      />
+
       {flash && (
         <div
           className={`rounded-xl border px-4 py-3 text-sm ${
@@ -196,10 +219,26 @@ export default function PendaftaranAnggotaPage() {
           {err("noktp")}
         </FieldGroup>
         <FieldGroup label={t("nafsulAnggotaForm.familyCardNo")}>
-          <Input
-            value={form.nokk}
-            onChange={(e) => set("nokk", e.target.value)}
-          />
+          {/* Tombol cari menempel DI DALAM kolomnya, bukan berdiri sendiri di
+              sebelahnya: tombol terpisah akan terbaca sebagai pencarian
+              formulir secara umum, padahal yang dicarinya adalah anggota
+              sekeluarga yang datanya akan disalin ke sini. */}
+          <div className="relative">
+            <Input
+              value={form.nokk}
+              onChange={(e) => set("nokk", e.target.value)}
+              className="pr-10"
+            />
+            <button
+              type="button"
+              onClick={() => setCariKK(true)}
+              title={t("nafsulAnggotaForm.kkSearchTitle")}
+              aria-label={t("nafsulAnggotaForm.kkSearchTitle")}
+              className="absolute right-1 top-1/2 inline-flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-md text-gray-400 transition-colors hover:bg-[#075489]/10 hover:text-[#075489] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#075489]/40"
+            >
+              <Search className="h-4 w-4" />
+            </button>
+          </div>
           {err("nokk")}
         </FieldGroup>
         <FieldGroup label={t("nafsulAnggotaForm.maritalStatus")}>

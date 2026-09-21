@@ -17,6 +17,19 @@ type ResultDialogProps = {
   // Teks tombol penutup — default "Selesai" (berhasil) / "Tutup" (gagal).
   actionLabel?: string
   /**
+   * Aksi LANJUTAN yang ditawarkan bersama hasilnya, mis. "Cetak Biling" setelah
+   * kuitansi divalidasi.
+   *
+   * Ada di sini, bukan lewat ConfirmDialog terpisah: yang baru saja terjadi
+   * adalah KEBERHASILAN, dan menampilkannya lewat dialog bernada bertanya
+   * membuatnya terbaca seperti tindakan yang masih perlu dipastikan.
+   *
+   * Tutup-otomatis mati sendiri begitu aksi ini ada — menawarkan tombol lalu
+   * menariknya kembali setelah lima detik adalah tawaran yang tidak sungguhan.
+   */
+  secondaryLabel?: string
+  onSecondary?: () => void
+  /**
    * Detik sebelum dialog menutup sendiri. Default: 5 detik untuk hasil berhasil,
    * dan TIDAK menutup sendiri untuk hasil gagal (pesan error perlu dibaca dulu).
    * Isi 0 untuk mematikan tutup-otomatis.
@@ -85,6 +98,8 @@ export function ResultDialog({
   title,
   description,
   actionLabel,
+  secondaryLabel,
+  onSecondary,
   autoCloseSeconds,
 }: ResultDialogProps) {
   const v = VARIANT[variant]
@@ -92,7 +107,8 @@ export function ResultDialog({
   const t = useT()
   const heading = title ?? t(variant === "success" ? "common.success" : "common.failed")
   const action = actionLabel ?? t(variant === "success" ? "common.done" : "common.close")
-  const seconds = autoCloseSeconds ?? (variant === "success" ? 5 : 0)
+  const seconds =
+    autoCloseSeconds ?? (variant === "success" && !onSecondary ? 5 : 0)
 
   return (
     <Modal
@@ -142,12 +158,39 @@ export function ResultDialog({
           <p className="mt-2 max-w-xs text-sm text-gray-500">{description}</p>
         )}
 
-        <Button
-          onClick={onClose}
-          className={"mt-7 h-12 w-full rounded-xl text-base font-semibold " + v.button}
-        >
-          {action}
-        </Button>
+        {/* `type="button"` pada semuanya: dialog ini kerap dipasang di dalam
+            formulir yang barusan disimpan, dan tombol tanpa `type` bertipe
+            submit sehingga akan menyimpannya sekali lagi. */}
+        {onSecondary ? (
+          // Aksi lanjutan yang menonjol, penutup di bawahnya sebagai garis
+          // keluar — urutannya mengikuti apa yang paling mungkin ditekan
+          // setelah sesuatu berhasil.
+          <div className="mt-7 flex w-full flex-col gap-2">
+            <Button
+              type="button"
+              onClick={onSecondary}
+              className={"h-12 w-full rounded-xl text-base font-semibold " + v.button}
+            >
+              {secondaryLabel}
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={onClose}
+              className="h-12 w-full rounded-xl text-base font-semibold"
+            >
+              {action}
+            </Button>
+          </div>
+        ) : (
+          <Button
+            type="button"
+            onClick={onClose}
+            className={"mt-7 h-12 w-full rounded-xl text-base font-semibold " + v.button}
+          >
+            {action}
+          </Button>
+        )}
 
         {/* Sisa waktu tutup-otomatis — berhenti saat kartu disorot / difokus,
             dan dialog menutup tepat saat bilahnya habis. */}

@@ -24,7 +24,11 @@ import { ResultDialog } from "@/components/molecules/ResultDialog"
 import { ConfirmDialog } from "@/components/molecules/ConfirmDialog"
 import MasterSelect from "@/components/nafsul/MasterSelect"
 import { useAppDispatch } from "@/lib/store/hooks"
-import { invalidateTransaksi } from "@/lib/store/slices/nafsulTransaksiSlice"
+import {
+  invalidateTransaksi,
+  setTransaksiBaru,
+  type TransaksiHeader,
+} from "@/lib/store/slices/nafsulTransaksiSlice"
 import { api, ApiError } from "@/lib/nafsul/api"
 import type { Anggota, KetuaKelompok, Tarif } from "@/lib/nafsul/types"
 import { isSekaliBayar, type FeeType } from "@/lib/nafsul/feeType"
@@ -601,26 +605,27 @@ export default function TransaksiForm({ tipe }: { tipe: Tipe }) {
 
     setSaving(true)
     try {
-      await api("/transaksi/header", {
+      const dibuat = await api<TransaksiHeader>("/transaksi/header", {
         method: "POST",
         body: {
           date: header.date,
           /*
-            Potongan anggota selalu NOL dari halaman ini. Angka yang tampil di
-            layar hanyalah cerminan potongan bulan gratis, dan potongan itu
-            sudah terpotong di tiap baris rincian — mengirimkannya lagi di sini
-            membuat server menguranginya untuk kedua kalinya.
+            Potongan anggota = jumlah diskon seluruh rincian, sepasang dengan
+            `total` yang kini KOTOR di bawah. Keduanya dikirim agar payload
+            lengkap; server menurunkannya sendiri dari rincian yang ikut
+            dikirim, jadi angka di sini tidak bisa berselisih dengannya.
           */
-          member_deduction: 0,
+          member_deduction: totalDiskon,
           // Hanya persentasenya yang dikirim; nominal potongan & jasa ketua
           // dihitung server dari total rincian yang juga dihitungnya sendiri.
           group_leader_fee_percent: angka(header.group_leader_fee_percent),
           payment: angka(header.payment),
           payment_method: header.payment_method,
           transaction_type: tipe,
-          // Total tetap dikirim agar payload lengkap, tapi server menghitung
-          // ulang dari rincian — itu yang menentukan.
-          total: totalRincian,
+          // Total KOTOR — sebelum diskon; diskonnya dilaporkan terpisah lewat
+          // `member_deduction` di atas. Tetap dikirim agar payload lengkap,
+          // tapi server menghitung ulang dari rincian — itu yang menentukan.
+          total: bruto,
           // Tiap rincian di daftar mekar jadi sebanyak bulan yang direncanakan.
           transactions: daftar.flatMap((d) =>
             d.rencana.transactions.map((p) => ({
@@ -637,6 +642,11 @@ export default function TransaksiForm({ tipe }: { tipe: Tipe }) {
       // Daftar di-cache Redux; tanpa ini halaman transaksi tidak akan memuat
       // ulang saat dibuka lagi dan kuitansi baru tidak muncul.
       dispatch(invalidateTransaksi())
+
+      // Transaksinya diselesaikan DULU: petugas dibawa kembali ke daftar, dan
+      // penawaran validasi menyusul di sana. Kuitansinya dititipkan lewat store
+      // — lihat `baruDibuat` di slice-nya.
+      dispatch(setTransaksiBaru(dibuat))
       router.push("/nafsul/transaksi")
     } catch (e2) {
       const err = e2 as ApiError
