@@ -108,7 +108,9 @@ export interface Anggota {
   created_by?: string | null;
   wilayah?: Wilayah | null;
   ketua?: KetuaKelompok | null;
-  kota_lahir?: Kota | null;
+  // camelCase, bukan `kota_lahir`: nama relasinya di API ikut nama relasi
+  // Eloquent (`kotaLahir`), tidak diubah ke snake_case seperti kolomnya.
+  kotaLahir?: Kota | null;
   status?: StatusAnggota | null;
   pendidikan?: Pendidikan | null;
   pekerjaan?: Pekerjaan | null;

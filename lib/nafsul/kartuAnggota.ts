@@ -106,7 +106,7 @@ function isiKartu(a: Anggota): string {
   return `
     ${baris("No Peserta", a.no_anggota ?? "-")}
     ${baris("Nama", a.nama ?? "-")}
-    ${baris("Tempat Lahir", a.kota_lahir?.nama ?? "-")}
+    ${baris("Tempat Lahir", a.kotaLahir?.nama ?? "-")}
     ${baris("Tgl Lahir", tanggalSingkat(a.tgl_lahir))}
     ${baris("Alamat", a.alamat?.trim() || "-", "alamat")}
     ${baris("Telepon", a.telepon?.trim() || "-")}
@@ -230,10 +230,12 @@ export function cetakKartuAnggota(daftar: Anggota | Anggota[], mulaiDari = 1): v
           .row .lbl { width: 19mm; flex: none; }
           .row .sep { width: 3mm; flex: none; }
           .row .val { flex: 1; min-width: 0; }
-          /* Alamat panjang dibatasi dua baris supaya kartu tidak meluap ke celah. */
+          /* Alamat dibatasi TIGA baris supaya kartu tidak meluap ke celah.
+             Dua baris sempat memotong alamat ±25 anggota (alamat > 90 huruf);
+             baris ketiga masih muat di ruang kosong di atas kotak foto. */
           .row .val.alamat {
             display: -webkit-box;
-            -webkit-line-clamp: 2;
+            -webkit-line-clamp: 3;
             -webkit-box-orient: vertical;
             overflow: hidden;
           }
