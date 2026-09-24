@@ -8,10 +8,11 @@ import type { Anggota } from "./types";
  *              jabatan penanda tangan.
  * - Belakang — logo RS, "KARTU PESERTA", nama unit, alamat & telepon RS.
  *
- * Kedua sisi dicetak di SATU halaman, bersebelahan dalam strip: kartu depan
- * lalu kartu belakangnya tepat di bawahnya — tinggal digunting & dilaminasi
- * berpasangan, tanpa cetak bolak-balik. Satu strip (4 kartu) = 2 anggota.
- * Latar biru tidak ikut dicetak — warnanya sudah dari kertasnya.
+ * Bolak-balik, dua kali cetak: sisi depan dulu, lalu kertasnya dibalik dan
+ * dimasukkan lagi untuk sisi belakang. Kedua cetakan memakai slot yang sama,
+ * jadi sisi belakang jatuh tepat di balik sisi depannya — satu kartu per
+ * anggota, satu strip = 4 anggota. Latar biru tidak ikut dicetak — warnanya
+ * sudah dari kertasnya.
  *
  * Isi kartu SENGAJA berbahasa Indonesia baku dan tidak lewat kamus i18n: ini
  * dokumen resmi, nama lembaga ("Bimbingan Rohani", "Ka Sie Nafsul Mutmainnah")
@@ -145,14 +146,21 @@ function isiBelakang(): string {
 /** Jarak tepi atas kertas ke kartu ke-`k` (0-based) di strip. */
 const atasKartu = (k: number) => GESER_Y + STRIP.atas + k * (STRIP.kartuTinggi + STRIP.jarak);
 
+export type SisiKartu = "depan" | "belakang";
+
 /**
- * Cetak kartu satu atau beberapa anggota. Tiap anggota memakai dua kartu
- * berurutan di strip (depan, lalu belakang), dari kartu paling atas.
+ * Cetak SATU sisi kartu satu atau beberapa anggota, satu kartu per anggota
+ * dari kartu paling atas. Sisi belakang dicetak dengan daftar & `mulaiDari`
+ * yang sama seperti sisi depannya, agar jumlah & posisinya berpasangan.
  *
  * `mulaiDari` (1–4) = posisi kartu pertama di strip pertama — supaya strip yang
  * sebagian kartunya sudah terpakai tetap bisa dihabiskan, bukan dibuang.
  */
-export function cetakKartuAnggota(daftar: Anggota | Anggota[], mulaiDari = 1): void {
+export function cetakKartuAnggota(
+  daftar: Anggota | Anggota[],
+  sisi: SisiKartu,
+  mulaiDari = 1,
+): void {
   const anggota = Array.isArray(daftar) ? daftar : [daftar];
   if (anggota.length === 0) return;
 
@@ -161,10 +169,11 @@ export function cetakKartuAnggota(daftar: Anggota | Anggota[], mulaiDari = 1): v
   // dihitung agar kartu berikutnya jatuh di tempat yang benar.
   const slot: (string | null)[] = [
     ...Array<null>(lewati).fill(null),
-    ...anggota.flatMap((a) => [
-      `<div class="kartu depan" style="{POS}">${isiKartu(a)}</div>`,
-      `<div class="kartu belakang" style="{POS}">${isiBelakang()}</div>`,
-    ]),
+    ...anggota.map((a) =>
+      sisi === "depan"
+        ? `<div class="kartu depan" style="{POS}">${isiKartu(a)}</div>`
+        : `<div class="kartu belakang" style="{POS}">${isiBelakang()}</div>`,
+    ),
   ];
 
   const lembar: string[] = [];
@@ -178,10 +187,11 @@ export function cetakKartuAnggota(daftar: Anggota | Anggota[], mulaiDari = 1): v
     lembar.push(`<div class="lembar">${kartu.join("")}</div>`);
   }
 
+  const label = sisi === "depan" ? "Depan" : "Belakang";
   const judul =
     anggota.length === 1
-      ? `Kartu Peserta ${escapeHtml(anggota[0].nama ?? "")}`
-      : `Kartu Peserta (${anggota.length})`;
+      ? `Kartu Peserta ${escapeHtml(anggota[0].nama ?? "")} - ${label}`
+      : `Kartu Peserta (${anggota.length}) - ${label}`;
 
   const w = window.open("", "_blank", "width=520,height=900");
   if (!w) return;
@@ -291,10 +301,14 @@ export function cetakKartuAnggota(daftar: Anggota | Anggota[], mulaiDari = 1): v
             margin-top: auto;
             font-size: 6pt;
           }
-          @page { size: ${STRIP.lebar}mm ${TINGGI_KERTAS}mm; margin: 0; }
+          /* Ukuran kertas TIDAK dipaksa: printer mengumpankan strip di tengah
+             baki, sedangkan halaman berukuran strip justru dicetak rata kiri
+             oleh driver. Strip dibuat rata tengah di kertas apa pun yang
+             dipilih di dialog cetak, jadi jatuh pas di atas kertasnya. */
+          @page { margin: 0; }
           @media print {
             body { background: none; }
-            .lembar { margin: 0; page-break-after: always; break-after: page; }
+            .lembar { margin: 0 auto; page-break-after: always; break-after: page; }
             .lembar:last-child { page-break-after: auto; break-after: auto; }
             .kartu { background: none; }
             .kartu.kosong { border: none; }

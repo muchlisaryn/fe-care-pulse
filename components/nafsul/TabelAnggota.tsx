@@ -184,14 +184,14 @@ export default function TabelAnggota({
 
   // Cetak kartu peserta — muncul di KIRI tombol Ubah (extraActions dirender lebih
   // dulu). Hanya pada tampilan aksi penuh, bukan di modal anggota per kelompok.
-  const aksiCetak: ExtraAction<Anggota>[] = [
-    {
-      label: t("nafsulAnggota.printCard"),
-      onClick: (a) => cetakKartuAnggota(a),
-      icon: () => <Printer className="h-3.5 w-3.5" />,
-      className: "gap-1 text-[#075489]",
-    },
-  ];
+  // Dua tombol karena kartunya bolak-balik: cetak depan, balik kertasnya, lalu
+  // cetak belakang di slot yang sama.
+  const aksiCetak: ExtraAction<Anggota>[] = (["depan", "belakang"] as const).map((sisi) => ({
+    label: t(sisi === "depan" ? "nafsulAnggota.printCardFront" : "nafsulAnggota.printCardBack"),
+    onClick: (a: Anggota) => cetakKartuAnggota(a, sisi),
+    icon: () => <Printer className="h-3.5 w-3.5" />,
+    className: "gap-1 text-[#075489]",
+  }));
 
   return (
     <>
@@ -201,7 +201,7 @@ export default function TabelAnggota({
         hideRowNumber
         autoWidth
         actionsAlign="center"
-        // Tiga aksi per baris (Cetak Kartu, Ubah, Hapus) — dilipat jadi satu
+        // Empat aksi per baris (Cetak Depan, Cetak Belakang, Ubah, Hapus) — dilipat jadi satu
         // tombol titik-tiga supaya kolom Aksi tidak lebih lebar dari datanya.
         actionsAsMenu
         emptyMessage={pesanKosong ?? t("nafsulAnggota.empty")}
