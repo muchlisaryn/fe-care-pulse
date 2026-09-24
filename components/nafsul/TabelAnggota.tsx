@@ -7,10 +7,10 @@ import { Printer } from "lucide-react";
 import { formatDate, kunciJenisKelamin } from "@/lib/nafsul/format";
 import { localeOf, useLanguage } from "@/lib/i18n";
 import type { Anggota } from "@/lib/nafsul/types";
-import { cetakKartuAnggota } from "@/lib/nafsul/kartuAnggota";
 import { Badge } from "@/components/atoms/Badge";
 import { DataTable, type Column, type ExtraAction } from "@/components/molecules/DataTable";
 import RiwayatIuranModal from "@/components/nafsul/RiwayatIuranModal";
+import PratinjauKartuModal from "@/components/nafsul/PratinjauKartuModal";
 
 /** Sel kosong seragam dengan tabel lain di aplikasi. */
 function Kosong() {
@@ -70,6 +70,8 @@ export default function TabelAnggota({
   // Anggota yang riwayatnya sedang dibuka. Namanya ikut disimpan supaya judul
   // modal tidak berkedip kosong sementara datanya masih dimuat.
   const [riwayat, setRiwayat] = useState<{ id: number; nama: string } | null>(null);
+  // Anggota yang kartunya sedang dipratinjau.
+  const [pratinjau, setPratinjau] = useState<Anggota | null>(null);
 
   const columns: Column<Anggota>[] = [
     {
@@ -184,14 +186,16 @@ export default function TabelAnggota({
 
   // Cetak kartu peserta — muncul di KIRI tombol Ubah (extraActions dirender lebih
   // dulu). Hanya pada tampilan aksi penuh, bukan di modal anggota per kelompok.
-  // Dua tombol karena kartunya bolak-balik: cetak depan, balik kertasnya, lalu
-  // cetak belakang di slot yang sama.
-  const aksiCetak: ExtraAction<Anggota>[] = (["depan", "belakang"] as const).map((sisi) => ({
-    label: t(sisi === "depan" ? "nafsulAnggota.printCardFront" : "nafsulAnggota.printCardBack"),
-    onClick: (a: Anggota) => cetakKartuAnggota(a, sisi),
-    icon: () => <Printer className="h-3.5 w-3.5" />,
-    className: "gap-1 text-[#075489]",
-  }));
+  // Satu tombol untuk kedua sisi: kliknya membuka pratinjau PDF, dan sisi
+  // depan/belakang dipilih lewat tab di dalamnya.
+  const aksiCetak: ExtraAction<Anggota>[] = [
+    {
+      label: t("nafsulAnggota.printCard"),
+      onClick: (a: Anggota) => setPratinjau(a),
+      icon: () => <Printer className="h-3.5 w-3.5" />,
+      className: "gap-1 text-[#075489]",
+    },
+  ];
 
   return (
     <>
@@ -201,7 +205,7 @@ export default function TabelAnggota({
         hideRowNumber
         autoWidth
         actionsAlign="center"
-        // Empat aksi per baris (Cetak Depan, Cetak Belakang, Ubah, Hapus) — dilipat jadi satu
+        // Tiga aksi per baris (Cetak Kartu, Ubah, Hapus) — dilipat jadi satu
         // tombol titik-tiga supaya kolom Aksi tidak lebih lebar dari datanya.
         actionsAsMenu
         emptyMessage={pesanKosong ?? t("nafsulAnggota.empty")}
@@ -217,6 +221,10 @@ export default function TabelAnggota({
         nama={riwayat?.nama ?? ""}
         onClose={() => setRiwayat(null)}
       />
+
+      {pratinjau && (
+        <PratinjauKartuModal anggota={pratinjau} onClose={() => setPratinjau(null)} />
+      )}
     </>
   );
 }

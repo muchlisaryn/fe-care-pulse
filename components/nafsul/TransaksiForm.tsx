@@ -13,6 +13,10 @@ import {
   Gift,
   Pencil,
   X,
+  ReceiptText,
+  Users,
+  User,
+  CheckCircle2,
 } from "lucide-react"
 import { Button } from "@/components/atoms/Button"
 import { Input } from "@/components/atoms/Input"
@@ -23,6 +27,9 @@ import { PageHeader } from "@/components/molecules/PageHeader"
 import { ResultDialog } from "@/components/molecules/ResultDialog"
 import { ConfirmDialog } from "@/components/molecules/ConfirmDialog"
 import MasterSelect from "@/components/nafsul/MasterSelect"
+import TransaksiSemuaAnggotaModal, {
+  type RincianMassal,
+} from "@/components/nafsul/TransaksiSemuaAnggotaModal"
 import { useAppDispatch } from "@/lib/store/hooks"
 import {
   invalidateTransaksi,
@@ -35,7 +42,7 @@ import { isSekaliBayar, type FeeType } from "@/lib/nafsul/feeType"
 import { useT } from "@/lib/i18n"
 
 /** Satu periode hasil hitungan server. */
-type RencanaBaris = {
+export type RencanaBaris = {
   /** `null` untuk tarif sekali bayar — barisnya memang tidak berperiode. */
   payment_period: string | null
   amount: string
@@ -45,7 +52,7 @@ type RencanaBaris = {
   free: boolean
 }
 
-type Rencana = {
+export type Rencana = {
   months: number
   free_months: number
   /**
@@ -196,6 +203,31 @@ function angka(nilai: string): number {
   return Number.isFinite(n) ? n : 0
 }
 
+type BarisRekap = { kunci: string; tarif: string; bulan: number; nilai: number }
+
+/**
+ * Gabungkan baris per anggota yang berkunci sama jadi satu baris rekap.
+ * `satuan` diisi hanya bila nilai tiap anggotanya sama — kalau berbeda, angka
+ * "per anggota" akan menyesatkan.
+ */
+function rekap(baris: BarisRekap[]) {
+  const grup = new Map<
+    string,
+    { kunci: string; tarif: string; bulan: number; anggota: number; nilai: number; satuan: number | null }
+  >()
+  for (const b of baris) {
+    const g = grup.get(b.kunci)
+    if (!g) {
+      grup.set(b.kunci, { ...b, anggota: 1, satuan: b.nilai })
+      continue
+    }
+    g.anggota++
+    g.nilai += b.nilai
+    if (g.satuan !== b.nilai) g.satuan = null
+  }
+  return [...grup.values()]
+}
+
 /**
  * Batas tunggakan yang memicu peringatan, dalam bulan.
  *
@@ -242,6 +274,18 @@ export default function TransaksiForm({ tipe }: { tipe: Tipe }) {
   const [saving, setSaving] = useState(false)
   const [galat, setGalat] = useState<string | null>(null)
   const [resetOpen, setResetOpen] = useState(false)
+  const [massalOpen, setMassalOpen] = useState(false)
+  /**
+   * Cara menagih pada kuitansi kelompok: seluruh anggota sekaligus lewat modal,
+   * atau satu per satu lewat baris isian. Bawaannya "semua" — hampir semua
+   * setoran kelompok memang untuk seluruh anggotanya. Kuitansi pribadi selalu
+   * "satuan".
+   */
+  const [mode, setMode] = useState<"semua" | "satuan">(tipe === "kelompok" ? "semua" : "satuan")
+  // Kabar singkat setelah tagihan massal masuk Rincian.
+  const [kabarMassal, setKabarMassal] = useState<string | null>(null)
+  const timerKabar = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const daftarRef = useRef<HTMLDivElement>(null)
 
   const idBerikutnya = useRef(1)
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -422,6 +466,38 @@ export default function TransaksiForm({ tipe }: { tipe: Tipe }) {
   }
 
   /**
+   * Masukkan hasil "Transaksi Semua Anggota" ke daftar sekaligus.
+   *
+   * Pasangan anggota + tarif yang sudah ada dilewati — alasannya sama dengan
+   * penolakan duplikat di `simpanEntri()`.
+   */
+  function tambahMassal(rincian: RincianMassal[]) {
+    const ada = new Set(daftar.map((r) => `${r.member_id}:${r.rate_id}`))
+    const baru = rincian
+      .filter((r) => !ada.has(`${r.member_id}:${r.rate_id}`))
+      .map((r) => ({ id: idBerikutnya.current++, ...r, ketua }))
+    if (baru.length === 0) return
+
+    setDaftar((rows) => [...rows, ...baru])
+
+    // Hasilnya DITUNJUKKAN: tanpa kabar & gulir, modal yang tertutup terasa
+    // seperti datanya hilang.
+    setKabarMassal(t("nafsulTransaksi.bulkAdded", { count: baru.length }))
+    if (timerKabar.current) clearTimeout(timerKabar.current)
+    timerKabar.current = setTimeout(() => setKabarMassal(null), 5000)
+    requestAnimationFrame(() =>
+      daftarRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })
+    )
+  }
+
+  /** Pindah cara menagih; isian satuan yang setengah jadi dibuang. */
+  function gantiMode(m: "semua" | "satuan") {
+    if (m === mode) return
+    if (m === "semua") batalkanEntri()
+    setMode(m)
+  }
+
+  /**
    * Kosongkan SELURUH isian form ke keadaan awal.
    *
    * Hanya menyentuh state di browser — tidak ada satu pun permintaan ke server,
@@ -442,6 +518,8 @@ export default function TransaksiForm({ tipe }: { tipe: Tipe }) {
     setHeader(headerKosong)
     setGalat(null)
     setResetOpen(false)
+    setMode(tipe === "kelompok" ? "semua" : "satuan")
+    setKabarMassal(null)
   }
 
   /** Kosongkan baris isian dan keluar dari mode ubah. */
@@ -466,6 +544,8 @@ export default function TransaksiForm({ tipe }: { tipe: Tipe }) {
     permintaan.current++
 
     setKetua(d.ketua)
+    // Yang diubah memang satu baris — tampilkan baris isiannya.
+    setMode("satuan")
     setEditId(d.id)
     setEntri({
       member_id: d.member_id,
@@ -532,6 +612,29 @@ export default function TransaksiForm({ tipe }: { tipe: Tipe }) {
     .filter((d) => d.nilai > 0)
 
   const totalDiskon = diskonPerAnggota.reduce((j, d) => j + d.nilai, 0)
+
+  /**
+   * Kuitansi KELOMPOK diringkas, bukan dirinci per anggota: satu kelompok bisa
+   * memuat puluhan anggota dengan angka yang sama persis, dan daftar sepanjang
+   * itu menenggelamkan totalnya. Baris per anggota tetap ada di Rincian.
+   *
+   * Transaksi dikelompokkan per tarif + jumlah bulan ("12 bulan × 12 anggota"),
+   * diskon per jumlah bulan gratis ("Gratis 1 bulan × 12 anggota").
+   */
+  const rekapTransaksi = rekap(
+    daftar.map((d) => ({
+      kunci: `${d.rate_id}|${d.rencana.months}`,
+      tarif: d.rate_label,
+      bulan: d.rencana.months,
+      nilai: d.rencana.transactions.reduce((j, p) => j + angka(p.amount), 0),
+    }))
+  )
+  const rekapDiskon = rekap(
+    diskonPerAnggota.map((d) => ({ kunci: String(d.bulan), tarif: "", bulan: d.bulan, nilai: d.nilai }))
+  )
+  // Nama tarif baru perlu disebut bila kuitansinya memuat lebih dari satu tarif.
+  const banyakTarif = new Set(daftar.map((d) => d.rate_id)).size > 1
+  const ringkas = tipe === "kelompok"
 
   /**
    * Yang harus disetorkan = total rincian, titik.
@@ -726,9 +829,85 @@ export default function TransaksiForm({ tipe }: { tipe: Tipe }) {
                 // keterangan terbaca sebagai kerusakan, bukan aturan.
                 <p className="text-xs text-slate-400">{t("nafsulTransaksi.leaderLocked")}</p>
               )}
+              {/*
+                Dua cara menagih, sejajar sebagai tab — baru muncul setelah
+                ketua dipilih, karena keduanya bekerja atas anggota ketua itu.
+                Hasil keduanya masuk ke daftar Rincian yang sama di bawah.
+              */}
+              {ketua.kode && (
+                <div className="pt-3">
+                  <p className="mb-1.5 text-sm font-medium text-slate-700">
+                    {t("nafsulTransaksi.modeLabel")}
+                  </p>
+                  <div role="tablist" className="grid gap-2 sm:grid-cols-2">
+                    {(
+                      [
+                        ["semua", Users, "modeAll", "modeAllHint"],
+                        ["satuan", User, "modeOne", "modeOneHint"],
+                      ] as const
+                    ).map(([m, Ikon, judul, ket]) => {
+                      const aktif = mode === m
+                      return (
+                        <button
+                          key={m}
+                          type="button"
+                          role="tab"
+                          aria-selected={aktif}
+                          onClick={() => gantiMode(m)}
+                          className={`flex items-start gap-3 rounded-xl border p-3 text-left transition-all ${
+                            aktif
+                              ? "border-[#075489] bg-[#075489]/[0.05] ring-1 ring-[#075489]/30"
+                              : "border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50"
+                          }`}
+                        >
+                          <span
+                            className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${
+                              aktif ? "bg-[#075489] text-white" : "bg-slate-100 text-slate-500"
+                            }`}
+                          >
+                            <Ikon className="h-4 w-4" />
+                          </span>
+                          <span className="min-w-0">
+                            <span
+                              className={`block text-sm font-semibold ${
+                                aktif ? "text-[#075489]" : "text-slate-800"
+                              }`}
+                            >
+                              {t(`nafsulTransaksi.${judul}`)}
+                            </span>
+                            <span className="block text-xs text-slate-500">
+                              {t(`nafsulTransaksi.${ket}`)}
+                            </span>
+                          </span>
+                        </button>
+                      )
+                    })}
+                  </div>
+
+                  {mode === "semua" && (
+                    <div className="mt-3 flex flex-col gap-3 rounded-xl border border-dashed border-[#4ba69d]/50 bg-[#4ba69d]/[0.06] p-4 sm:flex-row sm:items-center sm:justify-between">
+                      <p className="text-sm text-slate-600">
+                        {t("nafsulTransaksi.bulkCta", { leader: ketua.nama })}
+                      </p>
+                      <Button
+                        type="button"
+                        onClick={() => setMassalOpen(true)}
+                        className="shrink-0 gap-1.5 bg-[#4ba69d] hover:bg-[#4ba69d]/90 text-white"
+                      >
+                        <ReceiptText className="h-4 w-4" />
+                        {t("nafsulTransaksi.bulkOpen")}
+                      </Button>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           )}
 
+          {/* Baris isian satuan — pada kuitansi kelompok hanya untuk tab
+              "Per Anggota", dan setelah ketuanya dipilih. */}
+          {mode === "satuan" && (tipe === "pribadi" || ketua.kode) && (
+          <>
           <div className="space-y-1.5">
             <Label>
               {t("nafsulTransaksi.member")} <span className="text-red-500">*</span>
@@ -875,7 +1054,7 @@ export default function TransaksiForm({ tipe }: { tipe: Tipe }) {
               disabled={!siapTambah}
               className="bg-[#075489] hover:bg-[#075489]/90 text-white"
             >
-              {t("common.save")}
+              {t("common.add")}
             </Button>
             {editId !== null && (
               <Button
@@ -890,6 +1069,8 @@ export default function TransaksiForm({ tipe }: { tipe: Tipe }) {
               </Button>
             )}
           </div>
+          </>
+          )}
         </div>
 
         {/*
@@ -957,7 +1138,13 @@ export default function TransaksiForm({ tipe }: { tipe: Tipe }) {
         )}
 
         {/* ── Daftar rincian yang sudah ditambahkan ── */}
-        <div className="mt-5 border-t border-slate-200 pt-4">
+        <div ref={daftarRef} className="mt-5 scroll-mt-4 border-t border-slate-200 pt-4">
+          {kabarMassal && (
+            <p className="mb-3 flex items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-medium text-emerald-700">
+              <CheckCircle2 className="h-4 w-4 shrink-0" />
+              {kabarMassal}
+            </p>
+          )}
           {daftar.length === 0 ? (
             <p className="py-6 text-center text-sm text-slate-400">
               {t("nafsulTransaksi.listEmpty")}
@@ -1302,7 +1489,22 @@ export default function TransaksiForm({ tipe }: { tipe: Tipe }) {
                   {t("nafsulTransaksi.memberTransactions")}
                 </div>
                 <ul className="divide-y divide-slate-100">
-                  {transaksiPerAnggota.map((d) => (
+                  {ringkas
+                    ? rekapTransaksi.map((r) => (
+                        <BarisRingkas
+                          key={r.kunci}
+                          atas={banyakTarif ? r.tarif : undefined}
+                          teks={
+                            r.bulan > 0
+                              ? t("nafsulTransaksi.recapMonths", { months: r.bulan, members: r.anggota })
+                              : t("nafsulTransaksi.recapOneTime", { members: r.anggota })
+                          }
+                          satuan={r.satuan}
+                          nilai={r.nilai}
+                          t={t}
+                        />
+                      ))
+                    : transaksiPerAnggota.map((d) => (
                     <li
                       key={d.id}
                       className="flex items-baseline justify-between gap-3 px-3 py-1.5 text-[13px] text-slate-600"
@@ -1342,7 +1544,17 @@ export default function TransaksiForm({ tipe }: { tipe: Tipe }) {
                   {t("nafsulTransaksi.discount")}
                 </div>
                 <ul className="divide-y divide-slate-100">
-                  {diskonPerAnggota.map((d) => (
+                  {ringkas
+                    ? rekapDiskon.map((r) => (
+                        <BarisRingkas
+                          key={r.kunci}
+                          teks={t("nafsulTransaksi.recapFree", { months: r.bulan, members: r.anggota })}
+                          satuan={r.satuan}
+                          nilai={r.nilai}
+                          t={t}
+                        />
+                      ))
+                    : diskonPerAnggota.map((d) => (
                     <li
                       key={d.id}
                       className="flex items-baseline justify-between gap-3 px-3 py-1.5 text-[13px] text-slate-600"
@@ -1528,6 +1740,15 @@ export default function TransaksiForm({ tipe }: { tipe: Tipe }) {
         variant="error"
         description={galat ?? ""}
       />
+
+      {tipe === "kelompok" && massalOpen && (
+        <TransaksiSemuaAnggotaModal
+          onClose={() => setMassalOpen(false)}
+          ketua={ketua}
+          terpakai={new Set(daftar.map((d) => `${d.member_id}:${d.rate_id}`))}
+          onSimpan={tambahMassal}
+        />
+      )}
     </form>
   )
 }
@@ -1549,6 +1770,37 @@ export default function TransaksiForm({ tipe }: { tipe: Tipe }) {
  * menerima pembayaran justru dari anggota yang menunggak, dan menghalanginya
  * berarti melarang hal yang jadi tujuan halaman ini.
  */
+/** Satu baris rekap di ringkasan kuitansi kelompok. */
+function BarisRingkas({
+  atas,
+  teks,
+  satuan,
+  nilai,
+  t,
+}: {
+  /** Nama tarif — hanya bila kuitansinya memuat lebih dari satu tarif. */
+  atas?: string
+  teks: string
+  satuan: number | null
+  nilai: number
+  t: (kunci: string, vars?: Record<string, string | number>) => string
+}) {
+  return (
+    <li className="flex items-baseline justify-between gap-3 px-3 py-2 text-[13px] text-slate-600">
+      <span className="min-w-0">
+        {atas && <span className="block truncate text-xs text-slate-400">{atas}</span>}
+        <span className="font-medium text-slate-700">{teks}</span>
+        {satuan !== null && (
+          <span className="block text-xs text-slate-400">
+            {t("nafsulTransaksi.recapEach", { amount: rupiah(satuan) })}
+          </span>
+        )}
+      </span>
+      <span className="shrink-0 tabular-nums">{rupiah(nilai)}</span>
+    </li>
+  )
+}
+
 function PanelBayarTerakhir({
   memuat,
   data,
