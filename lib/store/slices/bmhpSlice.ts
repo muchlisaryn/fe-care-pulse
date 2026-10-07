@@ -5,9 +5,12 @@ export type Bmhp = {
   id: number
   code: string
   name: string
-  unit: string
+  // Satuan merujuk master satuan; `unit` adalah namanya, dikirim server.
+  unit_id: number | null
+  unit: string | null
   stock_qty: number
-  description: string | null
+  // Harga satuan (rupiah).
+  price: number
   created_at: string
   updated_at: string
 }

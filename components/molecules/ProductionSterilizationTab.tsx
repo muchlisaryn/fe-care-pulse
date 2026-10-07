@@ -1,7 +1,23 @@
 "use client"
 
 import { useMemo, useState } from "react"
-import { FlaskConical, CheckCircle2, Layers, X, ChevronRight, Check, Search, ZoomIn } from "lucide-react"
+import {
+  FlaskConical,
+  CheckCircle2,
+  Layers,
+  X,
+  ChevronRight,
+  Check,
+  Search,
+  ZoomIn,
+  Calendar,
+  Clock,
+  Package,
+  Server,
+  Thermometer,
+  User,
+  XCircle,
+} from "lucide-react"
 import { Button } from "@/components/atoms/Button"
 import { Badge } from "@/components/atoms/Badge"
 import { Input } from "@/components/atoms/Input"
@@ -32,6 +48,24 @@ function formatDate(value: string | null, lang: Lang) {
   const d = new Date(value)
   if (Number.isNaN(d.getTime())) return value
   return d.toLocaleDateString(localeOf(lang), { day: "2-digit", month: "short", year: "numeric" })
+}
+
+// Lama steril dari mulai sampai selesai: "45 menit", "2 jam", "1 jam 20 menit".
+// null bila salah satu waktunya kosong atau selesainya mendahului mulainya.
+function lamaSteril(
+  mulai: string | null,
+  selesai: string | null,
+  t: (kunci: string, vars?: Record<string, string | number>) => string,
+): string | null {
+  if (!mulai || !selesai) return null
+  const selisih = new Date(selesai).getTime() - new Date(mulai).getTime()
+  if (Number.isNaN(selisih) || selisih < 0) return null
+  const menit = Math.round(selisih / 60000)
+  const jam = Math.floor(menit / 60)
+  const sisa = menit % 60
+  if (jam === 0) return t("prodClean.elapsedM", { m: sisa })
+  if (sisa === 0) return t("prodClean.elapsedH", { h: jam })
+  return t("prodClean.elapsedHM", { h: jam, m: sisa })
 }
 
 function nowLocalInput(): string {
@@ -403,7 +437,7 @@ export function ProductionSterilizationTab({
         </div>
       )}
 
-      <div className="space-y-2">
+      <div className="space-y-3">
         {items.map((order) => {
           const inBatch = order.kind === "batch"
           // Baris siap-steril diidentifikasi nomor labelnya (satu label = satu
@@ -414,6 +448,10 @@ export function ProductionSterilizationTab({
           // Batch riwayat (sudah divalidasi) → tampilkan detail proses sterilisasinya.
           const ster = order.sterilization
           const isHistory = inBatch && ster != null && ster.status !== "diproses"
+          const nama = tn(order.name) || tn(order.borrowed_by) || t("prodSter.noInstrumentName")
+          // Kartu batch STR tidak selalu membawa foto di barisnya sendiri — ambil
+          // dari unit pertama yang punya.
+          const foto = order.image_url ?? order.units?.find((u) => u.image_url)?.image_url ?? null
           return (
             <div
               key={key}
@@ -427,73 +465,186 @@ export function ProductionSterilizationTab({
                     : undefined
               }
               className={
-                "rounded-lg border transition-colors " +
+                "rounded-xl border bg-white shadow-sm transition-colors " +
                 (isHistory
-                  ? "border-gray-200 cursor-pointer hover:border-[#075489]/40 hover:bg-gray-50"
+                  ? "border-gray-200 cursor-pointer hover:border-[#075489]/40 hover:bg-[#075489]/[0.03]"
                   : !inBatch
                     ? "cursor-pointer " +
                       (checked
                         ? "border-[#075489] bg-[#075489]/5 ring-1 ring-[#075489]/20"
-                        : "border-gray-200 hover:border-[#075489]/40 hover:bg-gray-50")
-                    : "border-gray-200")
+                        : "border-gray-200 hover:border-[#075489]/40 hover:bg-[#075489]/[0.03]")
+                    : "border-gray-200") +
+                // Garis kiri penanda tahap: merah = belum diproses (siap disterilkan),
+                // kuning = sudah diproses dan menunggu validasi hasil.
+                (!inBatch
+                  ? " border-l-4 border-l-red-600"
+                  : ster?.status === "diproses"
+                    ? " border-l-4 border-l-amber-400"
+                    : "")
               }
             >
-              <div className="flex items-start justify-between gap-3 px-3 py-3">
-                <div className="flex min-w-0 flex-1 items-start gap-3">
-                  {!inBatch && (
-                    <input
-                      type="checkbox"
-                      checked={checked}
-                      readOnly
-                      // Seluruh kartu yang menangani klik pilih; checkbox hanya indikator.
-                      className="pointer-events-none mt-0.5 h-4 w-4 shrink-0 accent-[#075489]"
-                      title={t("prodSter.selectToCombine")}
-                    />
-                  )}
-                  <div className="min-w-0 flex-1">
-                    {/* Baris 1: nomor label kemasan (siap-steril) / kode batch STR. */}
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="rounded bg-[#075489]/10 px-2 py-0.5 font-mono text-sm font-semibold text-[#075489]">
-                        {order.barcode_no ?? order.code}
-                      </span>
-                      {/* Item siap-steril: waktu pengemasan selesai. Kartu batch STR
-                          memakai `processed_at` yang berisi waktu sterilisasinya. */}
-                      <span className="text-xs text-gray-500">
-                        {inBatch ? t("prodSter.sterilizedOn") : t("prodSter.packagedOn")}:{" "}
-                        {formatDate(order.processed_at, lang)}
-                      </span>
-                      {inBatch &&
-                        (order.sterilization?.status === "selesai" ? (
-                          <Badge variant="success">{t("prodSter.badgeSterile")}</Badge>
-                        ) : order.sterilization?.status === "gagal" ? (
-                          <Badge variant="danger">{t("prodSter.badgeFailed")}</Badge>
-                        ) : (
-                          <Badge variant="warning">{t("prodSter.badgeAwaiting")}</Badge>
-                        ))}
-                    </div>
+              {/* Dua baris: identitas + aksi di atas; keterangan sterilisasi di bawahnya
+                  dalam kolom berlebar tetap, supaya lurus dari kartu ke kartu dan
+                  tidak saling berdesakan di layar yang lebih sempit. */}
+              <div className="px-4 py-3.5">
+                <div className="flex items-center gap-4">
+                  <div className="flex min-w-0 flex-1 items-center gap-4">
+                    {!inBatch && (
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        readOnly
+                        // Seluruh kartu yang menangani klik pilih; checkbox hanya indikator.
+                        className="pointer-events-none h-4 w-4 shrink-0 accent-[#075489]"
+                        title={t("prodSter.selectToCombine")}
+                      />
+                    )}
 
-                    {/* Baris 2: nama label — nama paket bila set, nama instrumen bila
-                        satuan (keduanya dari relasi production_item). Kartu batch STR
-                        yang belum punya `name` jatuh ke nama produksinya. */}
-                    <p className="mt-1 truncate text-sm font-medium text-gray-800">
-                      {tn(order.name) || tn(order.borrowed_by) || t("prodSter.noInstrumentName")}
-                    </p>
+                    {/* Foto asli paket/instrumennya; ikon hanya bila fotonya belum ada. */}
+                    {foto ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={foto}
+                        alt={nama}
+                        className="h-14 w-14 shrink-0 rounded-xl border border-gray-100 object-cover"
+                      />
+                    ) : (
+                      <span className="flex h-14 w-14 shrink-0 items-center justify-center rounded-xl bg-[#075489]/8">
+                        <Package className="h-6 w-6 text-[#075489]" />
+                      </span>
+                    )}
+
+                    <div className="min-w-0 flex-1">
+                      {/* Baris 1: nomor label kemasan (siap-steril) / kode batch STR + status. */}
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="rounded-lg bg-[#075489]/10 px-2.5 py-1 text-xs font-semibold text-[#075489]">
+                          {order.barcode_no ?? order.code}
+                        </span>
+                        {/* Item siap-steril belum punya data sterilisasi — cukup waktu
+                            pengemasannya. Batch STR menampilkan waktunya di kolom sendiri. */}
+                        {!inBatch && (
+                          <span className="inline-flex items-center gap-1.5 text-xs text-gray-500">
+                            <Calendar className="h-4 w-4 shrink-0 text-gray-400" />
+                            {t("prodSter.packagedOn")}: {formatDate(order.processed_at, lang)}
+                          </span>
+                        )}
+                        {inBatch &&
+                          (ster?.status === "selesai" ? (
+                            <span className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-700">
+                              <CheckCircle2 className="h-4 w-4 shrink-0" />
+                              {t("prodSter.badgeSterile")}
+                            </span>
+                          ) : ster?.status === "gagal" ? (
+                            <span className="inline-flex items-center gap-1.5 rounded-lg bg-red-50 px-2.5 py-1 text-xs font-medium text-red-600">
+                              <XCircle className="h-4 w-4 shrink-0" />
+                              {t("prodSter.badgeFailed")}
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1.5 rounded-lg bg-amber-50 px-2.5 py-1 text-xs font-medium text-amber-700">
+                              <Clock className="h-4 w-4 shrink-0" />
+                              {t("prodSter.badgeAwaiting")}
+                            </span>
+                          ))}
+                      </div>
+
+                      {/* Baris 2: nama label — nama paket bila set, nama instrumen bila
+                          satuan (keduanya dari relasi production_item). Kartu batch STR
+                          yang belum punya `name` jatuh ke nama produksinya. Nama panjang
+                          boleh turun ke baris kedua, tidak dipotong. */}
+                      <p className="mt-1.5 line-clamp-2 text-sm font-bold text-gray-900">{nama}</p>
+                    </div>
                   </div>
+                  {inBatch && ster?.status === "diproses" && (
+                    <Button
+                      type="button"
+                      size="sm"
+                      onClick={() => openValidate(order)}
+                      className="shrink-0 bg-[#075489] text-white hover:bg-[#075489]/90"
+                    >
+                      {t("prodSter.validateResult")}
+                    </Button>
+                  )}
+                  {isHistory && (
+                    <span className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-[#075489]/10 px-3 py-2 text-sm font-semibold text-[#075489]">
+                      {t("common.detail")}
+                      <ChevronRight className="h-4 w-4" />
+                    </span>
+                  )}
                 </div>
-                {inBatch && order.sterilization?.status === "diproses" && (
-                  <button
-                    type="button"
-                    onClick={() => openValidate(order)}
-                    className="shrink-0 self-center rounded-md border border-[#075489] bg-[#075489] px-3 py-1.5 text-xs font-medium text-white hover:bg-[#075489]/90"
-                  >
-                    {t("prodSter.validateResult")}
-                  </button>
-                )}
-                {isHistory && (
-                  <span className="flex shrink-0 items-center gap-1 self-center text-xs font-medium text-[#075489]">
-                    {t("common.detail")}
-                    <ChevronRight className="h-4 w-4" />
-                  </span>
+
+                {inBatch && ster && (
+                  <dl className="mt-3 grid grid-cols-1 gap-x-6 gap-y-3 border-t border-gray-100 pt-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-[1fr_1.3fr_1fr_1.3fr_1.7fr]">
+                    {/* Riwayat: lama steril = dari waktu sterilisasi sampai hasilnya
+                        divalidasi (saat itulah batch dinyatakan selesai). Selagi masih
+                        menunggu validasi lamanya belum ada, jadi yang tampil waktu mulainya. */}
+                    {isHistory ? (
+                      <KolomInfo
+                        Ikon={Clock}
+                        label={t("prodSter.elapsed")}
+                        value={lamaSteril(ster.sterilized_at, ster.validated_at, t)}
+                      />
+                    ) : (
+                      <KolomInfo
+                        Ikon={Calendar}
+                        label={t("prodSter.infoSterilizedAt")}
+                        value={ster.sterilized_at ? formatDateTime(ster.sterilized_at, lang) : null}
+                      />
+                    )}
+                    <KolomInfo Ikon={Server} label={t("prodSter.infoMachine")} value={ster.machine} />
+                    <KolomInfo
+                      Ikon={Thermometer}
+                      label={t("prodSter.tempDuration")}
+                      value={
+                        [
+                          ster.temperature ? `${ster.temperature}°C` : null,
+                          ster.duration_minutes != null
+                            ? `${ster.duration_minutes} ${t("prodSter.minSuffix")}`
+                            : null,
+                        ]
+                          .filter(Boolean)
+                          .join(" • ") || null
+                      }
+                    />
+                    {/* Petugas yang menjalankan batch; pemvalidasinya menyusul di bawah
+                        setelah hasilnya divalidasi. */}
+                    <KolomInfo
+                      Ikon={User}
+                      label={t("prodSter.officer")}
+                      value={ster.processed_by}
+                      sub={ster.validated_by ? `${t("prodSter.infoValidatedBy")}: ${ster.validated_by}` : null}
+                    />
+                    {/* Hasil indikator baru ada setelah batch divalidasi. */}
+                    {isHistory && (
+                      <div className="min-w-0">
+                        <dt className="flex items-center gap-1.5 text-xs text-gray-500">
+                          <FlaskConical className="h-4 w-4 shrink-0 text-gray-400" />
+                          {t("prodSter.indicatorResult")}
+                        </dt>
+                        <dd className="mt-1 flex flex-wrap gap-2">
+                          {ster.chemical_indicator || ster.bio_indicator_test ? (
+                            <>
+                              {ster.chemical_indicator && (
+                                <ChipIndikator
+                                  label={t("prodSter.chemShort")}
+                                  value={tn(ster.chemical_indicator)}
+                                  buruk={indikatorBuruk(ster.chemical_indicator)}
+                                />
+                              )}
+                              {ster.bio_indicator_test && (
+                                <ChipIndikator
+                                  label={t("prodSter.bioTestShort")}
+                                  value={tn(ster.bio_indicator_test)}
+                                  buruk={indikatorBuruk(ster.bio_indicator_test)}
+                                />
+                              )}
+                            </>
+                          ) : (
+                            <span className="text-xs text-gray-400">—</span>
+                          )}
+                        </dd>
+                      </div>
+                    )}
+                  </dl>
                 )}
               </div>
             </div>
@@ -1085,6 +1236,57 @@ export function ProductionSterilizationTab({
         </div>
       )}
     </>
+  )
+}
+
+// Hasil indikator yang menandakan sterilisasi TIDAK lolos: kimia "Tidak Berhasil",
+// biologi "Positif" (masih ada pertumbuhan). Nilainya teks apa adanya dari server.
+function indikatorBuruk(value: string): boolean {
+  return /tidak|gagal|positif|positive|fail/i.test(value)
+}
+
+// Satu kolom keterangan pada kartu batch: ikon + label kecil, nilainya tebal di bawah.
+function KolomInfo({
+  Ikon,
+  label,
+  value,
+  sub,
+}: {
+  Ikon: React.ComponentType<{ className?: string }>
+  label: string
+  value: string | null | undefined
+  /** Keterangan kecil di bawah nilainya. */
+  sub?: string | null
+}) {
+  return (
+    <div className="min-w-0">
+      <dt className="flex items-center gap-1.5 text-xs text-gray-500">
+        <Ikon className="h-4 w-4 shrink-0 text-gray-400" />
+        {label}
+      </dt>
+      <dd className="mt-1 text-sm font-semibold text-gray-900">
+        {value || <span className="text-xs font-normal text-gray-400">—</span>}
+        {sub && <span className="mt-0.5 block text-xs font-normal text-gray-500">{sub}</span>}
+      </dd>
+    </div>
+  )
+}
+
+// Chip hasil satu indikator: hijau bila lolos, merah bila tidak.
+function ChipIndikator({ label, value, buruk }: { label: string; value: string; buruk: boolean }) {
+  return (
+    <span
+      className={
+        "inline-flex items-center gap-2 rounded-lg px-2.5 py-1 text-xs " +
+        (buruk ? "bg-red-50 text-red-600" : "bg-emerald-50 text-emerald-700")
+      }
+    >
+      {buruk ? <XCircle className="h-4 w-4 shrink-0" /> : <CheckCircle2 className="h-4 w-4 shrink-0" />}
+      <span className="leading-tight">
+        <span className="block text-gray-700">{label}</span>
+        <span className="block font-semibold">{value}</span>
+      </span>
+    </span>
   )
 }
 

@@ -799,6 +799,14 @@ export default function NafsulTransaksiPage() {
             isRowLoading={(row) =>
               deletingUuid === row.uuid || validatingUuid === row.uuid
             }
+            // Kuitansi yang BELUM divalidasi diberi latar merah supaya yang
+            // masih menunggu pemeriksaan langsung terlihat saat daftarnya
+            // digulir, tanpa harus membaca kolom Validator baris per baris.
+            rowClassName={(row) =>
+              row.validation_at === null
+                ? "border-l-4 border-l-red-600 bg-red-50 hover:bg-red-100"
+                : undefined
+            }
             emptyMessage={t("nafsulTransaksi.empty")}
           />
         )}

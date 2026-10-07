@@ -17,6 +17,7 @@ import {
   Users,
   User,
   CheckCircle2,
+  Copy,
 } from "lucide-react"
 import { Button } from "@/components/atoms/Button"
 import { Input } from "@/components/atoms/Input"
@@ -784,7 +785,7 @@ export default function TransaksiForm({ tipe }: { tipe: Tipe }) {
 
       {/* ── Rincian iuran ── */}
       <div className="rounded-2xl border border-slate-200 bg-white p-5">
-        <h2 className="mb-4 font-semibold">{t("nafsulTransaksi.lines")}</h2>
+        <h2 className="mb-4 text-sm font-semibold">{t("nafsulTransaksi.lines")}</h2>
 
         {/* Baris isian: dikosongkan lagi setiap kali rinciannya masuk daftar. */}
         {/*
@@ -827,7 +828,7 @@ export default function TransaksiForm({ tipe }: { tipe: Tipe }) {
               {ketuaTerkunci && (
                 // Alasannya disebut, bukan cuma dimatikan: kolom yang mati tanpa
                 // keterangan terbaca sebagai kerusakan, bukan aturan.
-                <p className="text-xs text-slate-400">{t("nafsulTransaksi.leaderLocked")}</p>
+                <p className="text-sm text-slate-400">{t("nafsulTransaksi.leaderLocked")}</p>
               )}
               {/*
                 Dua cara menagih, sejajar sebagai tab — baru muncul setelah
@@ -875,7 +876,7 @@ export default function TransaksiForm({ tipe }: { tipe: Tipe }) {
                             >
                               {t(`nafsulTransaksi.${judul}`)}
                             </span>
-                            <span className="block text-xs text-slate-500">
+                            <span className="block text-sm text-slate-500">
                               {t(`nafsulTransaksi.${ket}`)}
                             </span>
                           </span>
@@ -1218,10 +1219,10 @@ export default function TransaksiForm({ tipe }: { tipe: Tipe }) {
                           bisa mirip antar anggota.
                         */}
                         <span className="block truncate">
-                          <span className="mr-2 rounded bg-slate-100 px-1.5 py-0.5 text-xs font-medium tabular-nums text-slate-600">
+                          <span className="mr-2 rounded bg-slate-100 px-1.5 py-0.5 text-sm font-medium tabular-nums text-slate-600">
                             {d.member_number}
                           </span>
-                          <span className="text-[15px] font-semibold text-slate-900">
+                          <span className="text-sm font-semibold text-slate-900">
                             {d.member_name}
                           </span>
                         </span>
@@ -1230,7 +1231,7 @@ export default function TransaksiForm({ tipe }: { tipe: Tipe }) {
                           flex: pemisah "·" yang berdiri sendiri sebagai item
                           flex bisa terlempar ke baris sendiri saat sempit.
                         */}
-                        <span className="mt-1 block text-xs text-slate-500">
+                        <span className="mt-1 block text-sm text-slate-500">
                           {d.rate_label}
                           {" · "}
                           <span className="tabular-nums">
@@ -1251,7 +1252,7 @@ export default function TransaksiForm({ tipe }: { tipe: Tipe }) {
                                 `whitespace-nowrap` menjaga ikon dan angkanya
                                 tidak terpisah ke dua baris.
                               */}
-                              <span className="ml-0.5 inline-flex items-center gap-1 whitespace-nowrap rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-medium text-emerald-700 ring-1 ring-emerald-200">
+                              <span className="ml-0.5 inline-flex items-center gap-1 whitespace-nowrap rounded-full bg-emerald-50 px-2 py-0.5 text-sm font-medium text-emerald-700 ring-1 ring-emerald-200">
                                 <Gift className="h-3 w-3" />
                                 {t("nafsulTransaksi.freeMonths", {
                                   count: d.rencana.free_months,
@@ -1264,7 +1265,7 @@ export default function TransaksiForm({ tipe }: { tipe: Tipe }) {
 
                       {/* Angka yang paling sering dibandingkan antar baris —
                           dibuat paling menonjol. */}
-                      <span className="shrink-0 text-right text-base font-bold tabular-nums text-[#075489]">
+                      <span className="shrink-0 text-right text-sm font-bold tabular-nums text-[#075489]">
                         {rupiah(d.rencana.total)}
                       </span>
                     </button>
@@ -1273,7 +1274,7 @@ export default function TransaksiForm({ tipe }: { tipe: Tipe }) {
                       <div className="border-t border-slate-200 bg-white px-4 py-3">
                         {d.rencana.start_period && (
                           <>
-                            <div className="mb-2 text-xs font-medium tabular-nums text-slate-500">
+                            <div className="mb-2 text-sm font-medium tabular-nums text-slate-500">
                               {t("nafsulTransaksi.planRange", {
                                 start: d.rencana.start_period,
                                 end: d.rencana.end_period ?? d.rencana.start_period,
@@ -1284,7 +1285,7 @@ export default function TransaksiForm({ tipe }: { tipe: Tipe }) {
                               {d.rencana.transactions.map((periode) => (
                                 <span
                                   key={periode.payment_period ?? "tanpa-periode"}
-                                  className={`rounded px-1.5 py-0.5 text-xs tabular-nums ${
+                                  className={`rounded px-1.5 py-0.5 text-sm tabular-nums ${
                                     periode.free
                                       ? "bg-emerald-100 font-medium text-emerald-800"
                                       : "bg-slate-50 text-slate-600 ring-1 ring-slate-200"
@@ -1307,7 +1308,7 @@ export default function TransaksiForm({ tipe }: { tipe: Tipe }) {
                           <button
                             type="button"
                             onClick={() => ubahRincian(d)}
-                            className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-[#075489] transition-colors hover:bg-[#075489]/10"
+                            className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-sm font-medium text-[#075489] transition-colors hover:bg-[#075489]/10"
                           >
                             <Pencil className="h-3.5 w-3.5" />
                             {t("common.edit")}
@@ -1323,7 +1324,7 @@ export default function TransaksiForm({ tipe }: { tipe: Tipe }) {
                               setTerbuka((ids) => ids.filter((x) => x !== d.id))
                               setDaftar((rows) => rows.filter((x) => x.id !== d.id))
                             }}
-                            className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-red-600 transition-colors hover:bg-red-50"
+                            className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-sm font-medium text-red-600 transition-colors hover:bg-red-50"
                           >
                             <Trash2 className="h-3.5 w-3.5" />
                             {t("common.delete")}
@@ -1341,7 +1342,7 @@ export default function TransaksiForm({ tipe }: { tipe: Tipe }) {
 
       {/* ── Pembayaran ── */}
       <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
-        <h2 className="border-b border-slate-200 bg-slate-50/60 px-5 py-3.5 font-semibold text-slate-800">
+        <h2 className="border-b border-slate-200 bg-slate-50/60 px-5 py-3.5 text-sm font-semibold text-slate-800">
           {t("nafsulTransaksi.paymentSection")}
         </h2>
 
@@ -1429,7 +1430,7 @@ export default function TransaksiForm({ tipe }: { tipe: Tipe }) {
                 placeholder="0"
                 value={header.payment}
                 onValueChange={(v) => setHeader((h) => ({ ...h, payment: v }))}
-                className="h-12 text-lg font-semibold"
+                className="font-semibold"
               />
               {harusDibayar > 0 && header.payment === "" && (
                 <button
@@ -1440,8 +1441,9 @@ export default function TransaksiForm({ tipe }: { tipe: Tipe }) {
                       payment: String(Math.round(harusDibayar)),
                     }))
                   }
-                  className="text-xs font-medium text-[#075489] underline-offset-2 hover:underline"
+                  className="inline-flex items-center gap-1.5 text-left text-sm font-medium text-[#075489] underline-offset-2 hover:underline"
                 >
+                  <Copy className="h-4 w-4 shrink-0" />
                   {t("nafsulTransaksi.fillExact", { amount: rupiah(harusDibayar) })}
                 </button>
               )}
@@ -1457,7 +1459,7 @@ export default function TransaksiForm({ tipe }: { tipe: Tipe }) {
               */}
               {header.payment !== "" && (
                 <p
-                  className={`text-xs font-medium ${
+                  className={`text-sm font-medium ${
                     sisa > 0 ? "text-red-600" : "text-emerald-700"
                   }`}
                 >
@@ -1485,7 +1487,7 @@ export default function TransaksiForm({ tipe }: { tipe: Tipe }) {
             */}
             {transaksiPerAnggota.length > 1 ? (
               <div className="overflow-hidden rounded-lg border border-emerald-200">
-                <div className="border-b border-emerald-200 bg-emerald-50 px-3 py-1.5 text-center text-xs font-semibold uppercase tracking-wide text-emerald-700">
+                <div className="border-b border-emerald-200 bg-emerald-50 px-3 py-1.5 text-center text-sm font-semibold uppercase tracking-wide text-emerald-700">
                   {t("nafsulTransaksi.memberTransactions")}
                 </div>
                 <ul className="divide-y divide-slate-100">
@@ -1507,7 +1509,7 @@ export default function TransaksiForm({ tipe }: { tipe: Tipe }) {
                     : transaksiPerAnggota.map((d) => (
                     <li
                       key={d.id}
-                      className="flex items-baseline justify-between gap-3 px-3 py-1.5 text-[13px] text-slate-600"
+                      className="flex items-baseline justify-between gap-3 px-3 py-1.5 text-sm text-slate-600"
                     >
                       <span className="min-w-0 truncate">
                         <span className="tabular-nums text-slate-500">
@@ -1540,7 +1542,7 @@ export default function TransaksiForm({ tipe }: { tipe: Tipe }) {
 
             {diskonPerAnggota.length > 1 ? (
               <div className="overflow-hidden rounded-lg border border-red-200">
-                <div className="border-b border-red-200 bg-red-50 px-3 py-1.5 text-center text-xs font-semibold uppercase tracking-wide text-red-700">
+                <div className="border-b border-red-200 bg-red-50 px-3 py-1.5 text-center text-sm font-semibold uppercase tracking-wide text-red-700">
                   {t("nafsulTransaksi.discount")}
                 </div>
                 <ul className="divide-y divide-slate-100">
@@ -1557,7 +1559,7 @@ export default function TransaksiForm({ tipe }: { tipe: Tipe }) {
                     : diskonPerAnggota.map((d) => (
                     <li
                       key={d.id}
-                      className="flex items-baseline justify-between gap-3 px-3 py-1.5 text-[13px] text-slate-600"
+                      className="flex items-baseline justify-between gap-3 px-3 py-1.5 text-sm text-slate-600"
                     >
                       <span className="min-w-0 truncate">
                         <span className="tabular-nums text-slate-500">
@@ -1600,7 +1602,7 @@ export default function TransaksiForm({ tipe }: { tipe: Tipe }) {
             */}
             <div className="flex items-baseline justify-between gap-3 border-t border-slate-200 pt-2.5">
               <dt className="font-medium text-slate-700">{t("nafsulTransaksi.due")}</dt>
-              <dd className="text-xl font-bold tabular-nums text-[#075489]">
+              <dd className="text-sm font-bold tabular-nums text-[#075489]">
                 {rupiah(harusDibayar)}
               </dd>
             </div>
@@ -1621,7 +1623,7 @@ export default function TransaksiForm({ tipe }: { tipe: Tipe }) {
               </div>
             )}
             {header.payment !== "" && sisa === 0 && harusDibayar > 0 && (
-              <p className="rounded-lg bg-emerald-50 px-3 py-2 text-center text-xs font-medium text-emerald-700">
+              <p className="rounded-lg bg-emerald-50 px-3 py-2 text-center text-sm font-medium text-emerald-700">
                 {t("nafsulTransaksi.exact")}
               </p>
             )}
@@ -1638,8 +1640,10 @@ export default function TransaksiForm({ tipe }: { tipe: Tipe }) {
         membuat keduanya terbaca sebagai hal yang sama.
       */}
       {tipe === "kelompok" && (
-        <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
-          <h2 className="border-b border-slate-200 bg-slate-50/60 px-5 py-3.5 font-semibold text-slate-800">
+        // Latar teal muda, bukan putih seperti kartu lain: bagian ini catatan hak
+        // ketua, bukan bagian dari hitungan setoran di atasnya.
+        <div className="overflow-hidden rounded-2xl border border-[#4ba69d]/40 bg-[#4ba69d]/[0.08]">
+          <h2 className="border-b border-[#4ba69d]/30 bg-[#4ba69d]/15 px-5 py-3.5 text-sm font-semibold text-slate-800">
             {t("nafsulTransaksi.leaderDeduction")}
           </h2>
 
@@ -1665,9 +1669,6 @@ export default function TransaksiForm({ tipe }: { tipe: Tipe }) {
                   }))
                 }
               />
-              <p className="text-xs text-slate-500">
-                {t("nafsulTransaksi.leaderDeductionHint")}
-              </p>
             </div>
 
             <div className="space-y-1.5">
@@ -1680,13 +1681,10 @@ export default function TransaksiForm({ tipe }: { tipe: Tipe }) {
               */}
               <div
                 id="hd-jasa-ketua"
-                className="flex h-[38px] items-center rounded-lg border border-slate-200 bg-slate-50 px-4 text-sm font-medium tabular-nums text-slate-700"
+                className="flex h-[38px] items-center rounded-lg border border-[#4ba69d]/30 bg-white/60 px-4 text-sm font-medium tabular-nums text-slate-700"
               >
                 {rupiah(jasaKetua)}
               </div>
-              <p className="text-xs text-slate-500">
-                {t("nafsulTransaksi.leaderFeeHint")}
-              </p>
             </div>
 
           </div>
@@ -1786,12 +1784,12 @@ function BarisRingkas({
   t: (kunci: string, vars?: Record<string, string | number>) => string
 }) {
   return (
-    <li className="flex items-baseline justify-between gap-3 px-3 py-2 text-[13px] text-slate-600">
+    <li className="flex items-baseline justify-between gap-3 px-3 py-2 text-sm text-slate-600">
       <span className="min-w-0">
-        {atas && <span className="block truncate text-xs text-slate-400">{atas}</span>}
+        {atas && <span className="block truncate text-sm text-slate-400">{atas}</span>}
         <span className="font-medium text-slate-700">{teks}</span>
         {satuan !== null && (
-          <span className="block text-xs text-slate-400">
+          <span className="block text-sm text-slate-400">
             {t("nafsulTransaksi.recapEach", { amount: rupiah(satuan) })}
           </span>
         )}

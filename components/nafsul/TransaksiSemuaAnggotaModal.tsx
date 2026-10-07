@@ -1,9 +1,10 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { Check, CopyCheck, Save, Tags, Users, X } from "lucide-react"
+import { Check, CopyCheck, Save, Search, Tags, Users, X } from "lucide-react"
 import { Modal } from "@/components/molecules/Modal"
 import { Button } from "@/components/atoms/Button"
+import { Input } from "@/components/atoms/Input"
 import { Label } from "@/components/atoms/Label"
 import { NumberInput } from "@/components/atoms/NumberInput"
 import MasterSelect from "@/components/nafsul/MasterSelect"
@@ -72,7 +73,12 @@ export default function TransaksiSemuaAnggotaModal({
   const [loading, setLoading] = useState(true)
   const [galat, setGalat] = useState<string | null>(null)
   const [semuaBulan, setSemuaBulan] = useState("")
+  // Dialog kecil tempat jumlah bulan untuk seluruh anggota diisi.
+  const [isiSemuaOpen, setIsiSemuaOpen] = useState(false)
   const [saving, setSaving] = useState(false)
+  // Saringan daftar anggota. Hanya menyaring yang DITAMPILKAN: isian bulan
+  // anggota yang sedang tersembunyi tetap ikut dihitung & disimpan.
+  const [cari, setCari] = useState("")
 
   useEffect(() => {
     let aktif = true
@@ -118,7 +124,9 @@ export default function TransaksiSemuaAnggotaModal({
       setBaris((rows) => rows.map((b) => ({ ...b, dipilih: !semuaDipilih, galat: null })))
       return
     }
+    if (semuaBulan === "") return
     setBaris((rows) => rows.map((b) => ({ ...b, months: semuaBulan, galat: null })))
+    setIsiSemuaOpen(false)
   }
 
   async function hitung(b: Baris): Promise<RincianMassal> {
@@ -174,7 +182,18 @@ export default function TransaksiSemuaAnggotaModal({
     )
   }
 
-  const tutup = saving ? () => {} : onClose
+  const kataCari = cari.trim().toLowerCase()
+  const tampil = kataCari
+    ? baris.filter(
+        (b) =>
+          (b.anggota.nama ?? "").toLowerCase().includes(kataCari) ||
+          (b.anggota.no_anggota ?? "").toLowerCase().includes(kataCari)
+      )
+    : baris
+
+  // Selagi dialog isi-bulan terbuka, Escape hanya boleh menutup dialog ITU —
+  // kedua modal sama-sama mendengarkan tombolnya di `document`.
+  const tutup = saving || isiSemuaOpen ? () => {} : onClose
   const bisaDiisi = baris.filter((b) => !sudahAda(b.anggota)).length
   const totalBulan = sekaliBayar ? 0 : terisi.reduce((j, b) => j + Number(b.months), 0)
 
@@ -293,33 +312,58 @@ export default function TransaksiSemuaAnggotaModal({
           </div>
 
           {/* Sekali isi untuk semua — kebanyakan kelompok menyetor jumlah
-              bulan yang sama; yang berbeda tinggal dikoreksi per kartu. */}
+              bulan yang sama; yang berbeda tinggal dikoreksi per kartu.
+              Jumlah bulannya diisi di dialog tersendiri; tarif sekali bayar
+              tidak punya bulan, jadi tombolnya langsung memilih semuanya. */}
           {tarif && !loading && bisaDiisi > 0 && (
+            <Button
+              type="button"
+              onClick={sekaliBayar ? terapkanSemua : () => setIsiSemuaOpen(true)}
+              disabled={saving}
+              className="shrink-0 gap-1.5 bg-[#4ba69d] hover:bg-[#4ba69d]/90 text-white"
+            >
+              <CopyCheck className="h-4 w-4" />
+              {sekaliBayar ? t("nafsulTransaksi.bulkToggleAll") : t("nafsulTransaksi.bulkApply")}
+            </Button>
+          )}
+        </div>
+
+        <Modal
+          open={isiSemuaOpen}
+          onClose={() => setIsiSemuaOpen(false)}
+          title={t("nafsulTransaksi.bulkApply")}
+          size="sm"
+          footer={
             <>
-              {!sekaliBayar && (
-                <div className="space-y-1.5 md:w-48">
-                  <Label htmlFor="bulk-bulan">{t("nafsulTransaksi.bulkFillAll")}</Label>
-                  <NumberInput
-                    id="bulk-bulan"
-                    grouped={false}
-                    placeholder="12"
-                    value={semuaBulan}
-                    onValueChange={setSemuaBulan}
-                  />
-                </div>
-              )}
+              <Button type="button" variant="outline" onClick={() => setIsiSemuaOpen(false)}>
+                {t("common.cancel")}
+              </Button>
               <Button
                 type="button"
                 onClick={terapkanSemua}
-                disabled={saving || (!sekaliBayar && semuaBulan === "")}
-                className="shrink-0 gap-1.5 bg-[#4ba69d] hover:bg-[#4ba69d]/90 text-white"
+                disabled={semuaBulan === ""}
+                className="bg-[#075489] hover:bg-[#075489]/90 text-white"
               >
-                <CopyCheck className="h-4 w-4" />
-                {sekaliBayar ? t("nafsulTransaksi.bulkToggleAll") : t("nafsulTransaksi.bulkApply")}
+                {t("nafsulTransaksi.bulkApplyConfirm")}
               </Button>
             </>
-          )}
-        </div>
+          }
+        >
+          <div className="space-y-1.5">
+            <Label htmlFor="bulk-bulan">{t("nafsulTransaksi.bulkFillAll")}</Label>
+            <NumberInput
+              id="bulk-bulan"
+              grouped={false}
+              placeholder="12"
+              autoFocus
+              value={semuaBulan}
+              onValueChange={setSemuaBulan}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") terapkanSemua()
+              }}
+            />
+          </div>
+        </Modal>
 
         {/* ── Daftar anggota ── */}
         <div className="px-5 py-4 sm:px-7">
@@ -339,8 +383,24 @@ export default function TransaksiSemuaAnggotaModal({
               {t("nafsulTransaksi.bulkEmpty")}
             </p>
           ) : (
+            <>
+            <div className="relative mb-3">
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+              <Input
+                aria-label={t("nafsulTransaksi.bulkSearchPlaceholder")}
+                placeholder={t("nafsulTransaksi.bulkSearchPlaceholder")}
+                value={cari}
+                onChange={(e) => setCari(e.target.value)}
+                className="pl-9"
+              />
+            </div>
+            {tampil.length === 0 ? (
+              <p className="py-14 text-center text-sm text-slate-400">
+                {t("nafsulTransaksi.bulkSearchEmpty")}
+              </p>
+            ) : (
             <ul className="grid max-h-[48vh] gap-3 overflow-y-auto p-0.5 md:grid-cols-2">
-              {baris.map((b) => {
+              {tampil.map((b) => {
                 const ada = sudahAda(b.anggota)
                 const aktif = !ada && (sekaliBayar ? b.dipilih : Number(b.months) > 0)
 
@@ -416,6 +476,8 @@ export default function TransaksiSemuaAnggotaModal({
                 )
               })}
             </ul>
+            )}
+            </>
           )}
         </div>
       </div>

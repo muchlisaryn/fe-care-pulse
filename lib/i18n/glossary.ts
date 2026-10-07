@@ -50,6 +50,8 @@ const PHRASE: Record<string, { en: string; id: string }> = {
   "rak": { en: "Rack", id: "Rak" },
   "packaging": { en: "Packaging", id: "Kemasan" },
   "jenis kemasan": { en: "Packaging Type", id: "Jenis Kemasan" },
+  "unit": { en: "Unit", id: "Satuan" },
+  "satuan": { en: "Unit", id: "Satuan" },
   "medis": { en: "Medical", id: "Medis" },
   "icd 10": { en: "ICD 10", id: "ICD 10" },
   "instrumen": { en: "Instrument", id: "Instrumen" },

@@ -44,6 +44,9 @@ type DataTableProps<T extends object> = {
   // nama tombol) — dirender langsung sebagai isi, bukan atribut.
   emptyMessage?: ReactNode
   isRowLoading?: (row: T) => boolean
+  // Kelas tambahan per baris (mis. latar berwarna untuk status tertentu).
+  // Sertakan varian `hover:`-nya juga, kalau tidak latar hover bawaan menimpanya.
+  rowClassName?: (row: T) => string | undefined
   rowNumber?: (row: T, index: number) => ReactNode
   // Sembunyikan kolom "No" (mis. saat tabel sudah punya kolom urutan sendiri).
   hideRowNumber?: boolean
@@ -85,6 +88,7 @@ export function DataTable<T extends object>({
   extraActions,
   emptyMessage,
   isRowLoading,
+  rowClassName,
   rowNumber,
   hideRowNumber = false,
   renderExpanded,
@@ -125,7 +129,10 @@ export function DataTable<T extends object>({
         aria-expanded={open}
         aria-label={open ? t("common.collapse") : t("common.expand")}
         title={open ? t("common.collapse") : t("common.expand")}
-        className="inline-flex h-6 w-6 items-center justify-center rounded text-gray-400 transition-colors hover:bg-[#075489]/10 hover:text-[#075489] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#075489]/40"
+        // `flex`, bukan `inline-flex`: sebagai kotak inline tombolnya duduk di
+        // garis dasar teks dan menyisakan ruang turunan huruf di bawahnya, jadi
+        // panahnya tampak lebih tinggi daripada teks di kolom sebelahnya.
+        className="flex h-6 w-6 items-center justify-center rounded text-gray-400 transition-colors hover:bg-[#075489]/10 hover:text-[#075489] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#075489]/40"
       >
         {open ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
       </button>
@@ -217,7 +224,8 @@ export function DataTable<T extends object>({
                 key={i}
                 className={cn(
                   "overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm transition-opacity",
-                  rowLoading && "opacity-60"
+                  rowLoading && "opacity-60",
+                  rowClassName?.(row)
                 )}
               >
                 {showRowNumber && (
@@ -317,7 +325,8 @@ export function DataTable<T extends object>({
                       rowLoading ? "bg-gray-50 cursor-wait" : "hover:bg-gray-50",
                       // Baris yang sedang terbuka diberi latar tetap supaya
                       // terlihat menyatu dengan baris lipatannya di bawahnya.
-                      expanded && "bg-[#075489]/[0.04]"
+                      expanded && "bg-[#075489]/[0.04]",
+                      rowClassName?.(row)
                     )}
                   >
                     {showRowNumber && (
@@ -326,7 +335,7 @@ export function DataTable<T extends object>({
                       </td>
                     )}
                     {expandable && (
-                      <td className="py-3 pl-4 pr-1 align-top">{renderExpandToggle(row)}</td>
+                      <td className="py-3 pl-4 pr-1 align-middle">{renderExpandToggle(row)}</td>
                     )}
                     {columns.map((col, j) => (
                       <td key={j} className={cn("py-3 px-3 text-gray-700", col.className)}>

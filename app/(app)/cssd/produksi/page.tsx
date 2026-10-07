@@ -2,7 +2,17 @@
 
 import { Suspense, useEffect, useMemo, useRef, useState } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
-import { Trash2, Package, Search, ScanLine, AlertTriangle, Loader2, ZoomIn } from "lucide-react"
+import {
+  Trash2,
+  Package,
+  Search,
+  ScanLine,
+  AlertTriangle,
+  Loader2,
+  ZoomIn,
+  Settings,
+  ClipboardList,
+} from "lucide-react"
 import { Button } from "@/components/atoms/Button"
 import { Input } from "@/components/atoms/Input"
 import { Label } from "@/components/atoms/Label"
@@ -143,7 +153,7 @@ function ProduksiCssdPage() {
   // Sub-tampilan pada tab Cleaning: proses cleaning vs riwayat cleaning.
   const [cleanView, setCleanView] = useState<"proses" | "history">("proses")
   // Sub-tampilan pada tab Sterilisasi: proses steril / validasi hasil / gagal steril / riwayat.
-  const [sterView, setSterView] = useState<"proses" | "validasi" | "history">("proses")
+  const [sterView, setSterView] = useState<"proses" | "history">("proses")
 
   // Data pipeline (tahap Cleaning/Packaging/Sterilization) — sama seperti dulu di
   // Tracking Order, kini dipantau dari halaman Produksi.
@@ -255,12 +265,11 @@ function ProduksiCssdPage() {
     () => sterilizationItems.filter((o) => o.kind === "batch" && o.sterilization?.status !== "diproses"),
     [sterilizationItems],
   )
-  const sterActive =
-    sterView === "validasi"
-      ? sterValidasi
-      : sterView === "history"
-        ? sterHistory
-        : sterProses
+  // Proses Sterilisasi & Validasi Hasil kini SATU daftar: yang belum diproses
+  // (siap-steril) di atas, disusul batch yang menunggu validasi. Keduanya dibedakan
+  // warna garis kiri kartunya (merah / kuning), bukan lagi tab terpisah.
+  const sterBerjalan = useMemo(() => [...sterProses, ...sterValidasi], [sterProses, sterValidasi])
+  const sterActive = sterView === "history" ? sterHistory : sterBerjalan
 
   // Pagination tahap pipeline (tab non-produksi). Slice ber-tipe spesifik dihitung
   // di JSX agar props tiap Tab tidak ber-tipe union. Untuk tab Packaging & Sterilisasi,
@@ -837,11 +846,10 @@ function ProduksiCssdPage() {
           )}
           {/* Sub-tampilan tab Sterilisasi: Proses Steril / Validasi Hasil / History. */}
           {tab === "sterilization" && (
-            <div className="mb-3 inline-flex max-w-full overflow-x-auto rounded-lg border border-gray-200 p-0.5 text-sm [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+            <div className="mb-4 flex max-w-full gap-2 overflow-x-auto text-sm [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
               {([
-                { key: "proses" as const, label: t("production.viewSterilizationProcess"), count: sterProses.length },
-                { key: "validasi" as const, label: t("production.viewResultValidation"), count: sterValidasi.length },
-                { key: "history" as const, label: t("production.viewHistory"), count: sterHistory.length },
+                { key: "proses" as const, icon: Settings, label: t("production.viewSterilizationProcess"), count: sterBerjalan.length },
+                { key: "history" as const, icon: ClipboardList, label: t("production.viewHistory"), count: sterHistory.length },
               ]).map((v) => (
                 <button
                   key={v.key}
@@ -856,10 +864,13 @@ function ProduksiCssdPage() {
                     }
                   }}
                   className={
-                    "shrink-0 whitespace-nowrap rounded-md px-3 py-1.5 font-medium transition-colors " +
-                    (sterView === v.key ? "bg-[#075489] text-white" : "text-gray-600 hover:bg-gray-100")
+                    "inline-flex shrink-0 items-center gap-2 whitespace-nowrap rounded-xl border px-4 py-2 font-medium transition-colors " +
+                    (sterView === v.key
+                      ? "border-[#075489] bg-[#075489] text-white shadow-sm"
+                      : "border-gray-200 bg-gray-50 text-gray-600 hover:bg-gray-100")
                   }
                 >
+                  <v.icon className="h-4 w-4 shrink-0" />
                   {v.label} ({v.count})
                 </button>
               ))}
@@ -876,11 +887,9 @@ function ProduksiCssdPage() {
                     ? t("production.emptyPackagingHistory")
                     : t("production.emptyPackagingPending")
                   : tab === "sterilization"
-                    ? sterView === "validasi"
-                      ? t("production.emptyValidation")
-                      : sterView === "history"
-                        ? t("production.emptySterHistory")
-                        : t("production.emptySterReady")
+                    ? sterView === "history"
+                      ? t("production.emptySterHistory")
+                      : t("production.emptySterReady")
                     : tab === "cleaning"
                       ? cleanView === "history"
                         ? t("production.emptyCleaningHistory")

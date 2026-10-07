@@ -3,13 +3,19 @@
 import { useRef, useState } from "react"
 import {
   ChevronDown,
-  Package,
   CheckCircle2,
   AlertTriangle,
   XCircle,
   ListChecks,
   ZoomIn,
   X,
+  Calendar,
+  Clock,
+  Droplet,
+  FlaskConical,
+  Stethoscope,
+  Thermometer,
+  Trash2,
 } from "lucide-react"
 import { Input } from "@/components/atoms/Input"
 import { Button } from "@/components/atoms/Button"
@@ -19,6 +25,7 @@ import { Textarea } from "@/components/atoms/Textarea"
 import { SelectSearch } from "@/components/atoms/SelectSearch"
 import { Modal } from "@/components/molecules/Modal"
 import { ConfirmDialog } from "@/components/molecules/ConfirmDialog"
+import { RowActionsMenu, type RowActionItem } from "@/components/molecules/RowActionsMenu"
 import { useToast } from "@/components/molecules/ToastProvider"
 import api from "@/lib/axios"
 import { useLanguage, type Lang } from "@/lib/i18n"
@@ -51,6 +58,39 @@ function formatDate(value: string | null, lang: Lang) {
     month: "short",
     year: "numeric",
   })
+}
+
+// Tanggal + jam serba angka ("05/10/2026 14.02") — dipakai statistik di kartu batch,
+// tempat nama bulan yang dieja membuat kolomnya tidak sama lebar antar kartu.
+function formatStamp(value: string | null, lang: Lang) {
+  if (!value) return null
+  const d = new Date(value)
+  if (Number.isNaN(d.getTime())) return value
+  const tanggal = d.toLocaleDateString(localeOf(lang), {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+  })
+  const jam = d.toLocaleTimeString(localeOf(lang), { hour: "2-digit", minute: "2-digit" })
+  return `${tanggal} ${jam}`
+}
+
+// Lama pencucian dari mulai sampai selesai: "45 menit", "2 jam", "1 jam 20 menit".
+// null bila salah satu waktunya kosong atau selesainya mendahului mulainya.
+function lamaCuci(
+  mulai: string | null,
+  selesai: string | null,
+  t: (kunci: string, vars?: Record<string, string | number>) => string,
+): string | null {
+  if (!mulai || !selesai) return null
+  const selisih = new Date(selesai).getTime() - new Date(mulai).getTime()
+  if (Number.isNaN(selisih) || selisih < 0) return null
+  const menit = Math.round(selisih / 60000)
+  const jam = Math.floor(menit / 60)
+  const sisa = menit % 60
+  if (jam === 0) return t("prodClean.elapsedM", { m: sisa })
+  if (sisa === 0) return t("prodClean.elapsedH", { h: jam })
+  return t("prodClean.elapsedHM", { h: jam, m: sisa })
 }
 
 // ISO → "YYYY-MM-DDTHH:mm" untuk <input type="datetime-local"> (waktu lokal).
@@ -139,7 +179,7 @@ export function CleaningTab({
   // Operator default = user yang sedang login (untuk auto-isi ID Operator).
   const currentUser = useAppSelector((s) => s.auth.name ?? s.auth.username ?? "")
   const toast = useToast()
-  const { t } = useLanguage()
+  const { t, tn, lang } = useLanguage()
 
   const [active, setActive] = useState<CleaningOrder | null>(null)
   const [operator, setOperator] = useState("")
@@ -404,7 +444,7 @@ export function CleaningTab({
 
   return (
     <>
-      <div className="space-y-2">
+      <div className="space-y-3">
         {items.map((order) => (
           <CleaningOrderCard
             key={order.id}
@@ -431,8 +471,6 @@ export function CleaningTab({
               <p className="text-sm text-red-600">{error}</p>
             ) : canceledActive ? (
               <span className="text-xs text-gray-400">{t("prodClean.batchCanceledShort")}</span>
-            ) : washedActive ? (
-              <span className="text-xs text-gray-400">{t("prodClean.washingCompletedShort")}</span>
             ) : null}
             <div className="flex shrink-0 justify-end gap-2 sm:ml-auto">
               <Button variant="outline" onClick={() => setActive(null)}>
@@ -514,11 +552,13 @@ export function CleaningTab({
                 lalu Waktu Mulai Cuci | Jenis Deterjen. Nomor Mesin dihapus — mesin
                 dirujuk lewat pilihan Mesin Washer di atas (washer_machine_id); ID
                 Operator juga disembunyikan, terisi otomatis dari user yang login. */}
-            {!canceledActive && (
+            {/* Hanya untuk batch yang masih diproses. Pada riwayat nilainya pindah ke
+                kotak ringkasan di bawah — isian terkunci hanya mengulang hal yang sama. */}
+            {!canceledActive && !washedActive && (
             <div className="grid grid-cols-1 items-start gap-4 sm:grid-cols-2">
               <div className="space-y-1.5">
                 <Label htmlFor="wash-temp">
-                  {t("prodClean.temperature")} <span className="text-red-500">*</span>
+                  {t("prodClean.temperature")} {!washedActive && <span className="text-red-500">*</span>}
                 </Label>
                 <Input
                   id="wash-temp"
@@ -541,7 +581,7 @@ export function CleaningTab({
               </div>
               <div className="space-y-1.5">
                 <Label htmlFor="wash-duration">
-                  {t("prodClean.duration")} <span className="text-red-500">*</span>
+                  {t("prodClean.duration")} {!washedActive && <span className="text-red-500">*</span>}
                 </Label>
                 <Input
                   id="wash-duration"
@@ -565,21 +605,24 @@ export function CleaningTab({
                     </p>
                   )}
               </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="wash-time">
-                  {t("prodClean.washStart")} <span className="text-red-500">*</span>
-                </Label>
-                <Input
-                  id="wash-time"
-                  type="datetime-local"
-                  value={washedAt}
-                  onChange={(e) => setWashedAt(e.target.value)}
-                  disabled={washedActive}
-                />
-              </div>
+              {/* Pada riwayat, waktu mulai cuci sudah ada di ringkasan di bawah —
+                  isian ini hanya untuk batch yang masih diproses. */}
+              {!washedActive && (
+                <div className="space-y-1.5">
+                  <Label htmlFor="wash-time">
+                    {t("prodClean.washStart")} <span className="text-red-500">*</span>
+                  </Label>
+                  <Input
+                    id="wash-time"
+                    type="datetime-local"
+                    value={washedAt}
+                    onChange={(e) => setWashedAt(e.target.value)}
+                  />
+                </div>
+              )}
               <div className="space-y-1.5">
                 <Label htmlFor="wash-detergent">
-                  {t("prodClean.detergent")} <span className="text-red-500">*</span>
+                  {t("prodClean.detergent")} {!washedActive && <span className="text-red-500">*</span>}
                 </Label>
                 <Input
                   id="wash-detergent"
@@ -637,14 +680,38 @@ export function CleaningTab({
                 </button>
               ))}
 
+            {/* Riwayat: kapan dicuci, kapan selesai, berapa lama, dan oleh siapa. */}
             {washedActive && (
-              <div className="flex items-start gap-3 rounded-lg border border-dashed border-gray-300 bg-gray-50 px-4 py-3">
-                <Package className="mt-0.5 h-5 w-5 shrink-0 text-gray-400" />
-                <div>
-                  <p className="text-sm font-medium text-gray-700">{t("prodClean.packagingStage")}</p>
-                  <p className="text-xs text-gray-500">{t("prodClean.packagingStageDesc")}</p>
-                </div>
-              </div>
+              <dl className="grid grid-cols-1 gap-x-4 gap-y-3 rounded-lg border border-gray-200 bg-gray-50 px-4 py-3 sm:grid-cols-2">
+                {(
+                  [
+                    [t("prodClean.productionCode"), active.code_transaction ?? active.code],
+                    [t("prodClean.washStart"), formatDateTime(active.washing?.washed_at ?? null, lang)],
+                    [t("prodClean.completionTime"), formatDateTime(active.washing?.completed_at ?? null, lang)],
+                    [
+                      t("prodClean.elapsed"),
+                      lamaCuci(active.washing?.washed_at ?? null, active.washing?.completed_at ?? null, t),
+                    ],
+                    [
+                      t("prodClean.officer"),
+                      active.washing?.completed_by || active.washing?.operator || active.washing?.started_by || null,
+                    ],
+                    [t("prodClean.temperature"), active.washing?.temperature || null],
+                    [
+                      t("prodClean.duration"),
+                      active.washing?.duration_minutes != null ? String(active.washing.duration_minutes) : null,
+                    ],
+                    [t("prodClean.detergent"), active.washing?.detergent_type || null],
+                  ] as const
+                ).map(([label, value]) => (
+                  <div key={label}>
+                    <dt className="text-xs text-gray-500">{label}</dt>
+                    <dd className="text-sm font-semibold text-gray-900">
+                      {value && value !== "—" ? value : <span className="text-xs text-gray-400">—</span>}
+                    </dd>
+                  </div>
+                ))}
+              </dl>
             )}
           </div>
         )}
@@ -690,23 +757,15 @@ export function CleaningTab({
               </div>
               <p className="pt-1.5 text-sm leading-relaxed text-gray-600">
                 {t("prodClean.completeDescPre")}
+                {/* Nama instrumennya, bukan kode batch: itu yang dikenali petugas
+                    di depan mesin. Kodenya hanya cadangan bila batch tanpa rincian. */}
                 <span className="font-semibold text-gray-900">
-                  {confirmTarget.code_transaction ?? confirmTarget.code}
+                  {confirmTarget.items?.length
+                    ? confirmTarget.items.map((it) => tn(it.name)).join(", ")
+                    : confirmTarget.code_transaction ?? confirmTarget.code}
                 </span>
                 {t("prodClean.completeDescPost")}
               </p>
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="complete-time">{t("prodClean.completionTime")}</Label>
-              <Input
-                id="complete-time"
-                type="datetime-local"
-                value={completedAt}
-                readOnly
-                disabled
-                className="cursor-not-allowed bg-gray-50"
-              />
-              <p className="text-xs text-gray-400">{t("prodClean.completionTimeHint")}</p>
             </div>
           </div>
         )}
@@ -892,226 +951,349 @@ function CleaningOrderCard({
     const key = u.source === "paket" ? u.package_name : u.name
     if (key && !imageByName[key]) imageByName[key] = u.image_url
   }
-  return (
-    <div className="rounded-lg border border-gray-200">
-      <div className="flex flex-col gap-1 px-1 sm:flex-row sm:items-start">
-        <button
-          type="button"
-          onClick={onOpen}
-          className="flex min-w-0 flex-1 items-start justify-between gap-2 px-2 py-2.5 text-left"
-        >
-          <div className="flex min-w-0 items-start gap-2">
-            <div className="min-w-0 flex-1">
-              {/* Baris 1: status | kode produksi | tanggal produksi. */}
-              <div className="flex flex-wrap items-center gap-2">
-                {washed ? (
-                  <Badge variant="success">{t("prodClean.badgeWashComplete")}</Badge>
-                ) : canceled ? (
-                  <Badge variant="default">{t("prodClean.badgeCanceled")}</Badge>
-                ) : order.washing?.status === "gagal" ? (
-                  <Badge variant="danger">{t("prodClean.badgeWashFailed")}</Badge>
-                ) : inProcess ? (
-                  <Badge variant="info">{t("prodClean.badgeInProcess")}</Badge>
-                ) : (
-                  <Badge variant="warning">{t("prodClean.badgeNotProcessed")}</Badge>
-                )}
-                {!washed && !canceled && order.washing?.alert && (
-                  <Badge variant="warning">{t("prodClean.badgeCheckParams")}</Badge>
-                )}
-                <span className="font-mono text-xs font-semibold text-[#075489] bg-[#075489]/8 px-2 py-0.5 rounded">
-                  {order.code_transaction ?? order.code}
-                </span>
-                {order.processed_at && (
-                  <span className="text-xs text-gray-500">{formatDate(order.processed_at, lang)}</span>
-                )}
-              </div>
 
-              {/* Nama paket / instrumen sebagai chip — paket bisa diklik utk lihat isi.
-                  Pada kartu ringkas (History) chip tetap tampil, tapi tidak bisa diklik
-                  karena rincian isinya disembunyikan. */}
-              {order.items?.length ? (
-                <div className="mt-2.5 flex flex-wrap items-center gap-1">
-                  {order.items.slice(0, 4).map((it, i) => {
-                    const isPaket = it.type === "paket" && !compact
-                    const open = openPaket === it.name
-                    return (
-                      <span
-                        key={`${it.name}-${i}`}
-                        onClick={
-                          isPaket
-                            ? (e) => {
-                                e.stopPropagation()
-                                setOpenPaket(open ? null : it.name)
-                              }
-                            : undefined
+  const failed = order.washing?.status === "gagal"
+  // Lencana status: ikon + warna mengikuti keadaan batch.
+  const status = washed
+    ? { Ikon: CheckCircle2, label: t("prodClean.badgeWashComplete"), cls: "bg-emerald-50 text-emerald-700" }
+    : canceled
+      ? { Ikon: XCircle, label: t("prodClean.badgeCanceled"), cls: "bg-gray-100 text-gray-600" }
+      : failed
+        ? { Ikon: XCircle, label: t("prodClean.badgeWashFailed"), cls: "bg-red-50 text-red-600" }
+        : inProcess
+          ? { Ikon: Droplet, label: t("prodClean.badgeInProcess"), cls: "bg-[#4ba69d]/15 text-[#2f7f77]" }
+          : { Ikon: Clock, label: t("prodClean.badgeNotProcessed"), cls: "bg-amber-50 text-amber-700" }
+
+  // Empat parameter pencucian di sisi kanan kartu. Baru muncul setelah parameternya
+  // diisi — batch yang belum diproses tidak punya apa pun untuk ditampilkan di sana.
+  const w = order.washing
+  const stats = isWashingFilled(order)
+    ? [
+        {
+          Ikon: Thermometer,
+          cls: "bg-red-50 text-red-500",
+          label: t("prodClean.statTemp"),
+          value: w?.temperature ? `${w.temperature}°C` : null,
+        },
+        {
+          Ikon: Clock,
+          cls: "bg-blue-50 text-blue-600",
+          label: t("prodClean.statDuration"),
+          value: w?.duration_minutes != null ? `${w.duration_minutes} ${t("prodSter.minSuffix")}` : null,
+        },
+        // Batch selesai: lama pencucian (mulai → selesai). Selagi masih dicuci belum
+        // ada waktu selesainya, jadi yang ditampilkan waktu mulainya.
+        washed
+          ? {
+              Ikon: Droplet,
+              cls: "bg-sky-50 text-sky-500",
+              label: t("prodClean.elapsed"),
+              value: lamaCuci(w?.washed_at ?? null, w?.completed_at ?? null, t),
+            }
+          : {
+              Ikon: Droplet,
+              cls: "bg-sky-50 text-sky-500",
+              label: t("prodClean.statWashStart"),
+              value: formatStamp(w?.washed_at ?? null, lang),
+            },
+        {
+          Ikon: FlaskConical,
+          cls: "bg-violet-50 text-violet-600",
+          label: t("prodClean.statDetergent"),
+          value: w?.detergent_type || null,
+        },
+      ]
+    : []
+
+  // Menu titik-tiga hanya berisi Hapus, dan hanya untuk batch yang belum diproses:
+  // menghapusnya membatalkan batch itu dan mengembalikan stoknya ke semula. Batch
+  // lain tidak punya isi menu, jadi titik-tiganya tidak dirender sama sekali.
+  const bisaHapus = !washed && !canceled && !inProcess && stage === "cleaning"
+  const menu: RowActionItem[] = bisaHapus
+    ? [
+        {
+          label: t("common.delete"),
+          icon: <Trash2 className="h-3.5 w-3.5" />,
+          tone: "danger",
+          onClick: onCancel,
+        },
+      ]
+    : []
+
+  // Aksi utama. Proses (belum diproses) sejajar dengan instrumennya; Selesaikan
+  // (sedang diproses) turun ke baris mesin di kaki kartu.
+  const bisaProses = !washed && !canceled && !inProcess
+
+  const adaRincian =
+    !compact && (!!order.washing?.washer_machine?.name || !!openPaket || !!order.note)
+  const adaKaki = adaRincian || (!canceled && washed) || inProcess
+
+  return (
+    <div
+      onClick={onOpen}
+      className={
+        "cursor-pointer rounded-xl border border-gray-200 bg-white px-4 py-3.5 shadow-sm transition-shadow hover:shadow-md" +
+        // Batch yang belum diproses ditandai garis merah tebal di kiri supaya
+        // langsung terlihat di antara yang sedang berjalan.
+        (!washed && !canceled && !inProcess ? " border-l-4 border-l-red-600" : "")
+      }
+    >
+      {/* Baris 1: status | kode produksi | tanggal produksi — titik-tiga di kanan. */}
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2">
+          <span
+            className={`inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs font-medium ${status.cls}`}
+          >
+            <status.Ikon className="h-4 w-4 shrink-0" />
+            {status.label}
+          </span>
+          {!washed && !canceled && order.washing?.alert && (
+            <span className="inline-flex items-center gap-1.5 rounded-lg bg-amber-50 px-2.5 py-1 text-xs font-medium text-amber-700">
+              <AlertTriangle className="h-4 w-4 shrink-0" />
+              {t("prodClean.badgeCheckParams")}
+            </span>
+          )}
+          <span className="hidden h-5 w-px bg-gray-200 sm:block" aria-hidden />
+          <span className="rounded-lg bg-[#075489]/10 px-2.5 py-1 text-xs font-semibold text-[#075489]">
+            {order.code_transaction ?? order.code}
+          </span>
+          {order.processed_at && (
+            <>
+              <span className="hidden h-5 w-px bg-gray-200 sm:block" aria-hidden />
+              <span className="inline-flex items-center gap-1.5 text-xs text-gray-700">
+                <Calendar className="h-4 w-4 shrink-0 text-gray-400" />
+                {formatDate(order.processed_at, lang)}
+              </span>
+            </>
+          )}
+        </div>
+
+        {/* Klik di menu tidak boleh ikut membuka kartunya. Menunya dirender lewat
+            portal, tapi kliknya tetap merambat lewat pohon React sampai ke sini. */}
+        <div className="shrink-0" onClick={(e) => e.stopPropagation()}>
+          <RowActionsMenu items={menu} />
+        </div>
+      </div>
+
+      {/* Baris 2: foto + nama + jumlah di kiri; parameter pencucian & tombol
+          aksi utama di kanan, sejajar dengan instrumennya. */}
+      <div className="mt-3 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+        {/* Paket bisa diklik utk lihat isi. Pada kartu ringkas (History) tidak bisa,
+            karena rincian isinya disembunyikan. */}
+        {order.items?.length ? (
+          <div className="flex min-w-0 flex-wrap items-center gap-x-5 gap-y-2">
+            {order.items.slice(0, 4).map((it, i) => {
+              const isPaket = it.type === "paket" && !compact
+              const open = openPaket === it.name
+              return (
+                <span
+                  key={`${it.name}-${i}`}
+                  onClick={
+                    isPaket
+                      ? (e) => {
+                          e.stopPropagation()
+                          setOpenPaket(open ? null : it.name)
                         }
-                        title={
-                          isPaket
-                            ? t("prodClean.viewSetContents")
-                            : `${tn(it.name)} ×${it.quantity}`
-                        }
-                        className={
-                          "inline-flex max-w-[200px] items-center gap-1 rounded-md px-1.5 py-0.5 text-xs ring-1 " +
-                          (isPaket
-                            ? "cursor-pointer " +
-                              (open
-                                ? "bg-[#075489]/10 text-[#075489] ring-[#075489]/30"
-                                : "bg-gray-50 text-gray-700 ring-gray-200 hover:bg-gray-100")
-                            : "bg-gray-50 text-gray-700 ring-gray-200")
-                        }
-                      >
-                        {imageByName[it.name] && (
-                          // eslint-disable-next-line @next/next/no-img-element
-                          <img src={imageByName[it.name]} alt={tn(it.name)} className="h-5 w-5 shrink-0 rounded object-cover" />
-                        )}
-                        <span className="truncate font-medium">{tn(it.name)}</span>
-                        {isPaket ? (
-                          <ChevronDown className={"h-3 w-3 shrink-0 transition-transform " + (open ? "rotate-180" : "")} />
-                        ) : (
-                          <span className="shrink-0 text-gray-400">×{it.quantity}</span>
-                        )}
-                      </span>
-                    )
-                  })}
-                  {order.items.length > 4 && (
-                    <span className="rounded-md bg-[#075489]/8 px-1.5 py-0.5 text-xs font-medium text-[#075489]">
-                      {t("common.andMore", { n: order.items.length - 4 })}
+                      : undefined
+                  }
+                  title={isPaket ? t("prodClean.viewSetContents") : `${tn(it.name)} ×${it.quantity}`}
+                  className={
+                    "inline-flex min-w-0 items-center gap-3 rounded-lg " +
+                    (isPaket ? "cursor-pointer pr-1.5 hover:bg-gray-50" : "")
+                  }
+                >
+                  {imageByName[it.name] ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={imageByName[it.name]}
+                      alt={tn(it.name)}
+                      className="h-11 w-11 shrink-0 rounded-lg object-cover"
+                    />
+                  ) : (
+                    <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-[#075489]/8">
+                      <Stethoscope className="h-5 w-5 text-[#075489]" />
                     </span>
                   )}
-                </div>
-              ) : (
-                <p className="mt-2.5 truncate text-sm font-semibold text-gray-900">
-                  {tn(order.borrowed_by) || "—"}
-                </p>
-              )}
-
-              {/* Mesin cuci: nama mesin + tanggal & jam mulai cuci (di bawah nama instrumen). */}
-              {!compact && order.washing?.washer_machine?.name && (
-                <p className="mt-2.5 text-xs text-gray-500">
-                  {t("prodClean.processedByMachine")}{" "}
-                  <span className="font-medium text-gray-700">
-                    {order.washing.washer_machine.name}
+                  <span className="max-w-[220px] truncate text-sm font-bold text-gray-900">
+                    {tn(it.name)}
                   </span>
-                  {order.washing.washed_at && `, ${formatDateTime(order.washing.washed_at, lang)}`}
-                </p>
-              )}
+                  <span className="shrink-0 rounded-md bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600">
+                    ×{it.quantity}
+                  </span>
+                  {isPaket && (
+                    <ChevronDown
+                      className={
+                        "h-4 w-4 shrink-0 text-gray-400 transition-transform " + (open ? "rotate-180" : "")
+                      }
+                    />
+                  )}
+                </span>
+              )
+            })}
+            {order.items.length > 4 && (
+              <span className="rounded-md bg-[#075489]/8 px-2 py-0.5 text-xs font-medium text-[#075489]">
+                {t("common.andMore", { n: order.items.length - 4 })}
+              </span>
+            )}
+          </div>
+        ) : (
+          <p className="truncate text-sm font-bold text-gray-900">{tn(order.borrowed_by) || "—"}</p>
+        )}
 
-              {/* Rincian isi paket yang dipilih. */}
-              {!compact && openPaket && (
-                <div
-                  onClick={(e) => e.stopPropagation()}
-                  className="mt-1.5 rounded-md border border-gray-100 bg-gray-50 px-2 py-1.5"
-                >
-                  <p className="mb-1 text-[11px] font-semibold text-gray-500">
-                    {t("prodClean.paketContents", { name: tn(openPaket) })}
-                  </p>
-                  <div className="flex flex-wrap gap-1.5">
-                    {paketBreakdown(order, openPaket, t("common.instrument")).map((p) => (
-                      <span
-                        key={p.name}
-                        className="inline-flex items-center gap-1.5 rounded-md bg-white py-1 pl-1 pr-2 text-[11px] text-gray-600 ring-1 ring-gray-200"
-                      >
-                        {imageByName[p.name] ? (
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation()
-                              setZoom({ url: imageByName[p.name], name: tn(p.name) })
-                            }}
-                            title={t("prodSter.clickToEnlarge")}
-                            className="group relative h-7 w-7 shrink-0 cursor-zoom-in overflow-hidden rounded-md border border-gray-200"
-                          >
-                            {/* eslint-disable-next-line @next/next/no-img-element */}
-                            <img
-                              src={imageByName[p.name]}
-                              alt={tn(p.name)}
-                              className="h-full w-full object-cover transition-transform group-hover:scale-105"
-                            />
-                            <span className="absolute inset-0 flex items-center justify-center bg-black/0 text-white opacity-0 transition group-hover:bg-black/30 group-hover:opacity-100">
-                              <ZoomIn className="h-3 w-3" />
-                            </span>
-                          </button>
-                        ) : (
-                          <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-[#075489]/8">
-                            <Package className="h-3.5 w-3.5 text-[#075489]" />
-                          </span>
-                        )}
-                        <span className="font-medium text-gray-800">{tn(p.name)}</span>
-                        <span className="text-gray-400">×{p.qty}</span>
-                      </span>
-                    ))}
+        {(stats.length > 0 || bisaProses) && (
+          <div className="flex flex-wrap items-center gap-x-5 gap-y-3 lg:shrink-0 lg:justify-end">
+          {stats.length > 0 && (
+            <dl className="flex flex-wrap items-center gap-x-5 gap-y-2 lg:shrink-0 lg:justify-end lg:divide-x lg:divide-gray-200">
+              {stats.map((st) => (
+                <div key={st.label} className="flex items-center gap-2.5 lg:pl-5 lg:first:pl-0">
+                  <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${st.cls}`}>
+                    <st.Ikon className="h-4 w-4" />
+                  </span>
+                  <div className="min-w-0">
+                    <dt className="text-xs text-gray-500">{st.label}</dt>
+                    <dd className="text-sm font-semibold text-gray-900">
+                      {st.value ?? <span className="text-xs text-gray-400">—</span>}
+                    </dd>
                   </div>
                 </div>
-              )}
+              ))}
+            </dl>
+          )}
 
-              {/* Catatan (opsional) dari tahap Mulai Produksi. */}
-              {!compact && order.note && (
-                <p className="mt-1.5 text-xs text-gray-500">
-                  <span className="font-medium text-gray-600">{t("prodClean.noteLabel")}</span>{" "}
-                  {order.note}
-                </p>
-              )}
+            {bisaProses && (
+              <div className="shrink-0" onClick={(e) => e.stopPropagation()}>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={onOpen}
+                  className="border-[#075489] text-[#075489] hover:bg-[#075489]/10"
+                >
+                  {t("prodClean.process")}
+                </Button>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
 
-              {/* Tanggal produksi tampil di samping kode & waktu cuci di baris mesin;
-                  di sini cukup tampilkan waktu selesai cuci saat batch sudah selesai. */}
-              {!canceled && washed && (
-                <div className="mt-1 flex flex-wrap gap-x-4 gap-y-0.5 text-xs text-gray-500">
-                  <span>
-                    {t("prodClean.washCompletedAt")}{" "}
-                    {formatDateTime(order.washing?.completed_at ?? null, lang)}
-                  </span>
+      {adaKaki && (
+        <div className="mt-3 space-y-1.5 border-t border-gray-100 pt-2.5">
+          {/* Mesin cuci yang dipakai — waktu mulainya sudah ada di statistik di atas.
+              Tombol Selesaikan sejajar di ujung kanan baris ini. */}
+          {((!compact && order.washing?.washer_machine?.name) || inProcess) && (
+            <div className="flex items-center justify-between gap-3">
+              <p className="min-w-0 text-xs text-gray-500">
+                {!compact && order.washing?.washer_machine?.name && (
+                  <>
+                    {t("prodClean.processedByMachine")}{" "}
+                    <span className="font-medium text-gray-700">{order.washing.washer_machine.name}</span>
+                  </>
+                )}
+              </p>
+              {inProcess && (
+                <div className="shrink-0" onClick={(e) => e.stopPropagation()}>
+                  <Button
+                    type="button"
+                    size="sm"
+                    onClick={onComplete}
+                    disabled={completing}
+                    className="bg-[#075489] text-white hover:bg-[#075489]/90"
+                  >
+                    {completing ? t("production.processing") : t("prodClean.complete")}
+                  </Button>
                 </div>
               )}
             </div>
-          </div>
-        </button>
-        <div className="mb-2 mr-2 flex shrink-0 items-center justify-end gap-1.5 sm:mb-0 sm:mr-1 sm:mt-1.5 sm:self-center">
-          {washed || canceled ? null : (
-            inProcess ? (
-              <button
-                type="button"
-                onClick={onComplete}
-                disabled={completing}
-                className="rounded-md border border-[#075489] bg-[#075489] px-2 py-1 text-xs font-medium text-white hover:bg-[#075489]/90 disabled:opacity-60"
-              >
-                {completing ? t("production.processing") : t("prodClean.complete")}
-              </button>
-            ) : (
-              <>
-                {/* Belum diproses → boleh dibatalkan (stok kembali ke semula). */}
-                {stage === "cleaning" && (
-                  <button
-                    type="button"
-                    onClick={onCancel}
-                    className="rounded-md border border-red-300 px-2 py-1 text-xs font-medium text-red-600 hover:bg-red-50"
+          )}
+
+          {/* Rincian isi paket yang dipilih. */}
+          {!compact && openPaket && (
+            <div
+              onClick={(e) => e.stopPropagation()}
+              className="cursor-default rounded-md border border-gray-100 bg-gray-50 px-2 py-1.5"
+            >
+              <p className="mb-1 text-[11px] font-semibold text-gray-500">
+                {t("prodClean.paketContents", { name: tn(openPaket) })}
+              </p>
+              <div className="flex flex-wrap gap-1.5">
+                {paketBreakdown(order, openPaket, t("common.instrument")).map((p) => (
+                  <span
+                    key={p.name}
+                    className="inline-flex items-center gap-1.5 rounded-md bg-white py-1 pl-1 pr-2 text-[11px] text-gray-600 ring-1 ring-gray-200"
                   >
-                    {t("common.cancel")}
-                  </button>
-                )}
-                <button
-                  type="button"
-                  onClick={onOpen}
-                  className="rounded-md border border-[#075489] px-2 py-1 text-xs font-medium text-[#075489] hover:bg-[#075489]/10"
-                >
-                  {t("prodClean.process")}
-                </button>
-              </>
-            )
+                    {imageByName[p.name] ? (
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          setZoom({ url: imageByName[p.name], name: tn(p.name) })
+                        }}
+                        title={t("prodSter.clickToEnlarge")}
+                        className="group relative h-7 w-7 shrink-0 cursor-zoom-in overflow-hidden rounded-md border border-gray-200"
+                      >
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          src={imageByName[p.name]}
+                          alt={tn(p.name)}
+                          className="h-full w-full object-cover transition-transform group-hover:scale-105"
+                        />
+                        <span className="absolute inset-0 flex items-center justify-center bg-black/0 text-white opacity-0 transition group-hover:bg-black/30 group-hover:opacity-100">
+                          <ZoomIn className="h-3 w-3" />
+                        </span>
+                      </button>
+                    ) : (
+                      <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-[#075489]/8">
+                        <Stethoscope className="h-3.5 w-3.5 text-[#075489]" />
+                      </span>
+                    )}
+                    <span className="font-medium text-gray-800">{tn(p.name)}</span>
+                    <span className="text-gray-400">×{p.qty}</span>
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Catatan (opsional) dari tahap Mulai Produksi. */}
+          {!compact && order.note && (
+            <p className="text-xs text-gray-500">
+              <span className="font-medium text-gray-600">{t("prodClean.noteLabel")}</span> {order.note}
+            </p>
+          )}
+
+          {!canceled && washed && (
+            <p className="text-xs text-gray-500">
+              {t("prodClean.washCompletedAt")} {formatDateTime(order.washing?.completed_at ?? null, lang)}
+              {order.washing?.completed_by && (
+                <>
+                  {" "}
+                  {t("prodClean.washCompletedBy")}{" "}
+                  <span className="font-medium text-gray-700">{order.washing.completed_by}</span>
+                </>
+              )}
+            </p>
           )}
         </div>
-      </div>
+      )}
 
       {/* Zoom foto instrumen isi set — overlay layar penuh */}
       {zoom && (
         <div
-          className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 p-4"
-          onClick={() => setZoom(null)}
+          className="fixed inset-0 z-[60] flex cursor-default items-center justify-center bg-black/70 p-4"
+          onClick={(e) => {
+            e.stopPropagation()
+            setZoom(null)
+          }}
           role="dialog"
           aria-modal="true"
         >
           <button
             type="button"
-            onClick={() => setZoom(null)}
+            onClick={(e) => {
+              e.stopPropagation()
+              setZoom(null)
+            }}
             className="absolute right-4 top-4 rounded-full bg-white/10 p-2 text-white hover:bg-white/20"
             title={t("common.close")}
           >
@@ -1198,7 +1380,7 @@ function InstrumentList({
                       </span>
                     </button>
                   ) : (
-                    <Package className="h-4 w-4 shrink-0 text-[#075489]" />
+                    <Stethoscope className="h-4 w-4 shrink-0 text-[#075489]" />
                   )}
                   <span className="truncate text-sm font-medium text-gray-800">{g.name}</span>
                   {g.kind === "paket" && <Badge variant="info">{t("common.package")}</Badge>}
