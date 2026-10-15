@@ -48,9 +48,26 @@ export type OrderRequestItem = {
   type: "satuan" | "paket"
   instrument_id: number | null
   instrument_catalog_id: number | null
+  bmhp_id?: number | null
+  package_bmhp_id?: number | null
   package_name: string | null
+  item_name?: string | null
   quantity: number
   instrument?: { id: number; code: string; name: string } | null
+  bmhp?: { id: number; code: string; name: string; unit?: string } | null
+  package_bmhp?: {
+    id: number
+    code: string
+    name: string
+    items?: {
+      bmhp_id?: number
+      instrument_id?: number
+      qty?: number
+      quantity?: number
+      bmhp?: { id: number; code: string; name: string } | null
+      instrument?: { id: number; code: string; name: string } | null
+    }[]
+  } | null
   catalog?: {
     id: number
     code: string
@@ -67,6 +84,7 @@ export type OrderRequestItem = {
 export type Order = {
   id: number
   code: string
+  order_type?: "cssd" | "bmhp"
   // Kode transaksi barcode — null sampai order diterima CSSD (status keluar dari "diajukan").
   code_transaction: string | null
   room_id: number

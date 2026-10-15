@@ -26,6 +26,9 @@ import {
   Circle,
   Wallet,
   HandCoins,
+  Boxes,
+  Factory,
+  Package,
   type LucideIcon,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
@@ -55,6 +58,9 @@ const ICON_MAP: Record<string, LucideIcon> = {
   wallet: Wallet,
   "hand-coins": HandCoins,
   "file-text": FileText,
+  production: Boxes,
+  factory: Factory,
+  package: Package,
 }
 
 function getIcon(name: string | null): LucideIcon {

@@ -27,6 +27,7 @@ export type PaketCatalog = {
   items_count?: number
   available_sets?: number // set yang bisa dipenuhi dari stok tersedia
   available_sterile_sets?: number // set yang bisa dipenuhi dari stok STERIL
+  items?: PaketItem[]
 }
 
 /** Rincian isi paket (jenis instrumen + jumlah per set), dari endpoint show katalog. */

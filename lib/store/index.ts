@@ -30,6 +30,7 @@ import sterilizePipelineReducer from "./slices/sterilizePipelineSlice"
 import productionPackagingReducer from "./slices/productionPackagingSlice"
 import productionSterilizeReducer from "./slices/productionSterilizeSlice"
 import storageReducer from "./slices/storageSlice"
+import storageBmhpReducer from "./slices/storageBmhpSlice"
 import sterileExpiryReducer from "./slices/sterileExpirySlice"
 import distributeReducer from "./slices/distributeSlice"
 import trackingCountReducer from "./slices/trackingCountSlice"
@@ -65,6 +66,7 @@ export const store = configureStore({
     productionPackaging: productionPackagingReducer,
     productionSterilize: productionSterilizeReducer,
     storage: storageReducer,
+    storageBmhp: storageBmhpReducer,
     sterileExpiry: sterileExpiryReducer,
     distribute: distributeReducer,
     trackingCount: trackingCountReducer,

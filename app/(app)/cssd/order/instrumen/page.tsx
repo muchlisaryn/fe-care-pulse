@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react"
 import Link from "next/link"
-import { Search, ChevronRight, ArrowLeftRight, Loader2 } from "lucide-react"
+import { Search, ChevronRight, ArrowLeftRight, Loader2, Wrench, Package } from "lucide-react"
 import { Button } from "@/components/atoms/Button"
 import { Badge } from "@/components/atoms/Badge"
 import { Input } from "@/components/atoms/Input"
@@ -199,6 +199,8 @@ export default function OrderInstrumenPage() {
   const [searchInput, setSearchInput] = useState(search)
   const [deleteTarget, setDeleteTarget] = useState<Order | null>(null)
   const [deletingId, setDeletingId] = useState<number | null>(null)
+  // Pilihan jenis order (CSSD vs BMHP) sebelum masuk ke form tambah.
+  const [pilihJenis, setPilihJenis] = useState(false)
 
   // Hasil aksi yang MENGUBAH daftar order: buat order (pesannya dititipkan dari
   // halaman Tambah) dan hapus order. Aksi lain (ubah status, permintaan pinjam)
@@ -675,14 +677,23 @@ export default function OrderInstrumenPage() {
       // belum ada, tampilkan no. order sebagai gantinya — hanya satu kode per baris.
       cell: (row) => {
         const invoice = row.status !== "diajukan" ? row.code_transaction : null
-        return invoice ? (
-          <span className="font-mono text-xs font-semibold text-[#4ba69d] bg-[#4ba69d]/10 px-2 py-1 rounded w-fit inline-block">
-            {invoice}
-          </span>
-        ) : (
-          <span className="font-mono text-xs font-semibold text-[#075489] bg-[#075489]/8 px-2 py-1 rounded w-fit inline-block">
-            {row.code}
-          </span>
+        return (
+          <div className="flex flex-col gap-1 items-start">
+            {invoice ? (
+              <span className="font-mono text-xs font-semibold text-[#4ba69d] bg-[#4ba69d]/10 px-2 py-1 rounded w-fit inline-block">
+                {invoice}
+              </span>
+            ) : (
+              <span className="font-mono text-xs font-semibold text-[#075489] bg-[#075489]/8 px-2 py-1 rounded w-fit inline-block">
+                {row.code}
+              </span>
+            )}
+            {row.order_type === "bmhp" && (
+              <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold bg-amber-50 text-amber-700 border border-amber-200">
+                BMHP
+              </span>
+            )}
+          </div>
         )
       },
       className: "w-36",
@@ -764,11 +775,12 @@ export default function OrderInstrumenPage() {
           >
             {t("orderInstrument.borrowInstrument")}
           </Button>
-          <Link href="/cssd/order/instrumen/tambah">
-            <Button className="w-full bg-[#075489] hover:bg-[#075489]/90 text-white sm:w-auto">
-              {t("orderInstrument.createOrder")}
-            </Button>
-          </Link>
+          <Button
+            onClick={() => setPilihJenis(true)}
+            className="w-full bg-[#075489] hover:bg-[#075489]/90 text-white sm:w-auto"
+          >
+            {t("orderInstrument.createOrder")}
+          </Button>
         </div>
       </div>
 
@@ -1371,9 +1383,15 @@ export default function OrderInstrumenPage() {
                 </p>
                 <div className="space-y-2">
                   {detail.request_items.map((r) => {
-                    const hasContents =
-                      r.type === "paket" && !!r.catalog?.items && r.catalog.items.length > 0
+                    const catalogItems = (r.catalog?.items ?? r.package_bmhp?.items ?? []) as any[]
+                    const hasContents = r.type === "paket" && catalogItems.length > 0
                     const open = expandedReq.has(r.id)
+                    const pkgName = r.package_name || r.package_bmhp?.name || r.catalog?.name || t("common.package")
+                    const singleName =
+                      r.bmhp?.name ||
+                      r.item_name ||
+                      r.instrument?.name ||
+                      t("orderInstrument.instrumentFallback", { id: r.instrument_id ?? r.bmhp_id ?? "?" })
                     return (
                       <div key={r.id} className="rounded-lg border border-gray-200">
                         {/* Paket: klik untuk buka/tutup isi paket */}
@@ -1391,7 +1409,7 @@ export default function OrderInstrumenPage() {
                               />
                               <Badge variant="info">{t("common.package")}</Badge>
                               <span className="text-sm font-medium text-gray-800">
-                                {tn(r.package_name) || tn(r.catalog?.name) || t("common.package")}
+                                {tn(pkgName)}
                               </span>
                             </div>
                             {/* Paket diminta dalam satuan SET (satu set = satu bungkus). */}
@@ -1404,10 +1422,7 @@ export default function OrderInstrumenPage() {
                             <div className="flex items-center gap-2">
                               <Badge variant="default">{t("common.single")}</Badge>
                               <span className="text-sm font-medium text-gray-800">
-                                {tn(r.instrument?.name) ||
-                                  t("orderInstrument.instrumentFallback", {
-                                    id: r.instrument_id ?? "?",
-                                  })}
+                                {tn(singleName)}
                               </span>
                             </div>
                             <span className="text-xs text-gray-500">
@@ -1419,22 +1434,26 @@ export default function OrderInstrumenPage() {
                         {/* Isi paket — tampil saat baris dibuka */}
                         {r.type === "paket" && open && hasContents && (
                           <ul className="divide-y divide-gray-50 border-t border-gray-100 bg-gray-50/60">
-                            {r.catalog!.items!.map((ci) => (
-                              <li
-                                key={ci.instrument_id}
-                                className="flex items-center justify-between px-3 py-1.5 text-sm"
-                              >
-                                <span className="pl-6 text-gray-600">
-                                  {tn(ci.instrument?.name) ||
-                                    t("orderInstrument.instrumentFallback", {
-                                      id: ci.instrument_id,
-                                    })}
-                                </span>
-                                <span className="text-xs font-semibold text-gray-700">
-                                  {ci.quantity * r.quantity}
-                                </span>
-                              </li>
-                            ))}
+                            {catalogItems.map((ci) => {
+                              const itName = ci.instrument?.name ?? ci.bmhp?.name
+                              const itId = ci.instrument_id ?? ci.bmhp_id ?? ci.id
+                              return (
+                                <li
+                                  key={itId}
+                                  className="flex items-center justify-between px-3 py-1.5 text-sm"
+                                >
+                                  <span className="pl-6 text-gray-600">
+                                    {tn(itName) ||
+                                      t("orderInstrument.instrumentFallback", {
+                                        id: itId,
+                                      })}
+                                  </span>
+                                  <span className="text-xs font-semibold text-gray-700">
+                                    {(ci.quantity ?? ci.qty ?? 1) * r.quantity}
+                                  </span>
+                                </li>
+                              )
+                            })}
                           </ul>
                         )}
                         {r.type === "paket" && open && !hasContents && (
@@ -1510,6 +1529,52 @@ export default function OrderInstrumenPage() {
             </div>
           </div>
         ) : null}
+      </Modal>
+
+      {/*
+        Pilihan jenis order: CSSD atau BMHP — modal pemilihan jenis sebelum masuk
+        ke formulir tambah order, sama seperti alur di transaksi Nafshul.
+      */}
+      <Modal
+        open={pilihJenis}
+        onClose={() => setPilihJenis(false)}
+        title={t("orderInstrument.pickTypeTitle")}
+        size="sm"
+      >
+        <div className="space-y-2.5">
+          {[
+            {
+              tipe: "cssd" as const,
+              label: t("orderInstrument.typeCssd"),
+              desc: t("orderInstrument.typeCssdDesc"),
+              href: "/cssd/order/instrumen/tambah?type=cssd",
+              icon: Wrench,
+            },
+            {
+              tipe: "bmhp" as const,
+              label: t("orderInstrument.typeBmhp"),
+              desc: t("orderInstrument.typeBmhpDesc"),
+              href: "/cssd/order/instrumen/tambah?type=bmhp",
+              icon: Package,
+            },
+          ].map(({ tipe, label, desc, href, icon: Ikon }) => (
+            <Link
+              key={tipe}
+              href={href}
+              onClick={() => setPilihJenis(false)}
+              className="flex items-center gap-3 rounded-xl border border-[#075489]/25 bg-[#075489]/5 px-4 py-3 transition-colors hover:border-[#075489] hover:bg-[#075489]/10"
+            >
+              <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-[#075489] text-white">
+                <Ikon className="h-5 w-5" />
+              </span>
+              <div className="min-w-0 flex-1">
+                <p className="font-medium text-[#075489]">{label}</p>
+                {desc && <p className="text-xs text-slate-500">{desc}</p>}
+              </div>
+              <ChevronRight className="h-4 w-4 shrink-0 text-[#075489]/60" />
+            </Link>
+          ))}
+        </div>
       </Modal>
 
       {/* Hasil aksi: order berhasil dibuat / dihapus — beserta pesan bila gagal */}

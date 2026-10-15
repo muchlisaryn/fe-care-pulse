@@ -1,7 +1,7 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
-import { useRouter } from "next/navigation"
+import { Suspense, useEffect, useMemo, useState } from "react"
+import { useRouter, useSearchParams } from "next/navigation"
 import { UserPlus } from "lucide-react"
 import { Button } from "@/components/atoms/Button"
 import { Input } from "@/components/atoms/Input"
@@ -30,10 +30,14 @@ import {
 import api from "@/lib/axios"
 import { useT } from "@/lib/i18n"
 
-export default function TambahOrderInstrumenPage() {
+function TambahOrderInstrumenContent() {
   const router = useRouter()
+  const searchParams = useSearchParams()
   const dispatch = useAppDispatch()
   const t = useT()
+
+  const orderType = (searchParams.get("type") === "bmhp" ? "bmhp" : "cssd") as "cssd" | "bmhp"
+  const isBmhp = orderType === "bmhp"
 
   const rooms = useAppSelector((s) => s.rooms.options)
   // Pilihan ruangan di-cache di Redux: `optionsLoaded` baru true setelah
@@ -85,39 +89,58 @@ export default function TambahOrderInstrumenPage() {
 
     let active = true
 
-    // Muat SEMUA jenis instrumen (lintas halaman) — endpoint paginate(20).
-    ;(async () => {
-      try {
-        const collected: InstrumentType[] = []
-        let cur = 1
-        let last = 1
-        do {
-          const res = await api.get("/master/instruments", { params: { page: cur } })
-          const p = res.data.data
-          collected.push(...p.data)
-          last = p.last_page
-          cur += 1
-        } while (cur <= last && active)
-        if (active) setInstruments(collected)
-      } finally {
-        if (active) setInstrumentLoading(false)
-      }
-    })()
+    if (isBmhp) {
+      setInstrumentLoading(true)
+      setCatalogLoading(true)
+      api
+        .get("/master/storage-bmhp/order-options")
+        .then((res) => {
+          if (active) {
+            setInstruments(res.data.data.instruments ?? [])
+            setCatalogs(res.data.data.catalogs ?? [])
+          }
+        })
+        .finally(() => {
+          if (active) {
+            setInstrumentLoading(false)
+            setCatalogLoading(false)
+          }
+        })
+    } else {
+      // Muat SEMUA jenis instrumen (lintas halaman) — endpoint paginate(20).
+      ;(async () => {
+        try {
+          const collected: InstrumentType[] = []
+          let cur = 1
+          let last = 1
+          do {
+            const res = await api.get("/master/instruments", { params: { page: cur } })
+            const p = res.data.data
+            collected.push(...p.data)
+            last = p.last_page
+            cur += 1
+          } while (cur <= last && active)
+          if (active) setInstruments(collected)
+        } finally {
+          if (active) setInstrumentLoading(false)
+        }
+      })()
 
-    // Daftar katalog paket (Master › Katalog Instrumen, tipe `paket`)
-    api
-      .get("/master/instrument-catalogs", { params: { type: "paket" } })
-      .then((res) => {
-        if (active) setCatalogs(res.data.data.data)
-      })
-      .finally(() => {
-        if (active) setCatalogLoading(false)
-      })
+      // Daftar katalog paket (Master › Katalog Instrumen, tipe `paket`)
+      api
+        .get("/master/instrument-catalogs", { params: { type: "paket" } })
+        .then((res) => {
+          if (active) setCatalogs(res.data.data.data)
+        })
+        .finally(() => {
+          if (active) setCatalogLoading(false)
+        })
+    }
 
     return () => {
       active = false
     }
-  }, [dispatch])
+  }, [dispatch, isBmhp])
 
   // Prefill tanggal & jam pinjam dengan waktu sekarang (tetap bisa diubah manual).
   // Sengaja lewat efek, BUKAN nilai awal useState: jam dihitung dari waktu perangkat,
@@ -262,6 +285,7 @@ export default function TambahOrderInstrumenPage() {
       // pasien dalam SATU transaksi, jadi tidak ada order yang tersimpan sebagian
       // bila salah satunya gagal.
       await api.post("/master/orders/bulk", {
+        order_type: orderType,
         room_id: Number(roomId),
         borrowed_by: borrowerName,
         order_date: orderDate,
@@ -276,13 +300,16 @@ export default function TambahOrderInstrumenPage() {
             r.type === "paket"
               ? {
                   type: "paket",
-                  instrument_catalog_id: r.refId,
-                  package_name: r.name,
+                  ...(isBmhp
+                    ? { package_bmhp_id: r.refId, package_name: r.name }
+                    : { instrument_catalog_id: r.refId, package_name: r.name }),
                   quantity: Number(r.quantity),
                 }
               : {
                   type: "satuan",
-                  instrument_id: r.refId,
+                  ...(isBmhp
+                    ? { bmhp_id: r.refId, name: r.name }
+                    : { instrument_id: r.refId }),
                   quantity: Number(r.quantity),
                 },
           ),
@@ -292,8 +319,12 @@ export default function TambahOrderInstrumenPage() {
       // Modal "berhasil" muncul di halaman daftar setelah redirect.
       setOrderFlash(
         patients.length > 1
-          ? t("orderCreate.createdMany", { n: patients.length })
-          : t("orderCreate.createdOne"),
+          ? isBmhp
+            ? t("orderCreate.createdManyBmhp")
+            : t("orderCreate.createdMany", { n: patients.length })
+          : isBmhp
+            ? t("orderCreate.createdOneBmhp")
+            : t("orderCreate.createdOne"),
       )
       router.push("/cssd/order/instrumen")
     } catch (err) {
@@ -311,8 +342,8 @@ export default function TambahOrderInstrumenPage() {
   return (
     <div className="space-y-6">
       <PageHeader
-        title={t("orderCreate.title")}
-        subtitle={t("orderCreate.subtitle")}
+        title={isBmhp ? t("orderCreate.titleBmhp") : t("orderCreate.title")}
+        subtitle={isBmhp ? t("orderCreate.subtitleBmhp") : t("orderCreate.subtitle")}
       />
 
       {/* Data peminjaman — SATU kotak berisi peminjam, jadwal & catatan. Ketiganya
@@ -431,6 +462,7 @@ export default function TambahOrderInstrumenPage() {
             catalogs={catalogs}
             instrumentLoading={instrumentLoading}
             catalogLoading={catalogLoading}
+            orderType={orderType}
             sterileAvailFor={sterileAvailFor}
             usedByOthers={(type, refId) => usedByOthers(p.id, type, refId)}
             onError={setFormError}
@@ -483,6 +515,14 @@ export default function TambahOrderInstrumenPage() {
         actionLabel={t("common.close")}
       />
     </div>
+  )
+}
+
+export default function TambahOrderInstrumenPage() {
+  return (
+    <Suspense fallback={<div className="py-10 text-center text-sm text-gray-400">Loading...</div>}>
+      <TambahOrderInstrumenContent />
+    </Suspense>
   )
 }
 

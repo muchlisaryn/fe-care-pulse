@@ -39,6 +39,8 @@ type PatientRequestCardProps = {
   catalogs: PaketCatalog[]
   instrumentLoading: boolean
   catalogLoading: boolean
+  /** Jenis order: cssd (instrumen) atau bmhp. */
+  orderType?: "cssd" | "bmhp"
   /** Stok steril total satu instrumen/paket (belum dikurangi isi form). */
   sterileAvailFor: (type: AddMode, refId: number) => number
   /** Jumlah yang sudah dipesan pasien LAIN pada form ini — ikut mengurangi stok. */
@@ -66,11 +68,13 @@ export function PatientRequestCard({
   catalogs,
   instrumentLoading,
   catalogLoading,
+  orderType = "cssd",
   sterileAvailFor,
   usedByOthers,
   onError,
 }: PatientRequestCardProps) {
   const t = useT()
+  const isBmhp = orderType === "bmhp"
   // Mode penambahan: per jenis instrumen (satuan) atau per paket (katalog tipe paket).
   const [addMode, setAddMode] = useState<AddMode>("satuan")
   const [newInstrumentId, setNewInstrumentId] = useState("")
@@ -169,6 +173,11 @@ export function PatientRequestCard({
       setPaketItems([])
       return
     }
+    const cat = catalogs.find((c) => String(c.id) === catalogId)
+    if (cat?.items && cat.items.length > 0) {
+      setPaketItems(cat.items)
+      return
+    }
     setLoadingPaketItems(true)
     try {
       const res = await api.get(`/master/instrument-catalogs/${catalogId}`)
@@ -196,7 +205,9 @@ export function PatientRequestCard({
     }
     onError(null)
     const contents: PaketContent[] = paketItems.map((it) => ({
-      name: it.instrument?.name ?? t("patientCard.instrumentFallback", { id: it.instrument_id }),
+      name:
+        it.instrument?.name ??
+        (isBmhp ? `BMHP #${it.instrument_id}` : t("patientCard.instrumentFallback", { id: it.instrument_id })),
       perSet: it.quantity,
     }))
     addRequest("paket", cat.id, cat.name, qty, contents)
@@ -336,28 +347,28 @@ export function PatientRequestCard({
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-[1fr_8rem_auto] lg:items-end">
           {addMode === "satuan" ? (
             <div className="space-y-1.5">
-              <Label>{t("patientCard.instrumentType")}</Label>
+              <Label>{isBmhp ? t("patientCard.bmhpType") : t("patientCard.instrumentType")}</Label>
               <SelectSearch
                 options={instrumentOptions}
                 value={newInstrumentId}
                 onChange={setNewInstrumentId}
                 loading={instrumentLoading}
                 disabled={instrumentLoading}
-                placeholder={t("patientCard.selectInstrument")}
-                searchPlaceholder={t("patientCard.searchInstrument")}
+                placeholder={isBmhp ? t("patientCard.selectBmhp") : t("patientCard.selectInstrument")}
+                searchPlaceholder={isBmhp ? t("patientCard.searchBmhp") : t("patientCard.searchInstrument")}
               />
             </div>
           ) : (
             <div className="space-y-1.5">
-              <Label>{t("patientCard.packageCatalog")}</Label>
+              <Label>{isBmhp ? t("patientCard.packageBmhp") : t("patientCard.packageCatalog")}</Label>
               <SelectSearch
                 options={catalogOptions}
                 value={newCatalogId}
                 onChange={handleSelectCatalog}
                 loading={catalogLoading}
                 disabled={catalogLoading}
-                placeholder={t("patientCard.selectPackage")}
-                searchPlaceholder={t("patientCard.searchPackage")}
+                placeholder={isBmhp ? t("patientCard.selectPackageBmhp") : t("patientCard.selectPackage")}
+                searchPlaceholder={isBmhp ? t("patientCard.searchPackageBmhp") : t("patientCard.searchPackage")}
               />
             </div>
           )}
@@ -388,7 +399,7 @@ export function PatientRequestCard({
               className="shrink-0 bg-[#075489] text-white hover:bg-[#075489]/90"
             >
               <Plus className="h-4 w-4" />
-              {t("patientCard.addPackage")}
+              {isBmhp ? t("patientCard.addPackageBmhp") : t("patientCard.addPackage")}
             </Button>
           )}
         </div>
