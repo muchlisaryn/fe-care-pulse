@@ -1,7 +1,7 @@
 "use client"
 
 import Link from "next/link"
-import { usePathname } from "next/navigation"
+import { usePathname, useRouter } from "next/navigation"
 import { useState, useRef, useEffect } from "react"
 import { createPortal } from "react-dom"
 import {
@@ -29,8 +29,10 @@ import {
   Boxes,
   Factory,
   Package,
+  Search,
   type LucideIcon,
 } from "lucide-react"
+import { Input } from "@/components/atoms/Input"
 import { cn } from "@/lib/utils"
 import { useLanguage } from "@/lib/i18n"
 import { useAppSelector } from "@/lib/store/hooks"
@@ -99,13 +101,14 @@ function NotifBadge({ count, className }: { count: number; className?: string })
 
 export function Sidebar({ className, collapsed = false, onExpand, onClose }: SidebarProps) {
   const pathname = usePathname()
+  const router = useRouter()
   const rawMenus = useAppSelector((s) => s.auth.menus)
   const incomingCount = useAppSelector((s) => s.notif.incomingCount)
   // Nama menu & judul seksi datang dari database dan bisa berubah kapan saja, jadi
   // diterjemahkan lewat glosarium (`tn`), bukan kamus statis. Kunci React tetap
   // memakai nama ASLI supaya status buka/tutup menu tidak ikut ter-reset saat
   // bahasanya diganti.
-  const { tn } = useLanguage()
+  const { t, tn } = useLanguage()
 
   // Badge untuk sebuah menu: bila menu (atau salah satu submenunya) mengarah ke
   // halaman order masuk, tampilkan jumlah order masuk.
@@ -120,6 +123,85 @@ export function Sidebar({ className, collapsed = false, onExpand, onClose }: Sid
   }))
 
   const [openMenus, setOpenMenus] = useState<Record<string, boolean>>({})
+
+  // ── Search ───────────────────────────────────────────────────────────────────
+  // Filter langsung saat mengetik (bukan tombol Cari seperti halaman list): datanya
+  // sudah ada di store, jadi tidak ada request yang perlu ditahan.
+  const [search, setSearch] = useState("")
+  const searchRef = useRef<HTMLInputElement>(null)
+  // Ikon search di mode collapsed membuka sidebar; fokus menyusul setelah input-nya
+  // ter-render.
+  const focusSearchOnExpand = useRef(false)
+  const query = search.trim().toLowerCase()
+
+  // Cocokkan nama asli DAN terjemahannya, supaya "Gudang" maupun "Storage" ketemu.
+  function matches(name: string | null | undefined): boolean {
+    if (!name) return false
+    return name.toLowerCase().includes(query) || tn(name).toLowerCase().includes(query)
+  }
+
+  // Judul seksi cocok → seluruh seksi tampil. Menu cocok → tampil dengan semua
+  // submenunya. Selain itu menu hanya tampil bila ada submenu yang cocok, dan
+  // submenunya disaring ke yang cocok saja.
+  const visibleSections =
+    !query || collapsed
+      ? sections
+      : sections
+          .map((section) => {
+            if (matches(section.title_menu)) return section
+            const menus = section.menus.flatMap((menu) => {
+              if (matches(menu.name)) return [menu]
+              const subs = menu.menu?.filter((sub) => sub.url && matches(sub.name)) ?? []
+              return subs.length > 0 ? [{ ...menu, menu: subs }] : []
+            })
+            return { ...section, menus }
+          })
+          .filter((section) => section.menus.length > 0)
+
+  function firstResultUrl(): string | null {
+    for (const section of visibleSections) {
+      for (const menu of section.menus) {
+        const hasSubs = !!(menu.menu && menu.menu.length > 0) && !menu.url
+        const url = hasSubs ? menu.menu!.find((sub) => sub.url)?.url : menu.url
+        if (url) return url
+      }
+    }
+    return null
+  }
+
+  function handleSearchKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
+    if (e.key === "Escape") {
+      setSearch("")
+      return
+    }
+    if (e.key === "Enter") {
+      e.preventDefault()
+      const url = firstResultUrl()
+      if (!url) return
+      router.push(url)
+      onClose?.()
+    }
+  }
+
+  function expandToSearch() {
+    focusSearchOnExpand.current = true
+    onExpand?.()
+  }
+
+  useEffect(() => {
+    if (!collapsed && focusSearchOnExpand.current) {
+      focusSearchOnExpand.current = false
+      searchRef.current?.focus()
+    }
+  }, [collapsed])
+
+  // Pindah halaman → pencarian selesai, sidebar kembali utuh. Di-reset saat render
+  // (bukan di effect) supaya tidak ada render tambahan dengan hasil pencarian lama.
+  const [searchPath, setSearchPath] = useState(pathname)
+  if (searchPath !== pathname) {
+    setSearchPath(pathname)
+    setSearch("")
+  }
 
   function isActivePath(path: string | null): boolean {
     if (!path) return false
@@ -197,7 +279,8 @@ export function Sidebar({ className, collapsed = false, onExpand, onClose }: Sid
     // disembunyikan dari sidebar utama — dipakai untuk sidebar kedua, mis. Pengaturan).
     const hasSubs = !!(menu.menu && menu.menu.length > 0) && !menu.url
     const active = isMenuActive(menu)
-    const isOpen = openMenus[key] ?? menu.is_open
+    // Saat mencari, semua grup hasil dibuka supaya submenu yang cocok terlihat.
+    const isOpen = query ? true : (openMenus[key] ?? menu.is_open)
 
     if (hasSubs) {
       return (
@@ -385,9 +468,54 @@ export function Sidebar({ className, collapsed = false, onExpand, onClose }: Sid
         </div>
       )}
 
+      <div className="mb-2 px-2">
+        {collapsed ? (
+          <button
+            type="button"
+            onClick={expandToSearch}
+            aria-label={t("sidebar.searchPlaceholder")}
+            title={t("sidebar.searchPlaceholder")}
+            className="flex w-full items-center justify-center rounded-lg px-2.5 py-2.5 text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-900"
+          >
+            <Search className="h-5 w-5 shrink-0" />
+          </button>
+        ) : (
+          <div className="relative">
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+            <Input
+              ref={searchRef}
+              type="text"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              onKeyDown={handleSearchKeyDown}
+              placeholder={t("sidebar.searchPlaceholder")}
+              aria-label={t("sidebar.searchPlaceholder")}
+              className="py-1.5 pl-9 pr-8"
+            />
+            {search && (
+              <button
+                type="button"
+                onClick={() => {
+                  setSearch("")
+                  searchRef.current?.focus()
+                }}
+                aria-label={t("sidebar.clearSearch")}
+                title={t("sidebar.clearSearch")}
+                className="absolute right-2 top-1/2 flex h-5 w-5 -translate-y-1/2 items-center justify-center rounded text-gray-400 hover:text-gray-600"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            )}
+          </div>
+        )}
+      </div>
+
       <nav className="flex flex-1 flex-col overflow-y-auto overflow-x-hidden">
         <div className="flex flex-col gap-1 px-2">
-          {sections.map((section, i) => {
+          {query && !collapsed && visibleSections.length === 0 && (
+            <p className="px-3 py-6 text-center text-sm text-gray-400">{t("sidebar.noResults")}</p>
+          )}
+          {visibleSections.map((section, i) => {
             const sectionKey = section.title_menu ?? `group-${i}`
             return collapsed ? (
               <div key={sectionKey} className="flex flex-col gap-0.5">

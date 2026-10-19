@@ -1144,8 +1144,11 @@ function CleaningOrderCard({
           <div className="flex flex-wrap items-center gap-x-5 gap-y-3 lg:shrink-0 lg:justify-end">
           {stats.length > 0 && (
             <dl className="flex flex-wrap items-center gap-x-5 gap-y-2 lg:shrink-0 lg:justify-end lg:divide-x lg:divide-gray-200">
+              {/* Tailwind v4: divide-x menaruh garis di sisi KANAN tiap item (kecuali
+                  terakhir), jadi jaraknya ke teks diberi lewat pr-5 — sama dengan
+                  gap-x-5 di sisi lain garis, supaya garisnya tepat di tengah. */}
               {stats.map((st) => (
-                <div key={st.label} className="flex items-center gap-2.5 lg:pl-5 lg:first:pl-0">
+                <div key={st.label} className="flex items-center gap-2.5 lg:pr-5 lg:last:pr-0">
                   <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${st.cls}`}>
                     <st.Ikon className="h-4 w-4" />
                   </span>

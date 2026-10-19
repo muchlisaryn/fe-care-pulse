@@ -5,9 +5,7 @@ import { Search, WashingMachine } from "lucide-react"
 import { Button } from "@/components/atoms/Button"
 import { Input } from "@/components/atoms/Input"
 import { Label } from "@/components/atoms/Label"
-import { Select } from "@/components/atoms/Select"
 import { Textarea } from "@/components/atoms/Textarea"
-import { Badge } from "@/components/atoms/Badge"
 import { Card } from "@/components/molecules/Card"
 import { DataTable, type Column } from "@/components/molecules/DataTable"
 import { Modal } from "@/components/molecules/Modal"
@@ -22,14 +20,16 @@ import {
   type SterilizerMachine,
 } from "@/lib/store/slices/sterilizerMachineSlice"
 import api from "@/lib/axios"
+import { apiErrorMessage } from "@/lib/apiError"
 import { useT } from "@/lib/i18n"
 
+// Status tidak ada di form — mesin baru selalu aktif (diatur backend).
 const emptyForm = {
+  code: "",
   name: "",
   location: "",
   temperature: "",
   duration_minutes: "",
-  status: "aktif",
   note: "",
 }
 
@@ -45,6 +45,7 @@ export default function MasterSterilizerMachinePage() {
   const [form, setForm] = useState(emptyForm)
   const [editId, setEditId] = useState<number | null>(null)
   const [saving, setSaving] = useState(false)
+  const [saveError, setSaveError] = useState<string | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<SterilizerMachine | null>(null)
   const [deletingId, setDeletingId] = useState<number | null>(null)
 
@@ -59,18 +60,20 @@ export default function MasterSterilizerMachinePage() {
   }
 
   function openTambah() {
+    setSaveError(null)
     setForm(emptyForm)
     setEditId(null)
     setModal("tambah")
   }
 
   function openEdit(row: SterilizerMachine) {
+    setSaveError(null)
     setForm({
+      code: row.code,
       name: row.name,
       location: row.location ?? "",
       temperature: row.temperature ?? "",
       duration_minutes: row.duration_minutes?.toString() ?? "",
-      status: row.status,
       note: row.note ?? "",
     })
     setEditId(row.id)
@@ -78,16 +81,17 @@ export default function MasterSterilizerMachinePage() {
   }
 
   async function handleSave() {
-    if (!form.name.trim()) return
+    if (!form.code.trim() || !form.name.trim()) return
     setSaving(true)
+    setSaveError(null)
     try {
       const num = (v: string) => (v.trim() === "" ? null : Number(v))
       const payload = {
+        code: form.code.trim(),
         name: form.name.trim(),
         location: form.location.trim() || null,
         temperature: num(form.temperature),
         duration_minutes: num(form.duration_minutes),
-        status: form.status,
         note: form.note.trim() || null,
       }
       if (modal === "tambah") {
@@ -97,6 +101,9 @@ export default function MasterSterilizerMachinePage() {
       }
       dispatch(invalidateSterilizerMachines())
       setModal(null)
+    } catch (err) {
+      // Mis. kode sudah dipakai mesin lain (422) — tampilkan di modal.
+      setSaveError(apiErrorMessage(err))
     } finally {
       setSaving(false)
     }
@@ -145,15 +152,6 @@ export default function MasterSterilizerMachinePage() {
       header: t("machine.colDuration"),
       cell: (row) => <span className="text-gray-700">{fmtValue(row.duration_minutes, " " + t("common.minutesShort"))}</span>,
       className: "w-28",
-    },
-    {
-      header: t("common.status"),
-      cell: (row) => (
-        <Badge variant={row.status === "aktif" ? "success" : "default"}>
-          {row.status === "aktif" ? t("common.active") : t("common.inactive")}
-        </Badge>
-      ),
-      className: "w-24",
     },
   ]
 
@@ -236,7 +234,7 @@ export default function MasterSterilizerMachinePage() {
             </Button>
             <Button
               onClick={handleSave}
-              disabled={saving || !form.name.trim()}
+              disabled={saving || !form.code.trim() || !form.name.trim()}
               className="bg-[#075489] hover:bg-[#075489]/90 text-white"
             >
               {saving ? t("common.saving") : t("common.save")}
@@ -245,6 +243,22 @@ export default function MasterSterilizerMachinePage() {
         }
       >
         <div className="space-y-4">
+          {saveError && (
+            <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600">{saveError}</p>
+          )}
+          {/* Kode diketik manual — dipakai juga sebagai awalan kode batch sterilisasi. */}
+          <div className="space-y-1.5">
+            <Label htmlFor="sm-code">
+              {t("common.code")} <span className="text-red-500">*</span>
+            </Label>
+            <Input
+              id="sm-code"
+              placeholder={t("machine.sterilizerCodePlaceholder")}
+              value={form.code}
+              maxLength={50}
+              onChange={(e) => setForm((f) => ({ ...f, code: e.target.value.toUpperCase() }))}
+            />
+          </div>
           <div className="space-y-1.5">
             <Label htmlFor="sm-name">{t("machine.colName")}</Label>
             <Input
@@ -286,17 +300,6 @@ export default function MasterSterilizerMachinePage() {
                 onChange={(e) => setForm((f) => ({ ...f, duration_minutes: e.target.value }))}
               />
             </div>
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="sm-status">{t("common.status")}</Label>
-            <Select
-              id="sm-status"
-              value={form.status}
-              onChange={(e) => setForm((f) => ({ ...f, status: e.target.value }))}
-            >
-              <option value="aktif">{t("common.active")}</option>
-              <option value="nonaktif">{t("common.inactive")}</option>
-            </Select>
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="sm-note">{t("common.description")}</Label>

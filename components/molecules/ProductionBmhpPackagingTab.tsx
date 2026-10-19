@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
+import { useMemo, useRef, useState } from "react"
 import {
   PackageCheck,
   Printer,
@@ -10,8 +10,9 @@ import {
   CheckCircle2,
   Tag,
   Clock,
-  Sparkles,
   Boxes,
+  RotateCcw,
+  AlertTriangle,
 } from "lucide-react"
 import { Button } from "@/components/atoms/Button"
 import { Badge } from "@/components/atoms/Badge"
@@ -19,9 +20,14 @@ import { Input } from "@/components/atoms/Input"
 import { Label } from "@/components/atoms/Label"
 import { SelectSearch } from "@/components/atoms/SelectSearch"
 import { Modal } from "@/components/molecules/Modal"
+import { DateRangeFields } from "@/components/molecules/DateRangeFields"
+import { Pagination } from "@/components/molecules/Pagination"
 import { Barcode } from "@/components/atoms/Barcode"
 import { useToast } from "@/components/molecules/ToastProvider"
 import { useLanguage } from "@/lib/i18n"
+import { usePagedList } from "@/lib/usePagedList"
+import { packagingContents } from "@/lib/bmhpPackaging"
+import { rentangSemingguTerakhir } from "@/lib/dateRange"
 import api from "@/lib/axios"
 
 export type PackagingBmhpItem = {
@@ -73,28 +79,46 @@ export type PackagingBmhpRecord = {
   items?: PackagingBmhpItem[]
 }
 
-type Props = {
-  onGoToSterilization: () => void
-}
-
-export function ProductionBmhpPackagingTab({ onGoToSterilization }: Props) {
+export function ProductionBmhpPackagingTab() {
   const toast = useToast()
   const { t } = useLanguage()
 
-  const [loading, setLoading] = useState(true)
-  const [items, setItems] = useState<PackagingBmhpRecord[]>([])
-  const [search, setSearch] = useState("")
+  // Filter: `draft` = isi form; baru diterapkan (`filter`) saat form Cari disubmit.
+  // Rentang tanggal (tgl kemasan dibuat) bawaannya seminggu terakhir.
+  const [defaultFilter] = useState(() => {
+    const { from, to } = rentangSemingguTerakhir()
+    return { search: "", dateFrom: from, dateTo: to }
+  })
+  const [draft, setDraft] = useState(defaultFilter)
+  const [filter, setFilter] = useState(defaultFilter)
+  const isFiltered =
+    filter.search !== defaultFilter.search ||
+    filter.dateFrom !== defaultFilter.dateFrom ||
+    filter.dateTo !== defaultFilter.dateTo
 
-  // Master jenis kemasan
+  // Antrean ber-pagination: hanya halaman yang dibuka yang diambil (20 per halaman).
+  const { items, loading, page, setPage, totalPages, totalItems, perPage, reload } =
+    usePagedList<PackagingBmhpRecord>(
+      "/master/production-bmhp/packaging",
+      {
+        search: filter.search || undefined,
+        date_from: filter.dateFrom || undefined,
+        date_to: filter.dateTo || undefined,
+      },
+      () => toast.error("Gagal memuat daftar antrean pengemasan BMHP."),
+    )
+
+  // Master jenis kemasan — baru diambil saat modal pengemasan pertama kali dibuka.
   const [packagingTypes, setPackagingTypes] = useState<
-    { id: number; name: string; shelf_life_days: number }[]
+    { value: number; label: string; shelf_life_days: number }[]
   >([])
+  const [packagingTypesLoading, setPackagingTypesLoading] = useState(false)
+  const packagingTypesLoadedRef = useRef(false)
 
   // Modal Inspeksi & Pengemasan
   const [packagingModalItem, setPackagingModalItem] = useState<PackagingBmhpRecord | null>(null)
   const [selectedTypeId, setSelectedTypeId] = useState<string>("")
   const [chemicalIndicator, setChemicalIndicator] = useState<string>("")
-  const [operator, setOperator] = useState<string>("")
   const [packNote, setPackNote] = useState<string>("")
   const [completing, setCompleting] = useState(false)
 
@@ -114,40 +138,46 @@ export function ProductionBmhpPackagingTab({ onGoToSterilization }: Props) {
     }[]
   } | null>(null)
 
-  async function loadData() {
+  async function loadPackagingTypes() {
+    if (packagingTypesLoadedRef.current || packagingTypesLoading) return
+    setPackagingTypesLoading(true)
     try {
-      setLoading(true)
-      const [resPkg, resCand] = await Promise.all([
-        api.get("/master/production-bmhp/packaging", { params: { search: search || undefined } }),
-        api.get("/master/production-bmhp/candidates"),
-      ])
-      setItems(resPkg.data?.data ?? [])
-      setPackagingTypes(resCand.data?.data?.packaging_types ?? [])
+      const res = await api.get("/master/packaging-types/options")
+      setPackagingTypes(res.data?.data ?? [])
+      packagingTypesLoadedRef.current = true
     } catch {
-      toast.error("Gagal memuat daftar antrean pengemasan BMHP.")
+      toast.error("Gagal memuat daftar jenis kemasan.")
     } finally {
-      setLoading(false)
+      setPackagingTypesLoading(false)
     }
   }
 
-  useEffect(() => {
-    loadData()
-  }, [search])
+  function handleSearch(e: React.FormEvent) {
+    e.preventDefault()
+    setFilter(draft)
+    setPage(1)
+  }
+
+  function resetFilter() {
+    setDraft(defaultFilter)
+    setFilter(defaultFilter)
+    setPage(1)
+  }
 
   const typeOptions = useMemo(
     () =>
       packagingTypes.map((pt) => ({
-        value: String(pt.id),
-        label: `${pt.name} (Masa simpan: ${pt.shelf_life_days} hari)`,
+        value: String(pt.value),
+        label: `${pt.label} (Masa simpan: ${pt.shelf_life_days} hari)`,
       })),
     [packagingTypes],
   )
 
   function openPackagingModal(record: PackagingBmhpRecord) {
+    loadPackagingTypes()
     setPackagingModalItem(record)
     setSelectedTypeId(record.packaging_type_id ? String(record.packaging_type_id) : "")
     setChemicalIndicator(record.chemical_indicator ?? "")
-    setOperator(record.operator ?? "")
     setPackNote(record.note ?? "")
   }
 
@@ -164,10 +194,10 @@ export function ProductionBmhpPackagingTab({ onGoToSterilization }: Props) {
 
     setCompleting(true)
     try {
+      // Petugas pengemas tidak diisi manual — backend memakai nama user yang login.
       const payload = {
         packaging_type_id: Number(selectedTypeId),
         chemical_indicator: chemicalIndicator.trim(),
-        operator: operator.trim() || undefined,
         note: packNote.trim() || undefined,
       }
 
@@ -187,7 +217,7 @@ export function ProductionBmhpPackagingTab({ onGoToSterilization }: Props) {
         })
       }
 
-      loadData()
+      reload()
     } catch (err: unknown) {
       const e = err as { response?: { data?: { message?: string } } }
       toast.error(e.response?.data?.message ?? "Gagal menyelesaikan pengemasan.")
@@ -200,7 +230,7 @@ export function ProductionBmhpPackagingTab({ onGoToSterilization }: Props) {
     const labels = (record.items ?? []).map((it) => {
       const pi = it.production_item
       return {
-        label_code: `${record.prefix} ${record.code}${pi?.package_no ? ` ${pi.package_no}` : ""}`,
+        label_code: `${record.prefix}${record.code}${pi?.package_no ? ` ${pi.package_no}` : ""}`,
         barcode_no: it.barcode_no,
         title: pi?.name ?? "BMHP",
         kind: pi?.source ?? "satuan",
@@ -221,26 +251,51 @@ export function ProductionBmhpPackagingTab({ onGoToSterilization }: Props) {
   return (
     <div className="space-y-6">
       {/* Header bar & Search */}
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div className="relative max-w-sm flex-1">
+      <form
+        onSubmit={handleSearch}
+        className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-[minmax(0,1fr)_10.5rem_10.5rem_auto] lg:items-end"
+      >
+        <div className="relative sm:col-span-2 lg:col-span-1">
           <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
           <Input
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
+            value={draft.search}
+            onChange={(e) => setDraft((d) => ({ ...d, search: e.target.value }))}
             placeholder="Cari kode batch, produksi, atau item..."
             className="pl-9"
           />
         </div>
-
-        <Button
-          type="button"
-          onClick={loadData}
-          variant="outline"
-          className="text-xs text-gray-600"
-        >
-          Muat Ulang
-        </Button>
-      </div>
+        <DateRangeFields
+          from={draft.dateFrom}
+          to={draft.dateTo}
+          onFromChange={(v) => setDraft((d) => ({ ...d, dateFrom: v }))}
+          onToChange={(v) => setDraft((d) => ({ ...d, dateTo: v }))}
+        />
+        <div className="flex gap-2 sm:col-span-2 lg:col-span-1">
+          <Button type="submit" className="flex-1 bg-[#075489] text-white hover:bg-[#075489]/90 lg:flex-none">
+            {t("common.search")}
+          </Button>
+          {isFiltered && (
+            <Button
+              type="button"
+              onClick={resetFilter}
+              variant="outline"
+              title={t("common.reset")}
+              aria-label={t("common.reset")}
+              className="shrink-0 text-gray-600"
+            >
+              <RotateCcw className="h-4 w-4" />
+            </Button>
+          )}
+          <Button
+            type="button"
+            onClick={reload}
+            variant="outline"
+            className="shrink-0 text-xs text-gray-600"
+          >
+            Muat Ulang
+          </Button>
+        </div>
+      </form>
 
       {/* Tabel Daftar Pengemasan */}
       {loading ? (
@@ -301,9 +356,9 @@ export function ProductionBmhpPackagingTab({ onGoToSterilization }: Props) {
                         Rincian Item BMHP
                       </div>
                       <div className="flex flex-wrap gap-2">
-                        {pkg.production?.items?.map((it) => (
+                        {packagingContents(pkg.items).map((it) => (
                           <div
-                            key={it.id}
+                            key={`${it.name}|${it.unit_name ?? ""}`}
                             className="inline-flex items-center gap-1.5 rounded-lg border border-gray-100 bg-gray-50 px-3 py-1.5 text-xs font-medium text-gray-800"
                           >
                             <Boxes className="h-3.5 w-3.5 text-[#075489]" />
@@ -322,32 +377,27 @@ export function ProductionBmhpPackagingTab({ onGoToSterilization }: Props) {
                           <strong>{pkg.expiry_date ?? "-"}</strong>
                         </div>
                       )}
+
+                      {/* Kemasan GS- = kemas ulang otomatis setelah batch gagal steril. */}
+                      {pkg.prefix.startsWith("GS-") && pkg.note && (
+                        <div className="mt-2 inline-flex items-center gap-1.5 rounded-md bg-red-50 px-2 py-1 text-xs font-medium text-red-700">
+                          <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+                          {pkg.note}
+                        </div>
+                      )}
                     </div>
 
                     <div className="flex items-center justify-end gap-2 md:col-span-4">
                       {isCompleted ? (
-                        <>
-                          <Button
-                            type="button"
-                            variant="outline"
-                            onClick={() => handleViewLabels(pkg)}
-                            className="text-xs text-[#075489] hover:bg-blue-50"
-                          >
-                            <Printer className="mr-1.5 h-3.5 w-3.5" />
-                            Cetak Label
-                          </Button>
-
-                          {pkg.status === "selesai" && (
-                            <Button
-                              type="button"
-                              onClick={onGoToSterilization}
-                              className="bg-[#075489] text-xs text-white hover:bg-[#064775]"
-                            >
-                              <Sparkles className="mr-1.5 h-3.5 w-3.5" />
-                              Ke Sterilisasi
-                            </Button>
-                          )}
-                        </>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          onClick={() => handleViewLabels(pkg)}
+                          className="text-xs text-[#075489] hover:bg-blue-50"
+                        >
+                          <Printer className="mr-1.5 h-3.5 w-3.5" />
+                          Cetak Label
+                        </Button>
                       ) : (
                         <Button
                           type="button"
@@ -364,6 +414,13 @@ export function ProductionBmhpPackagingTab({ onGoToSterilization }: Props) {
               </div>
             )
           })}
+          <Pagination
+            currentPage={page}
+            totalPages={totalPages}
+            totalItems={totalItems}
+            itemsPerPage={perPage}
+            onPageChange={setPage}
+          />
         </div>
       )}
 
@@ -396,7 +453,7 @@ export function ProductionBmhpPackagingTab({ onGoToSterilization }: Props) {
                 value={selectedTypeId}
                 onChange={(v) => setSelectedTypeId(v)}
                 options={typeOptions}
-                placeholder="Pilih jenis kemasan..."
+                placeholder={packagingTypesLoading ? t("common.loading") : "Pilih jenis kemasan..."}
               />
               <p className="mt-1 text-[11px] text-gray-500">
                 Jenis kemasan menentukan masa simpan steril (tgl kedaluwarsa otomatis).
@@ -412,16 +469,6 @@ export function ProductionBmhpPackagingTab({ onGoToSterilization }: Props) {
                 value={chemicalIndicator}
                 onChange={(e) => setChemicalIndicator(e.target.value)}
                 placeholder="Contoh: LOT-CHEM-2026-001"
-              />
-            </div>
-
-            <div>
-              <Label htmlFor="op-name">Nama Petugas Pengemas</Label>
-              <Input
-                id="op-name"
-                value={operator}
-                onChange={(e) => setOperator(e.target.value)}
-                placeholder="Nama operator yang melakukan pengemasan..."
               />
             </div>
 

@@ -111,6 +111,9 @@ export const dictionary = {
     },
     sidebar: {
       toggle: "Toggle sidebar",
+      searchPlaceholder: "Search menu...",
+      clearSearch: "Clear search",
+      noResults: "No menu found",
     },
     storage: {
       title: "Sterile Storage",
@@ -176,15 +179,15 @@ export const dictionary = {
       statExpired: "Already Expired",
       tabToStore: "To Be Stored",
       tabInventory: "Storage Inventory",
-      searchIncoming: "Search batch / operator / machine...",
-      searchInventory: "Search barcode, BMHP name, rack, or batch...",
+      searchIncoming: "Search packaging code / operator / machine...",
+      searchInventory: "Search barcode, BMHP name, rack, or packaging code...",
       noMatchingBatch: "No matching batch.",
       noIncoming: "No sterile BMHP batch needs storing yet.",
       noMatchingInstrument: "No matching BMHP.",
       noInventory: "No BMHP in sterile storage yet.",
       byRack: "By Rack",
-      byBatch: "By Batch",
-      batchPrefix: "Batch",
+      byBatch: "By Packaging",
+      batchPrefix: "Packaging",
       expiry: "Expiry",
       storedOf: "{stored}/{total} stored",
       storeOnRack: "Store on Rack",
@@ -281,8 +284,11 @@ export const dictionary = {
     },
     productionBmhp: {
       title: "BMHP Production",
-      subtitle:
-        "BMHP production and sterilization pipeline — without cleaning stage",
+      sterAll: "All",
+      sterPending: "Not Processed",
+      sterWaiting: "Awaiting Validation",
+      sterDone: "Processed",
+      sterEmpty: "No BMHP sterilization data yet.",
     },
     production: {
       title: "CSSD Production",
@@ -1003,6 +1009,7 @@ export const dictionary = {
       sterilizerModalAdd: "Add Sterilizer Machine",
       sterilizerModalEdit: "Edit Sterilizer Machine",
       sterilizerNamePlaceholder: "Example: Autoclave 1",
+      sterilizerCodePlaceholder: "Example: AUT01",
       sterilizerLocationPlaceholder: "Example: Sterilization Room",
     },
     masterRack: {
@@ -2601,6 +2608,9 @@ export const dictionary = {
     },
     sidebar: {
       toggle: "Buka/tutup sidebar",
+      searchPlaceholder: "Cari menu...",
+      clearSearch: "Hapus pencarian",
+      noResults: "Menu tidak ditemukan",
     },
     storage: {
       title: "Gudang Steril",
@@ -2666,15 +2676,15 @@ export const dictionary = {
       statExpired: "Sudah Kedaluwarsa",
       tabToStore: "Perlu Disimpan",
       tabInventory: "Inventaris Gudang",
-      searchIncoming: "Cari nomor batch / operator / mesin...",
-      searchInventory: "Cari barcode, nama BMHP, rak, atau batch...",
+      searchIncoming: "Cari kode kemasan / operator / mesin...",
+      searchInventory: "Cari barcode, nama BMHP, rak, atau kode kemasan...",
       noMatchingBatch: "Tidak ada batch yang cocok.",
       noIncoming: "Belum ada batch BMHP steril yang perlu disimpan.",
       noMatchingInstrument: "Tidak ada BMHP yang cocok.",
       noInventory: "Belum ada BMHP di gudang steril.",
       byRack: "Per Rak",
-      byBatch: "Per Batch",
-      batchPrefix: "Batch",
+      byBatch: "Per Kemasan",
+      batchPrefix: "Kemasan",
       expiry: "Kedaluwarsa",
       storedOf: "{stored}/{total} tersimpan",
       storeOnRack: "Simpan ke Rak",
@@ -2771,8 +2781,11 @@ export const dictionary = {
     },
     productionBmhp: {
       title: "Produksi BMHP",
-      subtitle:
-        "Alur produksi dan sterilisasi Bahan Medis Habis Pakai (BMHP) — tanpa tahap pencucian",
+      sterAll: "Semua",
+      sterPending: "Belum Diproses",
+      sterWaiting: "Menunggu Validasi",
+      sterDone: "Sudah Diproses",
+      sterEmpty: "Belum ada data sterilisasi BMHP.",
     },
     production: {
       title: "Produksi CSSD",
@@ -3493,6 +3506,7 @@ export const dictionary = {
       sterilizerModalAdd: "Tambah Mesin Sterilisator",
       sterilizerModalEdit: "Edit Mesin Sterilisator",
       sterilizerNamePlaceholder: "Contoh: Autoclave 1",
+      sterilizerCodePlaceholder: "Contoh: AUT01",
       sterilizerLocationPlaceholder: "Contoh: Ruang Sterilisasi",
     },
     masterRack: {

@@ -44,10 +44,7 @@ function ProduksiBmhpContent() {
 
   return (
     <div className="space-y-6">
-      <PageHeader
-        title={t("productionBmhp.title")}
-        subtitle={t("productionBmhp.subtitle")}
-      />
+      <PageHeader title={t("productionBmhp.title")} />
 
       <Card className="p-0">
         <div className="flex gap-5 overflow-x-auto border-b border-gray-200 px-5 pt-4 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
@@ -79,7 +76,7 @@ function ProduksiBmhpContent() {
           )}
 
           {tab === "packaging" && (
-            <ProductionBmhpPackagingTab onGoToSterilization={() => changeTab("sterilization")} />
+            <ProductionBmhpPackagingTab />
           )}
 
           {tab === "sterilization" && (
