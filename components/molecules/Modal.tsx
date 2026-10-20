@@ -19,6 +19,10 @@ type ModalProps = {
   // atau jarak berbeda dari standar (mis. ResultDialog).
   panelClassName?: string
   bodyClassName?: string
+  // Tampil DI ATAS modal lain yang sedang terbuka — untuk dialog yang muncul dari
+  // dalam modal (mis. ResultDialog / ConfirmDialog saat modal form masih terbuka).
+  // Tanpa ini urutan tumpukannya bergantung pada urutan render di halaman.
+  elevated?: boolean
 }
 
 // Ukuran modal: kecil (sm) / sedang (md) / besar (lg) / sangat besar (xl) — lebar
@@ -41,6 +45,7 @@ export function Modal({
   hideHeader = false,
   panelClassName,
   bodyClassName,
+  elevated = false,
 }: ModalProps) {
   useEffect(() => {
     if (!open) return
@@ -54,7 +59,12 @@ export function Modal({
   if (!open) return null
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center px-4">
+    <div
+      className={cn(
+        "fixed inset-0 flex items-center justify-center px-4",
+        elevated ? "z-[70]" : "z-50"
+      )}
+    >
       <div className="absolute inset-0 bg-black/40" onClick={onClose} />
       <div
         className={cn(

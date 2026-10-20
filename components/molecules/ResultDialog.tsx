@@ -117,6 +117,7 @@ export function ResultDialog({
       title={heading}
       size="sm"
       hideHeader
+      elevated
       panelClassName="rounded-3xl"
       bodyClassName="px-6 py-8 sm:px-8"
     >

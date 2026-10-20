@@ -60,6 +60,7 @@ export function ConfirmDialog({
       onClose={loading ? () => {} : onClose}
       title={title}
       size={size}
+      elevated
       footer={
         <>
           {/* `type="button"` pada keduanya: dialog ini bisa berada di dalam

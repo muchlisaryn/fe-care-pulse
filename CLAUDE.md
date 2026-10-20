@@ -27,9 +27,10 @@ Larger, composed UI blocks built from atoms or other molecules:
 - `Card` - white rounded container with border and shadow
 - `StatCard` - metric card with title, value, change indicator, and icon
 - `PageHeader` - page title + subtitle heading used at the top of every page
-- `Modal` - reusable dialog with header, scrollable body, and footer slot; supports `size` (sm/md/lg), closes on Escape key and backdrop click
+- `Modal` - reusable dialog with header, scrollable body, and footer slot; supports `size` (sm/md/lg), closes on Escape key and backdrop click; `elevated` stacks it above other open modals (used by `ResultDialog` & `ConfirmDialog`, so they always appear on top of the form modal that triggered them)
 - `ResultDialog` - success/error result popup built on `Modal`; props: `open`, `onClose`, `variant` ("success" | "error"), `title?`, `description?`, `actionLabel?`; use it after every create/update/delete so the user always gets a clear result — pair with `apiErrorMessage()` from `lib/apiError.ts` for the failure text
 - `ConfirmDialog` - delete confirmation popup built on `Modal`; props: `open`, `onClose`, `onConfirm`, `title?`, `description?`, `loading?`; always use this before any delete action — never delete on a single click
+- `DataTable` - list table (cards on mobile); optional `groupKey` (+ `renderGroupLabel`) inserts a group header row (`th`) whenever the key changes — pass data already sorted by that key (e.g. inventory grouped per rack); `groupHeaderClassName` (string, or `(key, rows) => string`) restyles that row
 - `Pagination` - page navigation with prev/next, numbered pages, ellipsis, and item count; renders nothing when totalPages ≤ 1; always place inside the Card below DataTable
 - `TrendChart` - single-series trend, `variant` "bar" or "line"; no legend (the card title names the series)
 - `StackedBarChart` - stacked bar chart for one period per column split by entity (e.g. loans per day by room); props: `series` ({ key, name }[], fixed order = fixed colors), `data` ({ label, title?, values })[], `otherKey?` for the neutral "Others" bucket. Colors come from `CHART_SERIES` in `lib/chartPalette.ts` - max 4 entity series, the rest must be folded into "Others" by the backend

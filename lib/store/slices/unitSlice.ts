@@ -6,7 +6,6 @@ import api from "@/lib/axios"
 // ikut dikirim.
 export type UnitMaster = {
   id: number
-  code: string
   name: string
   note: string | null
   created_by: string | null

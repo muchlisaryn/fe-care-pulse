@@ -76,6 +76,15 @@ type DataTableProps<T extends object> = {
   rowNumberOffset?: number
   // Teks bawaan tabel — dioper oleh halaman berbahasa Inggris.
   labels?: { rowNumber?: string; actions?: string; edit?: string; delete?: string }
+  // Kelompokkan baris di bawah baris judul (mis. per rak). `data` harus sudah
+  // URUT per kelompok — judul baru muncul tiap kali kunci berganti dari baris
+  // sebelumnya. `renderGroupLabel` mengisi baris judulnya.
+  groupKey?: (row: T) => string
+  renderGroupLabel?: (key: string, rows: T[]) => ReactNode
+  // Tampilan baris judul kelompok, menggantikan bawaan (latar abu, rata kiri).
+  // Boleh fungsi bila tampilannya bergantung isi kelompok (mis. merah bila ada
+  // yang kedaluwarsa).
+  groupHeaderClassName?: string | ((key: string, rows: T[]) => string)
 }
 
 export function DataTable<T extends object>({
@@ -99,7 +108,29 @@ export function DataTable<T extends object>({
   actionsAlign = "end",
   actionsAsMenu = false,
   labels,
+  groupKey,
+  renderGroupLabel,
+  groupHeaderClassName,
 }: DataTableProps<T>) {
+  // Baris judul kelompok: muncul sebelum baris pertama tiap kelompok.
+  const groupRows = new Map<string, T[]>()
+  if (groupKey) {
+    for (const row of data) {
+      const key = groupKey(row)
+      groupRows.set(key, [...(groupRows.get(key) ?? []), row])
+    }
+  }
+  const groupStartsAt = (i: number) =>
+    !!groupKey && (i === 0 || groupKey(data[i]) !== groupKey(data[i - 1]))
+  const groupLabel = (row: T) => {
+    const key = groupKey!(row)
+    return renderGroupLabel ? renderGroupLabel(key, groupRows.get(key) ?? []) : key
+  }
+  const groupClass = (row: T) => {
+    if (typeof groupHeaderClassName !== "function") return groupHeaderClassName
+    const key = groupKey!(row)
+    return groupHeaderClassName(key, groupRows.get(key) ?? [])
+  }
   // Kelas perataan Aksi — dipakai di header (teks) & sel (flex) tabel & kartu.
   const actionsThAlign =
     actionsAlign === "center" ? "text-center" : actionsAlign === "start" ? "text-left" : "text-right"
@@ -220,8 +251,18 @@ export function DataTable<T extends object>({
           data.map((row, i) => {
             const rowLoading = isRowLoading?.(row) ?? false
             return (
+              <Fragment key={i}>
+              {groupStartsAt(i) && (
+                <div
+                  className={cn(
+                    "rounded-lg px-3 py-2 text-sm font-semibold",
+                    groupClass(row) ?? "bg-gray-50 text-gray-800"
+                  )}
+                >
+                  {groupLabel(row)}
+                </div>
+              )}
               <div
-                key={i}
                 className={cn(
                   "overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm transition-opacity",
                   rowLoading && "opacity-60",
@@ -266,6 +307,7 @@ export function DataTable<T extends object>({
                   </div>
                 )}
               </div>
+              </Fragment>
             )
           })
         )}
@@ -317,8 +359,23 @@ export function DataTable<T extends object>({
             data.map((row, i) => {
               const rowLoading = isRowLoading?.(row) ?? false
               const expanded = expandable && (isRowExpanded?.(row) ?? false)
+              const colCount = columns.length + (hasActions ? 1 : 0) + (showRowNumber || expandable ? 1 : 0)
               return (
                 <Fragment key={i}>
+                  {groupStartsAt(i) && (
+                    <tr className="border-t border-gray-100">
+                      <th
+                        colSpan={colCount}
+                        scope="colgroup"
+                        className={cn(
+                          "px-4 py-2 text-sm font-semibold",
+                          groupClass(row) ?? "bg-gray-50 text-left text-gray-800"
+                        )}
+                      >
+                        {groupLabel(row)}
+                      </th>
+                    </tr>
+                  )}
                   <tr
                     className={cn(
                       "transition-colors",

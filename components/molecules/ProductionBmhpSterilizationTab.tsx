@@ -1,7 +1,6 @@
 "use client"
 
 import { useEffect, useMemo, useRef, useState } from "react"
-import Link from "next/link"
 import {
   Search,
   Loader2,
@@ -12,21 +11,23 @@ import {
   Flame,
   Layers,
   AlertTriangle,
-  Warehouse,
   RotateCcw,
 } from "lucide-react"
 import { Button } from "@/components/atoms/Button"
 import { Badge } from "@/components/atoms/Badge"
 import { Input } from "@/components/atoms/Input"
 import { Label } from "@/components/atoms/Label"
+import { Select } from "@/components/atoms/Select"
 import { SelectSearch } from "@/components/atoms/SelectSearch"
 import { Modal } from "@/components/molecules/Modal"
+import { ResultDialog } from "@/components/molecules/ResultDialog"
 import { DateRangeFields } from "@/components/molecules/DateRangeFields"
 import { Pagination } from "@/components/molecules/Pagination"
 import { useToast } from "@/components/molecules/ToastProvider"
-import { useLanguage } from "@/lib/i18n"
+import { localeOf, useLanguage } from "@/lib/i18n"
 import { usePagedList } from "@/lib/usePagedList"
 import { packagingContents } from "@/lib/bmhpPackaging"
+import { FAILURE_REASONS } from "@/lib/bmhpSterilization"
 import { tanggalLokal } from "@/lib/dateRange"
 import api from "@/lib/axios"
 
@@ -36,7 +37,6 @@ export type SterilReadyPackaging = {
   id: number
   prefix: string
   code: string
-  status: string
   packaging_type?: { name: string } | null
   packaged_at?: string | null
   expiry_date?: string | null
@@ -52,6 +52,24 @@ export type SterilReadyPackaging = {
 }
 
 /** Batch sterilisasi — kode {kode mesin}-{ddmmyy}-{urut}, mis. AUT01-191026-03. */
+type IndicatorResult = "lulus" | "gagal"
+
+// Indikator yang dicek saat validasi; Bowie-Dick hanya untuk mesin uap.
+// `reason` = alasan gagal yang otomatis dipilih bila indikator itu gagal.
+const INDICATORS = [
+  { key: "chemical_indicator_result", label: "Indikator Kimia", reason: "indikator_kimia", uapOnly: false },
+  { key: "bio_indicator_result", label: "Indikator Biologi", reason: "indikator_biologi", uapOnly: false },
+  { key: "bowie_dick_result", label: "Bowie-Dick", reason: "bowie_dick", uapOnly: true },
+] as const
+
+type IndicatorKey = (typeof INDICATORS)[number]["key"]
+
+const emptyIndicators: Record<IndicatorKey, IndicatorResult | ""> = {
+  chemical_indicator_result: "",
+  bio_indicator_result: "",
+  bowie_dick_result: "",
+}
+
 export type SterilizationBmhpBatch = {
   id: number
   code: string
@@ -64,11 +82,18 @@ export type SterilizationBmhpBatch = {
   operator?: string | null
   bio_indicator_lot?: string | null
   chemical_indicator_lot?: string | null
+  chemical_indicator_result?: IndicatorResult | null
+  bio_indicator_result?: IndicatorResult | null
+  bowie_dick_result?: IndicatorResult | null
   status: "diproses" | "selesai" | "gagal"
+  failure_reason?: string | null
+  failure_note?: string | null
   sterilized_at?: string | null
   expiry_date?: string | null
   note?: string | null
+  started_by?: string | null
   started_at?: string | null
+  completed_by?: string | null
   completed_at?: string | null
   created_at: string
   machine?: { id: number; name: string; temperature?: number; duration_minutes?: number } | null
@@ -81,6 +106,8 @@ export type SterilizationBmhpBatch = {
       prefix: string
       code: string
       packaging_type?: { name: string } | null
+      disabled?: boolean
+      disabled_by?: string | null
       items?: SterilReadyPackaging["items"]
     } | null
   }[]
@@ -256,9 +283,43 @@ export function ProductionBmhpSterilizationTab() {
 
   // Modal Validasi Hasil
   const [validatingBatch, setValidatingBatch] = useState<SterilizationBmhpBatch | null>(null)
+  // Kode batch yang barusan divalidasi steril → dialog "Berhasil Steril".
+  const [sterileResult, setSterileResult] = useState<string | null>(null)
+  // Modal Detail Batch (klik kartu batch)
+  const [detailBatch, setDetailBatch] = useState<SterilizationBmhpBatch | null>(null)
   const [validationResult, setValidationResult] = useState<"steril" | "gagal">("steril")
-  const [validationNote, setValidationNote] = useState<string>("")
+  const [indicators, setIndicators] = useState(emptyIndicators)
+  const [failureReason, setFailureReason] = useState<string>("")
+  // Alasan yang diketik sendiri — hanya untuk alasan "Lainnya".
+  const [failureNote, setFailureNote] = useState<string>("")
   const [submittingValidation, setSubmittingValidation] = useState(false)
+
+  // Indikator yang ditampilkan untuk batch ini, dan apakah salah satunya gagal —
+  // bila ya, batch tidak bisa dinyatakan steril.
+  const shownIndicators = INDICATORS.filter((i) => !i.uapOnly || validatingBatch?.method === "uap")
+  const indicatorFailed = shownIndicators.some((i) => indicators[i.key] === "gagal")
+  const isOtherReason = failureReason === "lainnya"
+  const canValidate =
+    validationResult === "steril"
+      ? !indicatorFailed
+      : failureReason !== "" && (!isOtherReason || failureNote.trim() !== "")
+
+  function openValidation(batch: SterilizationBmhpBatch) {
+    setValidatingBatch(batch)
+    setValidationResult("steril")
+    setIndicators(emptyIndicators)
+    setFailureReason("")
+    setFailureNote("")
+  }
+
+  function setIndicator(key: IndicatorKey, value: IndicatorResult | "", reason: string) {
+    setIndicators((prev) => ({ ...prev, [key]: value }))
+    // Indikator gagal → hasil otomatis GAGAL, alasan terisi bila belum dipilih.
+    if (value === "gagal") {
+      setValidationResult("gagal")
+      setFailureReason((r) => r || reason)
+    }
+  }
 
   async function loadMachines(): Promise<SterilizerMachineOption[]> {
     if (machinesLoadedRef.current) return machines
@@ -357,23 +418,28 @@ export function ProductionBmhpSterilizationTab() {
   }
 
   async function handleValidateSterilization() {
-    if (!validatingBatch) return
+    if (!validatingBatch || !canValidate) return
 
     setSubmittingValidation(true)
     try {
+      const indicatorPayload = Object.fromEntries(
+        shownIndicators.map((i) => [i.key, indicators[i.key] || null]),
+      )
       await api.post(
         `/master/production-bmhp/sterilization/${validatingBatch.id}/validate`,
         {
           result: validationResult,
-          note: validationNote.trim() || undefined,
+          ...indicatorPayload,
+          failure_reason: validationResult === "gagal" ? failureReason : null,
+          failure_note: validationResult === "gagal" && isOtherReason ? failureNote.trim() : null,
         },
       )
 
-      toast.success(
-        validationResult === "steril"
-          ? "Batch BMHP berhasil divalidasi STERIL."
-          : "Batch BMHP dinyatakan GAGAL steril.",
-      )
+      if (validationResult === "steril") {
+        setSterileResult(validatingBatch.code)
+      } else {
+        toast.success("Batch BMHP dinyatakan GAGAL steril.")
+      }
 
       setValidatingBatch(null)
       reloadAll()
@@ -510,11 +576,8 @@ export function ProductionBmhpSterilizationTab() {
                 <BatchCard
                   key={`b-${row.batch.id}`}
                   batch={row.batch}
-                  onValidate={() => {
-                    setValidatingBatch(row.batch)
-                    setValidationResult("steril")
-                    setValidationNote("")
-                  }}
+                  onValidate={() => openValidation(row.batch)}
+                  onOpen={() => setDetailBatch(row.batch)}
                 />
               ),
             )}
@@ -643,6 +706,16 @@ export function ProductionBmhpSterilizationTab() {
         </Modal>
       )}
 
+      <BatchDetailModal batch={detailBatch} onClose={() => setDetailBatch(null)} />
+
+      <ResultDialog
+        open={sterileResult !== null}
+        onClose={() => setSterileResult(null)}
+        variant="success"
+        title="Berhasil Steril"
+        description={`Batch ${sterileResult ?? ""} dinyatakan steril dan siap disimpan di Gudang Steril BMHP.`}
+      />
+
       {/* Modal Validasi Hasil Sterilisasi */}
       {validatingBatch && (
         <Modal
@@ -657,48 +730,28 @@ export function ProductionBmhpSterilizationTab() {
                 Batch Steril: <strong className="font-mono">{validatingBatch.code}</strong>
               </div>
               <div>
-                Mesin: <strong>{validatingBatch.machine_name ?? "-"}</strong> • Total:{" "}
-                <strong>{batchPackagings(validatingBatch).length} kemasan</strong>
+                Mesin: <strong>{validatingBatch.machine_name ?? "-"}</strong>
               </div>
             </div>
 
-            {/* Rincian isi batch: satu baris per BMHP di tiap kemasan. */}
-            <div className="max-h-64 overflow-auto rounded-lg border border-gray-200">
-              <table className="w-full text-left text-xs">
-                <thead className="sticky top-0 bg-gray-50 text-[11px] uppercase tracking-wide text-gray-500">
-                  <tr>
-                    <th className="px-3 py-2 font-semibold">Kode Kemasan</th>
-                    <th className="px-3 py-2 font-semibold">Nama BMHP</th>
-                    <th className="px-3 py-2 text-right font-semibold">Qty</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-100">
-                  {batchPackagings(validatingBatch).flatMap((p) => {
-                    const contents = packagingContents(p.items)
-                    const rows = contents.length > 0 ? contents : [null]
-                    return rows.map((it, i) => (
-                      <tr key={`${p.id}-${i}`} className="align-top">
-                        {i === 0 && (
-                          <td rowSpan={rows.length} className="whitespace-nowrap px-3 py-2 font-mono font-semibold text-[#075489]">
-                            {p.prefix}
-                            {p.code}
-                          </td>
-                        )}
-                        <td className="px-3 py-2 text-gray-800">
-                          {it ? it.name : <span className="text-xs text-gray-400">—</span>}
-                        </td>
-                        <td className="whitespace-nowrap px-3 py-2 text-right font-semibold text-gray-900">
-                          {it ? (
-                            [it.quantity, it.unit_name].filter(Boolean).join(" ")
-                          ) : (
-                            <span className="text-xs text-gray-400">—</span>
-                          )}
-                        </td>
-                      </tr>
-                    ))
-                  })}
-                </tbody>
-              </table>
+            <BatchContentsTable batch={validatingBatch} />
+
+            <div>
+              <Label>Hasil Indikator</Label>
+              <div className="mt-2 divide-y divide-gray-100 rounded-lg border border-gray-200">
+                {shownIndicators.map((ind) => (
+                  <div
+                    key={ind.key}
+                    className="flex flex-col gap-2 px-3 py-2.5 sm:flex-row sm:items-center sm:justify-between"
+                  >
+                    <span className="text-sm text-gray-700">{ind.label}</span>
+                    <IndicatorToggle
+                      value={indicators[ind.key]}
+                      onChange={(v) => setIndicator(ind.key, v, ind.reason)}
+                    />
+                  </div>
+                ))}
+              </div>
             </div>
 
             <div>
@@ -707,7 +760,9 @@ export function ProductionBmhpSterilizationTab() {
                 <button
                   type="button"
                   onClick={() => setValidationResult("steril")}
-                  className={`flex items-center justify-center gap-2 rounded-xl border p-3.5 text-sm font-semibold transition ${
+                  disabled={indicatorFailed}
+                  title={indicatorFailed ? "Ada indikator yang gagal" : undefined}
+                  className={`flex items-center justify-center gap-2 rounded-xl border p-3.5 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-40 ${
                     validationResult === "steril"
                       ? "border-emerald-600 bg-emerald-50 text-emerald-800"
                       : "border-gray-200 text-gray-600 hover:bg-gray-50"
@@ -732,15 +787,37 @@ export function ProductionBmhpSterilizationTab() {
               </div>
             </div>
 
-            <div>
-              <Label htmlFor="val-note">Catatan Validasi</Label>
-              <Input
-                id="val-note"
-                value={validationNote}
-                onChange={(e) => setValidationNote(e.target.value)}
-                placeholder="Catatan hasil indikator atau kondisi..."
-              />
-            </div>
+            {validationResult === "gagal" && (
+              <div>
+                <Label htmlFor="val-reason">
+                  Alasan Gagal <span className="text-red-500">*</span>
+                </Label>
+                <Select
+                  id="val-reason"
+                  value={failureReason}
+                  onChange={(e) => setFailureReason(e.target.value)}
+                  className="mt-1"
+                >
+                  <option value="">Pilih alasan gagal...</option>
+                  {FAILURE_REASONS.map((r) => (
+                    <option key={r.value} value={r.value}>
+                      {r.label}
+                    </option>
+                  ))}
+                </Select>
+                {isOtherReason && (
+                  <Input
+                    aria-label="Alasan gagal lainnya"
+                    value={failureNote}
+                    onChange={(e) => setFailureNote(e.target.value)}
+                    maxLength={255}
+                    placeholder="Tulis alasan gagal..."
+                    className="mt-2"
+                    autoFocus
+                  />
+                )}
+              </div>
+            )}
 
             <div className="flex justify-end gap-2 border-t border-gray-100 pt-4">
               <Button
@@ -754,7 +831,7 @@ export function ProductionBmhpSterilizationTab() {
               <Button
                 type="button"
                 onClick={handleValidateSterilization}
-                disabled={submittingValidation}
+                disabled={submittingValidation || !canValidate}
                 className={
                   validationResult === "steril"
                     ? "bg-emerald-600 text-white hover:bg-emerald-700"
@@ -843,7 +920,15 @@ function ReadyPackagingCard({
 }
 
 /** Batch sterilisasi — "Menunggu Validasi" (diproses) atau "Sudah Diproses" (steril / gagal). */
-function BatchCard({ batch, onValidate }: { batch: SterilizationBmhpBatch; onValidate: () => void }) {
+function BatchCard({
+  batch,
+  onValidate,
+  onOpen,
+}: {
+  batch: SterilizationBmhpBatch
+  onValidate: () => void
+  onOpen: () => void
+}) {
   const { t } = useLanguage()
   const isProcessing = batch.status === "diproses"
   const tone = isProcessing ? CARD_TONE.menunggu : batch.status === "selesai" ? CARD_TONE.steril : CARD_TONE.gagal
@@ -856,7 +941,19 @@ function BatchCard({ batch, onValidate }: { batch: SterilizationBmhpBatch; onVal
   const packagings = batchPackagings(batch)
 
   return (
-    <div className={`flex flex-col rounded-xl border border-l-4 border-gray-200 p-4 transition hover:shadow-sm ${tone.card}`}>
+    // Klik kartu → modal detail batch (isi, indikator, petugas, alasan gagal).
+    <div
+      role="button"
+      tabIndex={0}
+      onClick={onOpen}
+      onKeyDown={(e) => {
+        if (e.target === e.currentTarget && (e.key === "Enter" || e.key === " ")) {
+          e.preventDefault()
+          onOpen()
+        }
+      }}
+      className={`flex cursor-pointer flex-col rounded-xl border border-l-4 border-gray-200 p-4 transition hover:shadow-md focus:outline-none focus-visible:ring-2 focus-visible:ring-[#075489]/30 ${tone.card}`}
+    >
       <div className="flex items-start justify-between gap-3">
         {/* Judul = kode batch; kode kemasan di dalamnya ada di tooltip. */}
         <div className="min-w-0" title={packagings.map((p) => `${p.prefix}${p.code}`).join(", ")}>
@@ -891,25 +988,251 @@ function BatchCard({ batch, onValidate }: { batch: SterilizationBmhpBatch; onVal
 
       <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
         {isProcessing ? (
-          <Button type="button" onClick={onValidate} className="w-full bg-emerald-600 text-xs text-white hover:bg-emerald-700">
+          <Button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation() // jangan ikut membuka modal detail
+              onValidate()
+            }}
+            className="w-full bg-emerald-600 text-xs text-white hover:bg-emerald-700"
+          >
             <CheckCircle2 className="mr-1.5 h-3.5 w-3.5" />
             Validasi Hasil
           </Button>
         ) : (
-          <>
-            <span className="text-[11px] text-gray-400">Divalidasi {batch.completed_at?.slice(0, 10)}</span>
-            {batch.status === "selesai" && (
-              <Link
-                href="/cssd/storage-steril-bmhp?tab=simpan"
-                className="inline-flex items-center gap-1.5 rounded-md border border-[#075489] bg-[#075489] px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-[#075489]/90"
-              >
-                <Warehouse className="h-3.5 w-3.5" />
-                Ke Gudang Steril
-              </Link>
-            )}
-          </>
+          <span className="text-[11px] text-gray-400">Divalidasi {batch.completed_at?.slice(0, 10)}</span>
         )}
       </div>
     </div>
+  )
+}
+
+// Pilihan hasil satu indikator: tidak dipakai / lulus / gagal.
+function IndicatorToggle({
+  value,
+  onChange,
+}: {
+  value: IndicatorResult | ""
+  onChange: (value: IndicatorResult | "") => void
+}) {
+  const options: { value: IndicatorResult | ""; label: string; active: string }[] = [
+    { value: "", label: "Tidak dipakai", active: "border-gray-400 bg-gray-100 text-gray-700" },
+    { value: "lulus", label: "Lulus", active: "border-emerald-600 bg-emerald-50 text-emerald-800" },
+    { value: "gagal", label: "Gagal", active: "border-red-600 bg-red-50 text-red-800" },
+  ]
+
+  return (
+    <div className="grid grid-cols-3 gap-1.5 sm:flex">
+      {options.map((o) => (
+        <button
+          key={o.label}
+          type="button"
+          onClick={() => onChange(o.value)}
+          className={`rounded-lg border px-2.5 py-1.5 text-xs font-medium transition ${
+            value === o.value ? o.active : "border-gray-200 text-gray-500 hover:bg-gray-50"
+          }`}
+        >
+          {o.label}
+        </button>
+      ))}
+    </div>
+  )
+}
+
+/** Rincian isi batch: satu baris per BMHP di tiap kemasan. */
+function BatchContentsTable({ batch }: { batch: SterilizationBmhpBatch }) {
+  return (
+    <div className="max-h-64 overflow-auto rounded-lg border border-gray-200">
+      <table className="w-full text-left text-xs">
+        <thead className="sticky top-0 bg-gray-50 text-[11px] uppercase tracking-wide text-gray-500">
+          <tr>
+            <th className="px-3 py-2 font-semibold">Kode Kemasan</th>
+            <th className="px-3 py-2 font-semibold">Nama BMHP</th>
+            <th className="px-3 py-2 text-right font-semibold">Qty</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-gray-100">
+          {batchPackagings(batch).flatMap((p) => {
+            const contents = packagingContents(p.items)
+            const rows = contents.length > 0 ? contents : [null]
+            return rows.map((it, i) => (
+              <tr key={`${p.id}-${i}`} className="align-top">
+                {i === 0 && (
+                  <td rowSpan={rows.length} className="whitespace-nowrap px-3 py-2">
+                    <span className="font-mono font-semibold text-[#075489]">
+                      {p.prefix}
+                      {p.code}
+                    </span>
+                    {p.packaging_type?.name && (
+                      <div className="text-[11px] text-gray-400">{p.packaging_type.name}</div>
+                    )}
+                  </td>
+                )}
+                <td className="px-3 py-2 text-gray-800">
+                  {it ? it.name : <span className="text-xs text-gray-400">—</span>}
+                </td>
+                <td className="whitespace-nowrap px-3 py-2 text-right font-semibold text-gray-900">
+                  {it ? (
+                    [it.quantity, it.unit_name].filter(Boolean).join(" ")
+                  ) : (
+                    <span className="text-xs text-gray-400">—</span>
+                  )}
+                </td>
+              </tr>
+            ))
+          })}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
+const INDICATOR_BADGE: Record<IndicatorResult, string> = {
+  lulus: "bg-emerald-100 text-emerald-800",
+  gagal: "bg-red-100 text-red-700",
+}
+
+/** Detail satu batch sterilisasi: hasil, alasan gagal, indikator, petugas & isinya. */
+function BatchDetailModal({ batch, onClose }: { batch: SterilizationBmhpBatch | null; onClose: () => void }) {
+  const { lang } = useLanguage()
+  if (!batch) return null
+
+  const kosong = <span className="text-xs text-gray-400">—</span>
+  const waktu = (v?: string | null) =>
+    v
+      ? new Date(v).toLocaleString(localeOf(lang), {
+          day: "2-digit",
+          month: "short",
+          year: "numeric",
+          hour: "2-digit",
+          minute: "2-digit",
+        })
+      : null
+
+  const isProcessing = batch.status === "diproses"
+  const isFailed = batch.status === "gagal"
+  const tone = isProcessing ? CARD_TONE.menunggu : isFailed ? CARD_TONE.gagal : CARD_TONE.steril
+  const statusLabel = isProcessing ? "Menunggu Validasi" : isFailed ? "Gagal Steril" : "Steril"
+  const reasonLabel = FAILURE_REASONS.find((r) => r.value === batch.failure_reason)?.label ?? batch.failure_reason
+
+  // Lot dicatat saat mulai steril, hasilnya saat validasi.
+  const indicatorRows = [
+    { label: "Indikator Kimia", lot: batch.chemical_indicator_lot, result: batch.chemical_indicator_result },
+    { label: "Indikator Biologi", lot: batch.bio_indicator_lot, result: batch.bio_indicator_result },
+    ...(batch.method === "uap" ? [{ label: "Bowie-Dick", lot: null, result: batch.bowie_dick_result }] : []),
+  ]
+
+  const officers = [
+    { label: "Mulai steril", by: batch.started_by ?? batch.operator, at: waktu(batch.started_at ?? batch.created_at) },
+    { label: "Divalidasi", by: batch.completed_by, at: waktu(batch.completed_at) },
+  ]
+
+  return (
+    <Modal open onClose={onClose} title="Detail Batch Sterilisasi BMHP" size="lg">
+      <div className="space-y-5">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <span className="flex items-center gap-1.5 font-mono text-base font-bold text-[#075489]">
+              <Flame className="h-4 w-4" />
+              {batch.code}
+            </span>
+            <div className="mt-0.5 text-xs text-gray-500">
+              Mesin <strong>{batch.machine_name ?? "-"}</strong> • Metode <strong>{batch.method}</strong> • Siklus{" "}
+              <strong>{batch.cycle_number ?? "-"}</strong> •{" "}
+              <strong>{batch.temperature ? `${batch.temperature}°C` : "-"}</strong> •{" "}
+              <strong>{batch.duration_minutes ? `${batch.duration_minutes} mnt` : "-"}</strong>
+            </div>
+          </div>
+          <Badge className={tone.badge}>{statusLabel}</Badge>
+        </div>
+
+        {batch.status === "selesai" && (
+          <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm">
+            <div className="flex items-center gap-1.5 font-semibold text-emerald-800">
+              <CheckCircle2 className="h-4 w-4" />
+              Berhasil Steril
+            </div>
+            <p className="mt-1 text-emerald-900">
+              Divalidasi oleh <strong>{batch.completed_by ?? "-"}</strong>
+              {batch.completed_at && <> • {waktu(batch.completed_at)}</>}
+            </p>
+            {batch.expiry_date && (
+              <p className="mt-0.5 text-emerald-800">
+                Steril sampai{" "}
+                <strong>
+                  {new Date(batch.expiry_date).toLocaleDateString(localeOf(lang), {
+                    day: "2-digit",
+                    month: "short",
+                    year: "numeric",
+                  })}
+                </strong>
+              </p>
+            )}
+            <p className="mt-2 text-xs text-emerald-700">Kemasan siap disimpan di Gudang Steril BMHP.</p>
+          </div>
+        )}
+
+        {isFailed && (
+          <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm">
+            <div className="flex items-center gap-1.5 font-semibold text-red-800">
+              <AlertTriangle className="h-4 w-4" />
+              Alasan Gagal
+            </div>
+            <p className="mt-1 text-red-900">{reasonLabel ?? "Tidak dicatat"}</p>
+            {batch.failure_note && <p className="mt-0.5 text-red-800">&ldquo;{batch.failure_note}&rdquo;</p>}
+            <p className="mt-2 text-xs text-red-700">
+              Kemasan di batch ini di-void dan dikemas ulang (GS-), kembali ke antrean Inspeksi &amp; Pengemasan.
+            </p>
+          </div>
+        )}
+
+        <div className="grid gap-4 sm:grid-cols-2">
+          <div>
+            <Label>Petugas</Label>
+            <div className="mt-2 divide-y divide-gray-100 rounded-lg border border-gray-200 text-sm">
+              {officers.map((o) => (
+                <div key={o.label} className="flex items-start justify-between gap-3 px-3 py-2">
+                  <span className="text-gray-500">{o.label}</span>
+                  <span className="text-right">
+                    {o.by ? <span className="font-medium text-gray-900">{o.by}</span> : kosong}
+                    {o.at && <span className="block text-[11px] text-gray-400">{o.at}</span>}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div>
+            <Label>Hasil Indikator</Label>
+            <div className="mt-2 divide-y divide-gray-100 rounded-lg border border-gray-200 text-sm">
+              {indicatorRows.map((ind) => (
+                <div key={ind.label} className="flex items-center justify-between gap-3 px-3 py-2">
+                  <span className="text-gray-500">
+                    {ind.label}
+                    {ind.lot && <span className="block text-[11px] text-gray-400">Lot {ind.lot}</span>}
+                  </span>
+                  {ind.result ? (
+                    <Badge className={INDICATOR_BADGE[ind.result]}>{ind.result === "lulus" ? "Lulus" : "Gagal"}</Badge>
+                  ) : isProcessing ? (
+                    kosong
+                  ) : (
+                    <span className="text-xs text-gray-400">Tidak dipakai</span>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        {batch.note && (
+          <div className="text-sm">
+            <Label>Catatan</Label>
+            <p className="mt-1 text-gray-700">{batch.note}</p>
+          </div>
+        )}
+
+        <BatchContentsTable batch={batch} />
+      </div>
+    </Modal>
   )
 }

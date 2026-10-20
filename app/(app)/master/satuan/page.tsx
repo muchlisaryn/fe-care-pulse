@@ -25,7 +25,6 @@ import { apiErrorMessage } from "@/lib/apiError"
 import { useT } from "@/lib/i18n"
 
 const emptyForm = {
-  code: "",
   name: "",
   note: "",
 }
@@ -64,19 +63,18 @@ export default function MasterUnitPage() {
   }
 
   function openEdit(row: UnitMaster) {
-    setForm({ code: row.code, name: row.name, note: row.note ?? "" })
+    setForm({ name: row.name, note: row.note ?? "" })
     setEditId(row.id)
     setModal("edit")
   }
 
-  const canSave = form.code.trim().length > 0 && form.name.trim().length > 0
+  const canSave = form.name.trim().length > 0
 
   async function handleSave() {
     if (!canSave) return
     setSaving(true)
     try {
       const payload = {
-        code: form.code.trim(),
         name: form.name.trim(),
         note: form.note.trim() || null,
       }
@@ -119,15 +117,6 @@ export default function MasterUnitPage() {
   const kosong = <span className="text-gray-400 text-xs">—</span>
 
   const columns: Column<UnitMaster>[] = [
-    {
-      header: t("common.code"),
-      cell: (row) => (
-        <span className="font-mono text-xs font-semibold text-[#075489] bg-[#075489]/8 px-2 py-1 rounded">
-          {row.code}
-        </span>
-      ),
-      className: "w-28",
-    },
     {
       header: t("masterUnit.colName"),
       cell: (row) => (
@@ -242,18 +231,6 @@ export default function MasterUnitPage() {
         }
       >
         <div className="space-y-4">
-          <div className="space-y-1.5">
-            <Label htmlFor="unit-code">
-              {t("common.code")} <span className="text-red-500">*</span>
-            </Label>
-            <Input
-              id="unit-code"
-              placeholder={t("masterUnit.codePlaceholder")}
-              value={form.code}
-              maxLength={50}
-              onChange={(e) => setForm((f) => ({ ...f, code: e.target.value }))}
-            />
-          </div>
           <div className="space-y-1.5">
             <Label htmlFor="unit-name">
               {t("masterUnit.colName")} <span className="text-red-500">*</span>

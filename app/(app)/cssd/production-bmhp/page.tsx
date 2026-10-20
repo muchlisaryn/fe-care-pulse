@@ -1,14 +1,32 @@
 "use client"
 
 import { Suspense, useState } from "react"
+import dynamic from "next/dynamic"
 import { useRouter, useSearchParams } from "next/navigation"
 import { PackageCheck, Sparkles, PlusCircle } from "lucide-react"
 import { Card } from "@/components/molecules/Card"
 import { PageHeader } from "@/components/molecules/PageHeader"
-import { ProductionBmhpNewTab } from "@/components/molecules/ProductionBmhpNewTab"
-import { ProductionBmhpPackagingTab } from "@/components/molecules/ProductionBmhpPackagingTab"
-import { ProductionBmhpSterilizationTab } from "@/components/molecules/ProductionBmhpSterilizationTab"
-import { useLanguage } from "@/lib/i18n"
+import { useLanguage, useT } from "@/lib/i18n"
+
+function TabLoading() {
+  const t = useT()
+  return <div className="py-16 text-center text-sm text-gray-400">{t("common.loading")}</div>
+}
+
+// Lazy load: kode tiap tab baru diunduh saat tab itu pertama kali dibuka, dan
+// datanya pun baru diambil saat tabnya dirender (tab dirender bersyarat).
+const ProductionBmhpNewTab = dynamic(
+  () => import("@/components/molecules/ProductionBmhpNewTab").then((m) => m.ProductionBmhpNewTab),
+  { loading: TabLoading },
+)
+const ProductionBmhpPackagingTab = dynamic(
+  () => import("@/components/molecules/ProductionBmhpPackagingTab").then((m) => m.ProductionBmhpPackagingTab),
+  { loading: TabLoading },
+)
+const ProductionBmhpSterilizationTab = dynamic(
+  () => import("@/components/molecules/ProductionBmhpSterilizationTab").then((m) => m.ProductionBmhpSterilizationTab),
+  { loading: TabLoading },
+)
 
 type ProduksiBmhpTab = "produksi" | "packaging" | "sterilization"
 

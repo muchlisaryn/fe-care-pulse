@@ -7,28 +7,25 @@ export type StorageBmhpIncomingUnit = {
   code: string | null
   instrument: string | null
   barcode_no: string | null
-  image_url: string | null
   source: "satuan" | "paket"
   package_name: string | null
-  package_no?: number | null
   quantity?: number
   unit_name?: string | null
+  /** Harga satuan saat produksi (paket = harga 1 paket). */
+  price?: number
+  /** quantity × price. */
+  total_price?: number
   stored: boolean
-  rack_code: string | null
+  /** Rak tempat unit ini sudah disimpan (null = belum disimpan). */
+  rack_id: number | null
+  rack_name: string | null
 }
 
 // Batch BMHP steril yang perlu disimpan ke rak gudang steril.
 export type StorageBmhpIncomingBatch = {
   id: number
-  code: string
-  code_transaction: string | null
-  status: string
-  source?: "order" | "produksi"
-  store_url?: string
-  borrowed_by: string | null
-  room: { id: number; name: string } | null
-  operator?: string | null
-  machine_name?: string | null
+  /** Kode siklus sterilisasi, mis. AUT01-191026-03. */
+  sterilization_code: string | null
   processed_at: string | null
   expiry_date: string | null
   unit_count: number
@@ -39,38 +36,31 @@ export type StorageBmhpIncomingBatch = {
 // Satu baris inventaris gudang steril BMHP.
 export type StorageBmhpInventoryRow = {
   id: number
-  rack_code: string
+  rack_id: number
+  rack_name: string | null
   stored_at: string | null
   expiry_date: string | null
   days_to_expiry: number | null
   alert: boolean
   expired: boolean
-  can_distribute: boolean
-  blocked_reason: string | null
   source: "satuan" | "paket"
   package_name: string | null
-  package_no?: number | null
   barcode_no: string | null
-  production_code: string | null
-  batch: string | null
+  /** Kode siklus sterilisasi, mis. AUT01-191026-03. */
+  sterilization_code: string | null
   unit: {
-    id: number
-    code: string | null
     instrument: string | null
     quantity?: number
     unit_name?: string | null
-    image_url?: string | null
+    /** Harga satuan saat produksi (paket = harga 1 paket). */
+    price?: number
+    /** quantity × price. */
+    total_price?: number
   }
 }
 
-export type StorageBmhpSummary = {
-  total: number
-  alert: number
-  expired: number
-  no_expiry?: number
-}
-
-export type LazyList<T> = {
+// Daftar yang dimuat bertahap (lazy load): halaman berikutnya ditambahkan ke `items`.
+type LazyList<T> = {
   items: T[]
   page: number
   lastPage: number
@@ -83,7 +73,6 @@ export type LazyList<T> = {
 type StorageBmhpState = {
   incoming: LazyList<StorageBmhpIncomingBatch>
   inventory: LazyList<StorageBmhpInventoryRow>
-  summary: StorageBmhpSummary
 }
 
 const emptyList = <T>(): LazyList<T> => ({
@@ -99,16 +88,16 @@ const emptyList = <T>(): LazyList<T> => ({
 const initialState: StorageBmhpState = {
   incoming: emptyList<StorageBmhpIncomingBatch>(),
   inventory: emptyList<StorageBmhpInventoryRow>(),
-  summary: { total: 0, alert: 0, expired: 0 },
 }
 
 type PageResult<T> = { items: T[]; page: number; lastPage: number; total: number }
 
-export type FetchPageArg = { page?: number; search?: string }
+// `rackId` = filter id rak (hanya dipakai inventaris).
+type FetchPageArg = { page?: number; search?: string; rackId?: string }
 
-async function fetchPage<T>(url: string, { page = 1, search }: FetchPageArg): Promise<PageResult<T>> {
+async function fetchPage<T>(url: string, { page = 1, search, rackId }: FetchPageArg): Promise<PageResult<T>> {
   const res = await api.get(url, {
-    params: { page, search: search || undefined },
+    params: { page, search: search || undefined, rack_id: rackId || undefined },
   })
   const p = res.data.data
   return { items: p.data, page: p.current_page, lastPage: p.last_page, total: p.total }
@@ -123,11 +112,6 @@ export const fetchStorageBmhpInventory = createAsyncThunk(
   "storageBmhp/inventory",
   (arg: FetchPageArg = {}) => fetchPage<StorageBmhpInventoryRow>("/master/storage-bmhp/inventory", arg),
 )
-
-export const fetchStorageBmhpSummary = createAsyncThunk("storageBmhp/summary", async () => {
-  const res = await api.get("/master/storage-bmhp/summary")
-  return res.data.data as StorageBmhpSummary
-})
 
 function onPending<T>(list: LazyList<T>, page: number) {
   if (page > 1) list.loadingMore = true
@@ -172,9 +156,6 @@ const storageBmhpSlice = createSlice({
       })
       .addCase(fetchStorageBmhpInventory.rejected, (state) => {
         onRejected(state.inventory)
-      })
-      .addCase(fetchStorageBmhpSummary.fulfilled, (state, action) => {
-        state.summary = action.payload
       })
   },
 })

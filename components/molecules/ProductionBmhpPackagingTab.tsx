@@ -15,7 +15,6 @@ import {
   AlertTriangle,
 } from "lucide-react"
 import { Button } from "@/components/atoms/Button"
-import { Badge } from "@/components/atoms/Badge"
 import { Input } from "@/components/atoms/Input"
 import { Label } from "@/components/atoms/Label"
 import { SelectSearch } from "@/components/atoms/SelectSearch"
@@ -28,6 +27,7 @@ import { useLanguage, localeOf, type Lang } from "@/lib/i18n"
 import { usePagedList } from "@/lib/usePagedList"
 import { packagingContents } from "@/lib/bmhpPackaging"
 import { rentangSemingguTerakhir } from "@/lib/dateRange"
+import { FAILURE_REASONS } from "@/lib/bmhpSterilization"
 import api from "@/lib/axios"
 
 export type PackagingBmhpItem = {
@@ -50,9 +50,22 @@ export type PackagingBmhpRecord = {
   id: number
   prefix: string
   code: string
-  status: "diproses" | "selesai" | "sterilisasi"
+  /** Terisi = sudah selesai dikemas (siap / sudah masuk sterilisasi). */
+  completed_at?: string | null
+  /** Tahap kemasan dari backend (PackagingBmhp::stage()) — menentukan warna kartu. */
+  stage?: PackagingStage
   /** Kemasan di-void (mis. gagal steril) — tampil sebagai riwayat saja. */
   disabled?: boolean
+  /** Rincian void (JSON) — lihat PackagingBmhp::$casts di backend. */
+  disabled_reason?: {
+    reason: string
+    packaging?: { id: number; code: string } | null
+    sterilization?: { id: number; code: string; failure_reason?: string | null; failure_note?: string | null } | null
+    replaced_by?: { id: number; code: string } | null
+    by?: string | null
+    at?: string | null
+  } | null
+  disabled_by?: string | null
   packaging_type_id?: number | null
   packaging_type?: {
     id: number
@@ -65,21 +78,58 @@ export type PackagingBmhpRecord = {
   expiry_date?: string | null
   note?: string | null
   created_at: string
-  production?: {
-    id: number
-    code: string
-    note?: string | null
-    items?: {
-      id: number
-      source: string
-      name: string
-      package_no?: number
-      quantity: number
-      unit_name?: string
-    }[]
-  } | null
   items?: PackagingBmhpItem[]
 }
+
+type PackagingStage = "belum" | "siap" | "sterilisasi" | "steril" | "gagal"
+
+// Warna kartu per tahap: garis kiri tebal + latar tipis. Siap steril & sedang
+// disteril sama-sama "dalam proses".
+const STAGE_TONE: Record<PackagingStage, string> = {
+  belum: "border-gray-200 border-l-amber-400 bg-white",
+  siap: "border-gray-200 border-l-sky-500 bg-white",
+  sterilisasi: "border-gray-200 border-l-sky-500 bg-white",
+  steril: "border-gray-200 border-l-emerald-500 bg-emerald-50/20",
+  gagal: "border-red-200 border-l-red-500 bg-red-50/30",
+}
+
+// Label `disabled_reason.reason` (PackagingBmhp::DISABLED_*).
+const DISABLED_REASON_LABEL: Record<string, string> = {
+  gagal_steril: "Gagal steril",
+}
+
+/** Rincian kemasan void: "Gagal steril — Kemasan rusak (AUT01-…) • Packaging ulang dengan kode GS-…". */
+function VoidInfo({ detail }: { detail: PackagingBmhpRecord["disabled_reason"] }) {
+  const ster = detail?.sterilization
+  const failure =
+    ster?.failure_reason === "lainnya"
+      ? ster.failure_note
+      : FAILURE_REASONS.find((r) => r.value === ster?.failure_reason)?.label
+
+  return (
+    <div className="mt-2 inline-flex flex-wrap items-center gap-x-1.5 gap-y-0.5 rounded-md bg-red-50 px-2 py-1 text-xs font-medium text-red-700">
+      <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+      <span>{DISABLED_REASON_LABEL[detail?.reason ?? ""] ?? "Di-void"}</span>
+      {failure && <span>— {failure}</span>}
+      {ster?.code && <span className="font-mono font-normal">({ster.code})</span>}
+      {detail?.replaced_by && (
+        <span className="font-normal">
+          • Packaging ulang dengan kode <span className="font-mono">{detail.replaced_by.code}</span>
+        </span>
+      )}
+    </div>
+  )
+}
+
+// Chip filter tahap (`?stage=` di backend). Warna garisnya = warna garis kiri kartu.
+type StageFilter = "" | "belum" | "proses" | "steril" | "gagal"
+const STAGE_FILTERS: { key: StageFilter; label: string; dot: string }[] = [
+  { key: "", label: "Semua", dot: "bg-gray-300" },
+  { key: "belum", label: "Belum dikemas", dot: "bg-amber-400" },
+  { key: "proses", label: "Proses sterilisasi", dot: "bg-sky-500" },
+  { key: "steril", label: "Berhasil steril", dot: "bg-emerald-500" },
+  { key: "gagal", label: "Gagal steril", dot: "bg-red-500" },
+]
 
 // Tanggal dari API berupa ISO (2026-11-19T00:00:00.000000Z) — tampilkan tanggalnya
 // saja, nama bulan ikut bahasa aktif.
@@ -107,6 +157,9 @@ export function ProductionBmhpPackagingTab() {
     filter.dateFrom !== defaultFilter.dateFrom ||
     filter.dateTo !== defaultFilter.dateTo
 
+  // Filter tahap dari chip — langsung diterapkan saat diklik.
+  const [stage, setStage] = useState<StageFilter>("")
+
   // Antrean ber-pagination: hanya halaman yang dibuka yang diambil (20 per halaman).
   const { items, loading, page, setPage, totalPages, totalItems, perPage, reload } =
     usePagedList<PackagingBmhpRecord>(
@@ -115,6 +168,7 @@ export function ProductionBmhpPackagingTab() {
         search: filter.search || undefined,
         date_from: filter.dateFrom || undefined,
         date_to: filter.dateTo || undefined,
+        stage: stage || undefined,
       },
       () => toast.error("Gagal memuat daftar antrean pengemasan BMHP."),
     )
@@ -130,7 +184,6 @@ export function ProductionBmhpPackagingTab() {
   const [packagingModalItem, setPackagingModalItem] = useState<PackagingBmhpRecord | null>(null)
   const [selectedTypeId, setSelectedTypeId] = useState<string>("")
   const [chemicalIndicator, setChemicalIndicator] = useState<string>("")
-  const [packNote, setPackNote] = useState<string>("")
   const [completing, setCompleting] = useState(false)
 
   // Modal Cetak Label
@@ -169,6 +222,11 @@ export function ProductionBmhpPackagingTab() {
     setPage(1)
   }
 
+  function changeStage(next: StageFilter) {
+    setStage(next)
+    setPage(1)
+  }
+
   function resetFilter() {
     setDraft(defaultFilter)
     setFilter(defaultFilter)
@@ -189,7 +247,6 @@ export function ProductionBmhpPackagingTab() {
     setPackagingModalItem(record)
     setSelectedTypeId(record.packaging_type_id ? String(record.packaging_type_id) : "")
     setChemicalIndicator(record.chemical_indicator ?? "")
-    setPackNote(record.note ?? "")
   }
 
   async function handleCompletePackaging() {
@@ -209,7 +266,6 @@ export function ProductionBmhpPackagingTab() {
       const payload = {
         packaging_type_id: Number(selectedTypeId),
         chemical_indicator: chemicalIndicator.trim(),
-        note: packNote.trim() || undefined,
       }
 
       const res = await api.post(
@@ -297,16 +353,28 @@ export function ProductionBmhpPackagingTab() {
               <RotateCcw className="h-4 w-4" />
             </Button>
           )}
-          <Button
-            type="button"
-            onClick={reload}
-            variant="outline"
-            className="shrink-0 text-xs text-gray-600"
-          >
-            Muat Ulang
-          </Button>
         </div>
       </form>
+
+      {/* Filter tahap — sekaligus keterangan warna garis kiri kartu. Langsung
+          diterapkan saat diklik (bukan lewat tombol Cari). */}
+      <div className="flex flex-wrap gap-2">
+        {STAGE_FILTERS.map((f) => (
+          <button
+            key={f.key || "all"}
+            type="button"
+            onClick={() => changeStage(f.key)}
+            className={`inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-semibold transition-colors ${
+              stage === f.key
+                ? "border-[#075489] bg-[#075489]/10 text-[#075489]"
+                : "border-gray-200 bg-white text-gray-600 hover:bg-gray-50"
+            }`}
+          >
+            <span className={`h-3 w-1 rounded-full ${f.dot}`} aria-hidden />
+            {f.label}
+          </button>
+        ))}
+      </div>
 
       {/* Tabel Daftar Pengemasan */}
       {loading ? (
@@ -321,14 +389,15 @@ export function ProductionBmhpPackagingTab() {
       ) : (
         <div className="space-y-4">
           {items.map((pkg) => {
-            const isCompleted = pkg.status === "selesai" || pkg.status === "sterilisasi"
+            const isCompleted = Boolean(pkg.completed_at)
             const isVoid = Boolean(pkg.disabled)
+            const tone = STAGE_TONE[pkg.stage ?? (isCompleted ? "siap" : "belum")]
 
             return (
               <div
                 key={pkg.id}
-                className={`overflow-hidden rounded-xl border bg-white transition hover:shadow-sm ${
-                  isVoid ? "border-red-200 opacity-75" : "border-gray-200"
+                className={`overflow-hidden rounded-xl border border-l-4 transition hover:shadow-sm ${tone} ${
+                  isVoid ? "opacity-75" : ""
                 }`}
               >
                 <div className="flex flex-wrap items-center justify-between gap-3 border-b border-gray-100 bg-gray-50/60 px-5 py-3">
@@ -338,31 +407,11 @@ export function ProductionBmhpPackagingTab() {
                       {pkg.code}
                     </span>
                     <span className="text-xs text-gray-400">|</span>
-                    <span className="text-xs text-gray-600">
-                      Dari Produksi:{" "}
-                      <strong className="text-gray-900">{pkg.production?.code ?? "-"}</strong>
-                    </span>
-                  </div>
-
-                  <div className="flex items-center gap-2">
-                    {isVoid ? (
-                      <Badge className="bg-red-50 text-red-700">Gagal Steril</Badge>
+                    {/* Tanggal dikemas — kosong selama belum Inspeksi & Kemas. */}
+                    {pkg.packaged_at ? (
+                      <span className="text-xs text-gray-600">{formatDate(pkg.packaged_at, lang)}</span>
                     ) : (
-                      <Badge
-                        className={
-                          pkg.status === "sterilisasi"
-                            ? "bg-purple-50 text-purple-700"
-                            : isCompleted
-                              ? "bg-emerald-50 text-emerald-700"
-                              : "bg-amber-50 text-amber-700"
-                        }
-                      >
-                        {pkg.status === "sterilisasi"
-                          ? "Dalam Sterilisasi"
-                          : isCompleted
-                            ? "Siap Steril"
-                            : "Menunggu Pengemasan"}
-                      </Badge>
+                      <span className="text-xs text-gray-400">—</span>
                     )}
                   </div>
                 </div>
@@ -370,9 +419,6 @@ export function ProductionBmhpPackagingTab() {
                 <div className="p-5">
                   <div className="grid grid-cols-1 gap-4 md:grid-cols-12 md:items-center">
                     <div className="space-y-1.5 md:col-span-8">
-                      <div className="text-xs font-medium text-gray-400 uppercase tracking-wider">
-                        Rincian Item BMHP
-                      </div>
                       <div className="flex flex-wrap gap-2">
                         {packagingContents(pkg.items).map((it) => (
                           <div
@@ -396,14 +442,9 @@ export function ProductionBmhpPackagingTab() {
                         </div>
                       )}
 
-                      {/* Kemasan GS- = kemas ulang otomatis setelah batch gagal steril;
-                          kemasan void membawa catatan alasan di-void-nya. */}
-                      {(isVoid || pkg.prefix.startsWith("GS-")) && pkg.note && (
-                        <div className="mt-2 inline-flex items-center gap-1.5 rounded-md bg-red-50 px-2 py-1 text-xs font-medium text-red-700">
-                          <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
-                          {pkg.note}
-                        </div>
-                      )}
+                      {/* Kemasan void: rinciannya dari JSON `disabled_reason` — alasan,
+                          siklus steril & alasan gagalnya, kemasan packaging ulang. */}
+                      {isVoid && <VoidInfo detail={pkg.disabled_reason} />}
                     </div>
 
                     <div className="flex items-center justify-end gap-2 md:col-span-4">
@@ -453,19 +494,7 @@ export function ProductionBmhpPackagingTab() {
           size="md"
         >
           <div className="space-y-4 py-2">
-            <div className="rounded-lg bg-gray-50 p-3 text-xs text-gray-600">
-              Batch:{" "}
-              <strong className="text-gray-900">
-                {packagingModalItem.prefix}
-                {packagingModalItem.code}
-              </strong>{" "}
-              • Produksi:{" "}
-              <strong className="text-gray-900">
-                {packagingModalItem.production?.code ?? "-"}
-              </strong>
-            </div>
-
-            <div>
+            <div className="space-y-1.5">
               <Label htmlFor="pkg-type-select">
                 Jenis Kemasan <span className="text-red-500">*</span>
               </Label>
@@ -475,12 +504,12 @@ export function ProductionBmhpPackagingTab() {
                 options={typeOptions}
                 placeholder={packagingTypesLoading ? t("common.loading") : "Pilih jenis kemasan..."}
               />
-              <p className="mt-1 text-[11px] text-gray-500">
+              <p className="text-[11px] text-gray-500">
                 Jenis kemasan menentukan masa simpan steril (tgl kedaluwarsa otomatis).
               </p>
             </div>
 
-            <div>
+            <div className="space-y-1.5">
               <Label htmlFor="chem-ind">
                 Lot / Batch Indikator Kimia <span className="text-red-500">*</span>
               </Label>
@@ -489,16 +518,6 @@ export function ProductionBmhpPackagingTab() {
                 value={chemicalIndicator}
                 onChange={(e) => setChemicalIndicator(e.target.value)}
                 placeholder="Contoh: LOT-CHEM-2026-001"
-              />
-            </div>
-
-            <div>
-              <Label htmlFor="pack-note">Catatan Tambahan</Label>
-              <Input
-                id="pack-note"
-                value={packNote}
-                onChange={(e) => setPackNote(e.target.value)}
-                placeholder="Catatan inspeksi atau kondisi..."
               />
             </div>
 

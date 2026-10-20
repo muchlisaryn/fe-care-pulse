@@ -20,6 +20,11 @@ type ExpiryCardProps = {
   expired?: boolean
   /** Masuk masa peringatan (H-7) — termasuk yang sudah lewat. */
   alert?: boolean
+  /**
+   * Tanpa kartu: hanya teks merah "09 Agu 2026 (5 hari lagi)" — untuk tabel yang
+   * kolomnya sudah berjudul Kedaluwarsa dan kartunya terlalu memakan tempat.
+   */
+  plain?: boolean
   className?: string
 }
 
@@ -51,6 +56,7 @@ export function ExpiryCard({
   daysToExpiry,
   expired = false,
   alert = false,
+  plain = false,
   className = "",
 }: ExpiryCardProps) {
   // Selalu mengikuti bahasa yang dipilih di header.
@@ -66,6 +72,18 @@ export function ExpiryCard({
   }
 
   const remaining = remainingKey(daysToExpiry, expired)
+
+  if (plain) {
+    return (
+      <span
+        title={expired ? t("expiryCard.titleExpired") : t("expiryCard.titleSoon")}
+        className={"text-red-600 " + className}
+      >
+        {formatDate(date, lang)}
+        {remaining && <> ({t(remaining.key, remaining.vars)})</>}
+      </span>
+    )
+  }
 
   return (
     <span
