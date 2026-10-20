@@ -24,7 +24,7 @@ import { DateRangeFields } from "@/components/molecules/DateRangeFields"
 import { Pagination } from "@/components/molecules/Pagination"
 import { Barcode } from "@/components/atoms/Barcode"
 import { useToast } from "@/components/molecules/ToastProvider"
-import { useLanguage } from "@/lib/i18n"
+import { useLanguage, localeOf, type Lang } from "@/lib/i18n"
 import { usePagedList } from "@/lib/usePagedList"
 import { packagingContents } from "@/lib/bmhpPackaging"
 import { rentangSemingguTerakhir } from "@/lib/dateRange"
@@ -51,6 +51,8 @@ export type PackagingBmhpRecord = {
   prefix: string
   code: string
   status: "diproses" | "selesai" | "sterilisasi"
+  /** Kemasan di-void (mis. gagal steril) — tampil sebagai riwayat saja. */
+  disabled?: boolean
   packaging_type_id?: number | null
   packaging_type?: {
     id: number
@@ -79,9 +81,18 @@ export type PackagingBmhpRecord = {
   items?: PackagingBmhpItem[]
 }
 
+// Tanggal dari API berupa ISO (2026-11-19T00:00:00.000000Z) — tampilkan tanggalnya
+// saja, nama bulan ikut bahasa aktif.
+function formatDate(value: string | null | undefined, lang: Lang) {
+  if (!value) return "-"
+  const d = new Date(value)
+  if (Number.isNaN(d.getTime())) return value
+  return d.toLocaleDateString(localeOf(lang), { day: "2-digit", month: "short", year: "numeric" })
+}
+
 export function ProductionBmhpPackagingTab() {
   const toast = useToast()
-  const { t } = useLanguage()
+  const { t, lang } = useLanguage()
 
   // Filter: `draft` = isi form; baru diterapkan (`filter`) saat form Cari disubmit.
   // Rentang tanggal (tgl kemasan dibuat) bawaannya seminggu terakhir.
@@ -311,11 +322,14 @@ export function ProductionBmhpPackagingTab() {
         <div className="space-y-4">
           {items.map((pkg) => {
             const isCompleted = pkg.status === "selesai" || pkg.status === "sterilisasi"
+            const isVoid = Boolean(pkg.disabled)
 
             return (
               <div
                 key={pkg.id}
-                className="overflow-hidden rounded-xl border border-gray-200 bg-white transition hover:shadow-sm"
+                className={`overflow-hidden rounded-xl border bg-white transition hover:shadow-sm ${
+                  isVoid ? "border-red-200 opacity-75" : "border-gray-200"
+                }`}
               >
                 <div className="flex flex-wrap items-center justify-between gap-3 border-b border-gray-100 bg-gray-50/60 px-5 py-3">
                   <div className="flex items-center gap-3">
@@ -331,21 +345,25 @@ export function ProductionBmhpPackagingTab() {
                   </div>
 
                   <div className="flex items-center gap-2">
-                    <Badge
-                      className={
-                        pkg.status === "sterilisasi"
-                          ? "bg-purple-50 text-purple-700"
+                    {isVoid ? (
+                      <Badge className="bg-red-50 text-red-700">Gagal Steril</Badge>
+                    ) : (
+                      <Badge
+                        className={
+                          pkg.status === "sterilisasi"
+                            ? "bg-purple-50 text-purple-700"
+                            : isCompleted
+                              ? "bg-emerald-50 text-emerald-700"
+                              : "bg-amber-50 text-amber-700"
+                        }
+                      >
+                        {pkg.status === "sterilisasi"
+                          ? "Dalam Sterilisasi"
                           : isCompleted
-                            ? "bg-emerald-50 text-emerald-700"
-                            : "bg-amber-50 text-amber-700"
-                      }
-                    >
-                      {pkg.status === "sterilisasi"
-                        ? "Dalam Sterilisasi"
-                        : isCompleted
-                          ? "Siap Steril"
-                          : "Menunggu Pengemasan"}
-                    </Badge>
+                            ? "Siap Steril"
+                            : "Menunggu Pengemasan"}
+                      </Badge>
+                    )}
                   </div>
                 </div>
 
@@ -374,12 +392,13 @@ export function ProductionBmhpPackagingTab() {
                       {pkg.packaging_type && (
                         <div className="mt-2 text-xs text-gray-500">
                           Kemasan: <strong>{pkg.packaging_type.name}</strong> • Expired:{" "}
-                          <strong>{pkg.expiry_date ?? "-"}</strong>
+                          <strong>{formatDate(pkg.expiry_date, lang)}</strong>
                         </div>
                       )}
 
-                      {/* Kemasan GS- = kemas ulang otomatis setelah batch gagal steril. */}
-                      {pkg.prefix.startsWith("GS-") && pkg.note && (
+                      {/* Kemasan GS- = kemas ulang otomatis setelah batch gagal steril;
+                          kemasan void membawa catatan alasan di-void-nya. */}
+                      {(isVoid || pkg.prefix.startsWith("GS-")) && pkg.note && (
                         <div className="mt-2 inline-flex items-center gap-1.5 rounded-md bg-red-50 px-2 py-1 text-xs font-medium text-red-700">
                           <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
                           {pkg.note}
@@ -388,7 +407,8 @@ export function ProductionBmhpPackagingTab() {
                     </div>
 
                     <div className="flex items-center justify-end gap-2 md:col-span-4">
-                      {isCompleted ? (
+                      {/* Kemasan void sudah digantikan kemasan baru — tanpa aksi. */}
+                      {isVoid ? null : isCompleted ? (
                         <Button
                           type="button"
                           variant="outline"
@@ -552,7 +572,8 @@ export function ProductionBmhpPackagingTab() {
                       Kemasan: {lbl.packaging_type ?? "-"} • Petugas: {lbl.operator ?? "-"}
                     </div>
                     <div className="text-[11px] text-gray-500">
-                      Tgl Kemas: {lbl.packaged_at ?? "-"} | Exp: {lbl.expiry_date ?? "-"}
+                      Tgl Kemas: {formatDate(lbl.packaged_at, lang)} | Exp:{" "}
+                      {formatDate(lbl.expiry_date, lang)}
                     </div>
                   </div>
 

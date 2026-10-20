@@ -101,6 +101,10 @@ const PHRASE: Record<string, { en: string; id: string }> = {
   "formulir": { en: "Form", id: "Formulir" },
   "form": { en: "Form", id: "Formulir" },
 
+  // ── Rawat Jalan ───────────────────────────────────────────────────────────
+  "rawat jalan": { en: "Outpatient", id: "Rawat Jalan" },
+  "asesmen rawat jalan": { en: "Outpatient Assessment", id: "Asesmen Rawat Jalan" },
+
   // ── Tahap unit di pipeline CSSD (dikirim server sbg `stage_label`) ─────────
   "dalam produksi": { en: "Under Production", id: "Dalam Produksi" },
   "menunggu disimpan di rak": { en: "Awaiting Storage", id: "Menunggu Disimpan di Rak" },

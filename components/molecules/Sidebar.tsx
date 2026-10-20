@@ -30,6 +30,7 @@ import {
   Factory,
   Package,
   Search,
+  Stethoscope,
   type LucideIcon,
 } from "lucide-react"
 import { Input } from "@/components/atoms/Input"
@@ -63,6 +64,7 @@ const ICON_MAP: Record<string, LucideIcon> = {
   production: Boxes,
   factory: Factory,
   package: Package,
+  stethoscope: Stethoscope,
 }
 
 function getIcon(name: string | null): LucideIcon {

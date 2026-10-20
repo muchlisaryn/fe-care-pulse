@@ -27,7 +27,9 @@ import { apiErrorMessage } from "@/lib/apiError"
 import { useT } from "@/lib/i18n"
 
 // Kode diketik manual oleh admin — server tidak lagi membuatkannya.
-const emptyForm = { code: "", name: "", unit_id: "", stock_qty: 0, price: "" }
+// stock_qty disimpan sebagai teks supaya angka 0 di depan tidak menempel ("01")
+// saat diketik — dikonversi ke angka hanya ketika dikirim.
+const emptyForm = { code: "", name: "", unit_id: "", stock_qty: "", price: "" }
 
 export default function MasterBmhpPage() {
   const dispatch = useAppDispatch()
@@ -95,7 +97,7 @@ export default function MasterBmhpPage() {
       code: row.code,
       name: row.name,
       unit_id: row.unit_id != null ? String(row.unit_id) : "",
-      stock_qty: row.stock_qty,
+      stock_qty: String(row.stock_qty ?? ""),
       // Isian harga hanya menerima digit — pecahan rupiahnya dibulatkan.
       price: row.price ? String(Math.round(row.price)) : "",
     })
@@ -370,7 +372,8 @@ export default function MasterBmhpPage() {
                 // Stok boleh pecahan, dua angka di belakang koma.
                 step="0.01"
                 value={form.stock_qty}
-                onChange={(e) => setForm((f) => ({ ...f, stock_qty: Number(e.target.value) }))}
+                placeholder="0"
+                onChange={(e) => setForm((f) => ({ ...f, stock_qty: e.target.value }))}
               />
             </div>
           </div>
