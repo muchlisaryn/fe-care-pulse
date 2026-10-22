@@ -6,7 +6,6 @@ import {
   Package,
   Plus,
   Trash2,
-  AlertTriangle,
   Loader2,
   CheckCircle2,
   PackagePlus,
@@ -27,7 +26,6 @@ export type CandidateBmhp = {
   id: number
   code: string
   name: string
-  stock_qty: number
   unit?: string | null
   price?: number
 }
@@ -106,7 +104,7 @@ export function ProductionBmhpNewTab({ onSuccess }: Props) {
     if (addMode === "satuan") {
       return bmhps.map((b) => ({
         value: String(b.id),
-        label: `${b.code} - ${b.name} (Stok: ${b.stock_qty} ${b.unit ?? "Pcs"})`,
+        label: `${b.code} - ${b.name} (${b.unit ?? "Pcs"})`,
       }))
     }
     return packages.map((p) => ({
@@ -208,41 +206,10 @@ export function ProductionBmhpNewTab({ onSuccess }: Props) {
     setLines(lines.map((l) => (l.id === id ? { ...l, quantity: newQty } : l)))
   }
 
-  // Hitung total kebutuhan BMHP dari seluruh baris untuk memvalidasi stok di tabel
-  const stockCheck = useMemo(() => {
-    const required: Record<number, number> = {}
-    for (const line of lines) {
-      if (line.type === "satuan") {
-        required[line.refId] = (required[line.refId] ?? 0) + line.quantity
-      } else if (line.items) {
-        for (const it of line.items) {
-          const needed = it.qty * line.quantity
-          required[it.bmhp_id] = (required[it.bmhp_id] ?? 0) + needed
-        }
-      }
-    }
-
-    const errors: string[] = []
-    for (const [bmhpIdStr, neededQty] of Object.entries(required)) {
-      const bId = Number(bmhpIdStr)
-      const bmhp = bmhps.find((b) => b.id === bId)
-      if (bmhp && bmhp.stock_qty < neededQty) {
-        errors.push(
-          `Stok ${bmhp.name} tidak cukup (Butuh: ${neededQty} ${bmhp.unit ?? "Pcs"}, Tersedia: ${bmhp.stock_qty} ${bmhp.unit ?? "Pcs"})`,
-        )
-      }
-    }
-
-    return { required, errors, hasError: errors.length > 0 }
-  }, [lines, bmhps])
-
+  // Master BMHP tidak menyimpan stok — produksi tidak perlu dicek stoknya.
   async function handleSubmit() {
     if (lines.length === 0) {
       toast.error("Daftar produksi masih kosong.")
-      return
-    }
-    if (stockCheck.hasError) {
-      toast.error(stockCheck.errors[0])
       return
     }
 
@@ -489,21 +456,6 @@ export function ProductionBmhpNewTab({ onSuccess }: Props) {
             </table>
           </div>
         )}
-
-        {/* Warning jika stok tidak cukup */}
-        {stockCheck.hasError && (
-          <div className="flex items-start gap-2.5 rounded-lg border border-red-200 bg-red-50 p-3 text-xs text-red-800">
-            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-red-600" />
-            <div className="space-y-1">
-              <span className="font-semibold">Stok Master BMHP Tidak Mencukupi:</span>
-              <ul className="list-disc pl-4">
-                {stockCheck.errors.map((err, i) => (
-                  <li key={i}>{err}</li>
-                ))}
-              </ul>
-            </div>
-          </div>
-        )}
       </div>
 
       {/* Catatan & Tombol Eksekusi */}
@@ -521,14 +473,14 @@ export function ProductionBmhpNewTab({ onSuccess }: Props) {
 
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between border-t border-gray-100 pt-4">
           <div className="text-xs text-gray-500">
-            Setelah tombol ditekan, stok master akan otomatis terpotong dan batch langsung masuk ke
-            antrean <strong>Inspeksi & Pengemasan</strong>.
+            Setelah tombol ditekan, batch langsung masuk ke antrean{" "}
+            <strong>Inspeksi & Pengemasan</strong>.
           </div>
 
           <Button
             type="button"
             onClick={handleSubmit}
-            disabled={submitting || lines.length === 0 || stockCheck.hasError}
+            disabled={submitting || lines.length === 0}
             className="bg-[#075489] text-white hover:bg-[#064775]"
           >
             {submitting ? (

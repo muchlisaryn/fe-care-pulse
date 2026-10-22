@@ -12,10 +12,11 @@ import { Card } from "@/components/molecules/Card"
 import { PageHeader } from "@/components/molecules/PageHeader"
 import { FormSectionHeader } from "@/components/molecules/FormSectionHeader"
 import { PatientRequestCard } from "@/components/molecules/PatientRequestCard"
+import { PatientOrderModal } from "@/components/molecules/PatientOrderModal"
 import { ResultDialog } from "@/components/molecules/ResultDialog"
 import { useAppDispatch, useAppSelector } from "@/lib/store/hooks"
 import { fetchRoomOptions } from "@/lib/store/slices/roomSlice"
-import { invalidateOrders } from "@/lib/store/slices/orderSlice"
+import { invalidateOrders, type OrderType } from "@/lib/store/slices/orderSlice"
 import { useUserOptions } from "@/lib/useUserOptions"
 import { apiErrorMessage } from "@/lib/apiError"
 import { setOrderFlash } from "@/lib/orderFlash"
@@ -36,7 +37,7 @@ function TambahOrderInstrumenContent() {
   const dispatch = useAppDispatch()
   const t = useT()
 
-  const orderType = (searchParams.get("type") === "bmhp" ? "bmhp" : "cssd") as "cssd" | "bmhp"
+  const orderType: OrderType = searchParams.get("type") === "bmhp" ? "bmhp" : "instrumen"
   const isBmhp = orderType === "bmhp"
 
   const rooms = useAppSelector((s) => s.rooms.options)
@@ -71,6 +72,9 @@ function TambahOrderInstrumenContent() {
 
   // Satu grup = satu pasien = satu record order. Selalu ada minimal satu grup.
   const [patients, setPatients] = useState<PatientGroup[]>(() => [emptyPatientGroup()])
+  // Modal pasien (identitas + permintaan, rawat inap): `add` = Tambah Pasien dengan
+  // grup baru `group`, `edit` = ubah pasien `group` yang sudah ada di form.
+  const [patientModal, setPatientModal] = useState<{ mode: "add" | "edit"; group: PatientGroup } | null>(null)
 
   // Pesan validasi yang baru ditampilkan saat klik Simpan.
   const [formError, setFormError] = useState<string | null>(null)
@@ -191,13 +195,38 @@ function TambahOrderInstrumenContent() {
     setPatients((prev) => prev.map((p) => (p.id === next.id ? next : p)))
   }
 
+  // Tambah Pasien → identitas & permintaannya diisi dulu di modal, baru kartunya muncul.
   function addPatient() {
     setFormError(null)
-    setPatients((prev) => [...prev, emptyPatientGroup()])
+    setPatientModal({ mode: "add", group: emptyPatientGroup() })
   }
 
+  function savePatientModal(group: PatientGroup) {
+    if (!patientModal) return
+    if (patientModal.mode === "add") setPatients((prev) => [...prev, group])
+    else setPatients((prev) => prev.map((p) => (p.id === group.id ? group : p)))
+    setFormError(null)
+    setPatientModal(null)
+  }
+
+  // Ruangan rawat inap dipilih & pasien pertama belum beridentitas → langsung
+  // buka modal pasiennya, supaya petugas tidak perlu mencari tombolnya.
+  function changeRoom(value: string) {
+    setRoomId(value)
+    const first = patients[0]
+    const room = rooms.find((r) => String(r.id) === value)
+    if (room?.layanan === "rawat_inap" && first && !first.medicalRecordNo.trim() && !first.patientName.trim()) {
+      setPatientModal({ mode: "edit", group: first })
+    }
+  }
+
+  // Selalu sisakan satu grup: di rawat inap grup kosong itu tersembunyi dan diisi
+  // lagi lewat modal; di layanan lain kartu terakhir memang tidak bisa dihapus.
   function removePatient(id: string) {
-    setPatients((prev) => (prev.length <= 1 ? prev : prev.filter((p) => p.id !== id)))
+    setPatients((prev) => {
+      const next = prev.filter((p) => p.id !== id)
+      return next.length > 0 ? next : [emptyPatientGroup()]
+    })
   }
 
   // Ruangan terpilih + layanannya. Identitas pasien hanya WAJIB untuk RAWAT INAP;
@@ -207,14 +236,20 @@ function TambahOrderInstrumenContent() {
   const selectedRoom = rooms.find((r) => String(r.id) === roomId)
   const needPatient = selectedRoom?.layanan === "rawat_inap"
 
-  const totalQty = patients.reduce((sum, p) => sum + totalQtyOf(p.requests), 0)
-  const filledPatients = patients.filter((p) => p.requests.length > 0)
+  // Rawat inap: pasien baru tampil & ikut disimpan setelah diisi lewat modal —
+  // grup kosong (belum beridentitas & belum ada permintaan) disembunyikan.
+  const activePatients = needPatient
+    ? patients.filter((p) => p.medicalRecordNo.trim() || p.patientName.trim() || p.requests.length > 0)
+    : patients
+
+  const totalQty = activePatients.reduce((sum, p) => sum + totalQtyOf(p.requests), 0)
+  const filledPatients = activePatients.filter((p) => p.requests.length > 0)
 
   // Ruangan DIKUNCI begitu ada identitas pasien yang sudah diisi: mengganti ruangan
   // bisa mengubah layanannya (rawat inap ↔ bukan), sehingga identitas yang sudah
   // diketik jadi tidak berlaku dan simpanan gagal divalidasi. Kosongkan identitasnya
   // dulu bila ruangannya memang perlu diganti.
-  const roomLocked = patients.some((p) => p.medicalRecordNo.trim() !== "" || p.patientName.trim() !== "")
+  const roomLocked = activePatients.some((p) => p.medicalRecordNo.trim() !== "" || p.patientName.trim() !== "")
 
   // Wajib: peminjam, ruangan, tanggal + jam pinjam, minimal 1 permintaan pada TIAP
   // pasien, dan (khusus rawat inap) identitas tiap pasien.
@@ -223,8 +258,8 @@ function TambahOrderInstrumenContent() {
     roomId &&
     orderDate &&
     orderTime &&
-    patients.length > 0 &&
-    patients.every(
+    activePatients.length > 0 &&
+    activePatients.every(
       (p) =>
         p.requests.length > 0 &&
         (!needPatient || (p.medicalRecordNo.trim() && p.patientName.trim())),
@@ -239,7 +274,7 @@ function TambahOrderInstrumenContent() {
       return
     }
     // Validasi jumlah baru di sini (saat klik Simpan).
-    const invalid = patients.some((p) =>
+    const invalid = activePatients.some((p) =>
       p.requests.some((r) => !/^\d+$/.test(r.quantity) || Number(r.quantity) < 1),
     )
     if (invalid) {
@@ -248,7 +283,7 @@ function TambahOrderInstrumenContent() {
     }
     // Satu pasien = satu order: No. RM tidak boleh dobel antar grup.
     if (needPatient) {
-      const rms = patients.map((p) => p.medicalRecordNo.trim())
+      const rms = activePatients.map((p) => p.medicalRecordNo.trim())
       if (new Set(rms).size !== rms.length) {
         setFormError(t("orderCreate.errDuplicateMr"))
         return
@@ -256,7 +291,7 @@ function TambahOrderInstrumenContent() {
     }
     // Total lintas pasien tidak boleh melebihi stok steril (mis. setelah diedit manual).
     const totals = new Map<string, { type: AddMode; refId: number; name: string; qty: number }>()
-    for (const p of patients) {
+    for (const p of activePatients) {
       for (const r of p.requests) {
         const key = `${r.type}-${r.refId}`
         const cur = totals.get(key) ?? { type: r.type, refId: r.refId, name: r.name, qty: 0 }
@@ -292,7 +327,7 @@ function TambahOrderInstrumenContent() {
         order_time: orderTime || null,
         return_plan_date: returnPlanDate || null,
         note: note.trim() || null,
-        patients: patients.map((p) => ({
+        patients: activePatients.map((p) => ({
           // Identitas pasien hanya dikirim untuk layanan rawat inap.
           medical_record_no: needPatient ? p.medicalRecordNo.trim() || null : null,
           patient_name: needPatient ? p.patientName.trim() || null : null,
@@ -318,10 +353,10 @@ function TambahOrderInstrumenContent() {
       dispatch(invalidateOrders())
       // Modal "berhasil" muncul di halaman daftar setelah redirect.
       setOrderFlash(
-        patients.length > 1
+        activePatients.length > 1
           ? isBmhp
             ? t("orderCreate.createdManyBmhp")
-            : t("orderCreate.createdMany", { n: patients.length })
+            : t("orderCreate.createdMany", { n: activePatients.length })
           : isBmhp
             ? t("orderCreate.createdOneBmhp")
             : t("orderCreate.createdOne"),
@@ -378,7 +413,7 @@ function TambahOrderInstrumenContent() {
             <SelectSearch
               options={roomOptions}
               value={roomId}
-              onChange={setRoomId}
+              onChange={changeRoom}
               loading={roomLoading}
               // Terkunci setelah identitas pasien diisi — lihat `roomLocked`.
               disabled={roomLoading || roomLocked}
@@ -449,15 +484,16 @@ function TambahOrderInstrumenContent() {
           </p>
         </div>
 
-        {patients.map((p, i) => (
+        {activePatients.map((p, i) => (
           <PatientRequestCard
             key={p.id}
             index={i}
             group={p}
             onChange={updatePatient}
             onRemove={() => removePatient(p.id)}
-            canRemove={patients.length > 1}
+            canRemove={needPatient || activePatients.length > 1}
             showPatientFields={needPatient}
+            onEditPatient={() => setPatientModal({ mode: "edit", group: p })}
             instruments={instruments}
             catalogs={catalogs}
             instrumentLoading={instrumentLoading}
@@ -499,11 +535,31 @@ function TambahOrderInstrumenContent() {
         >
           {saving
             ? t("common.saving")
-            : patients.length > 1
-              ? t("orderCreate.saveOrders", { n: patients.length })
+            : activePatients.length > 1
+              ? t("orderCreate.saveOrders", { n: activePatients.length })
               : t("orderCreate.saveOrder")}
         </Button>
       </div>
+
+      {patientModal && (
+        <PatientOrderModal
+          onClose={() => setPatientModal(null)}
+          mode={patientModal.mode}
+          initial={patientModal.group}
+          takenMrNos={patients
+            .filter((p) => p.id !== patientModal.group.id)
+            .map((p) => p.medicalRecordNo.trim())
+            .filter(Boolean)}
+          onSave={savePatientModal}
+          instruments={instruments}
+          catalogs={catalogs}
+          instrumentLoading={instrumentLoading}
+          catalogLoading={catalogLoading}
+          orderType={orderType}
+          sterileAvailFor={sterileAvailFor}
+          usedByOthers={(type, refId) => usedByOthers(patientModal.group.id, type, refId)}
+        />
+      )}
 
       {/* Gagal menyimpan order (mis. stok steril keburu diambil order lain) */}
       <ResultDialog

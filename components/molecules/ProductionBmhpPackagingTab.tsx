@@ -10,22 +10,22 @@ import {
   CheckCircle2,
   Tag,
   Clock,
-  Boxes,
   RotateCcw,
   AlertTriangle,
 } from "lucide-react"
 import { Button } from "@/components/atoms/Button"
+import { Badge } from "@/components/atoms/Badge"
 import { Input } from "@/components/atoms/Input"
 import { Label } from "@/components/atoms/Label"
 import { SelectSearch } from "@/components/atoms/SelectSearch"
 import { Modal } from "@/components/molecules/Modal"
 import { DateRangeFields } from "@/components/molecules/DateRangeFields"
 import { Pagination } from "@/components/molecules/Pagination"
+import { BmhpContentChips } from "@/components/molecules/BmhpContentChips"
 import { Barcode } from "@/components/atoms/Barcode"
 import { useToast } from "@/components/molecules/ToastProvider"
 import { useLanguage, localeOf, type Lang } from "@/lib/i18n"
 import { usePagedList } from "@/lib/usePagedList"
-import { packagingContents } from "@/lib/bmhpPackaging"
 import { rentangSemingguTerakhir } from "@/lib/dateRange"
 import { FAILURE_REASONS } from "@/lib/bmhpSterilization"
 import api from "@/lib/axios"
@@ -83,14 +83,23 @@ export type PackagingBmhpRecord = {
 
 type PackagingStage = "belum" | "siap" | "sterilisasi" | "steril" | "gagal"
 
-// Warna kartu per tahap: garis kiri tebal + latar tipis. Siap steril & sedang
-// disteril sama-sama "dalam proses".
+// Warna kartu per tahap: garis kiri tebal + latar tipis. Palet sama dengan tab
+// Sterilisasi — siap steril biru langit, proses steril indigo.
 const STAGE_TONE: Record<PackagingStage, string> = {
   belum: "border-gray-200 border-l-amber-400 bg-white",
   siap: "border-gray-200 border-l-sky-500 bg-white",
-  sterilisasi: "border-gray-200 border-l-sky-500 bg-white",
+  sterilisasi: "border-gray-200 border-l-indigo-500 bg-white",
   steril: "border-gray-200 border-l-emerald-500 bg-emerald-50/20",
   gagal: "border-red-200 border-l-red-500 bg-red-50/30",
+}
+
+// Lencana tahap di pojok kartu — warnanya mengikuti garis kiri kartu.
+const STAGE_BADGE: Record<PackagingStage, { label: string; tone: string }> = {
+  belum: { label: "Belum dikemas", tone: "bg-amber-100 text-amber-800" },
+  siap: { label: "Siap steril", tone: "bg-sky-100 text-sky-800" },
+  sterilisasi: { label: "Proses steril", tone: "bg-indigo-100 text-indigo-800" },
+  steril: { label: "Steril", tone: "bg-emerald-100 text-emerald-800" },
+  gagal: { label: "Gagal steril", tone: "bg-red-100 text-red-700" },
 }
 
 // Label `disabled_reason.reason` (PackagingBmhp::DISABLED_*).
@@ -387,74 +396,62 @@ export function ProductionBmhpPackagingTab() {
           Tidak ada antrean pengemasan BMHP saat ini.
         </div>
       ) : (
-        <div className="space-y-4">
-          {items.map((pkg) => {
-            const isCompleted = Boolean(pkg.completed_at)
-            const isVoid = Boolean(pkg.disabled)
-            const tone = STAGE_TONE[pkg.stage ?? (isCompleted ? "siap" : "belum")]
+        <div className="space-y-3">
+          {/* Kotak-kotak ringkas seperti tab Sterilisasi — 3 kolom di layar lebar. */}
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
+            {items.map((pkg) => {
+              const isCompleted = Boolean(pkg.completed_at)
+              const isVoid = Boolean(pkg.disabled)
+              const stageKey = pkg.stage ?? (isCompleted ? "siap" : "belum")
 
-            return (
-              <div
-                key={pkg.id}
-                className={`overflow-hidden rounded-xl border border-l-4 transition hover:shadow-sm ${tone} ${
-                  isVoid ? "opacity-75" : ""
-                }`}
-              >
-                <div className="flex flex-wrap items-center justify-between gap-3 border-b border-gray-100 bg-gray-50/60 px-5 py-3">
-                  <div className="flex items-center gap-3">
-                    <span className="font-mono text-sm font-bold text-[#075489]">
-                      {pkg.prefix}
-                      {pkg.code}
-                    </span>
-                    <span className="text-xs text-gray-400">|</span>
-                    {/* Tanggal dikemas — kosong selama belum Inspeksi & Kemas. */}
-                    {pkg.packaged_at ? (
-                      <span className="text-xs text-gray-600">{formatDate(pkg.packaged_at, lang)}</span>
-                    ) : (
-                      <span className="text-xs text-gray-400">—</span>
-                    )}
-                  </div>
-                </div>
-
-                <div className="p-5">
-                  <div className="grid grid-cols-1 gap-4 md:grid-cols-12 md:items-center">
-                    <div className="space-y-1.5 md:col-span-8">
-                      <div className="flex flex-wrap gap-2">
-                        {packagingContents(pkg.items).map((it) => (
-                          <div
-                            key={`${it.name}|${it.unit_name ?? ""}`}
-                            className="inline-flex items-center gap-1.5 rounded-lg border border-gray-100 bg-gray-50 px-3 py-1.5 text-xs font-medium text-gray-800"
-                          >
-                            <Boxes className="h-3.5 w-3.5 text-[#075489]" />
-                            <span>{it.name}</span>
-                            <span className="text-gray-400">•</span>
-                            <span className="font-semibold text-[#075489]">
-                              {it.quantity} {it.unit_name}
-                            </span>
-                          </div>
-                        ))}
+              return (
+                <div
+                  key={pkg.id}
+                  className={`flex flex-col rounded-xl border border-l-4 p-4 transition hover:shadow-sm ${STAGE_TONE[stageKey]} ${
+                    isVoid ? "opacity-75" : ""
+                  }`}
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <span className="block truncate font-mono text-sm font-bold text-[#075489]">
+                        {pkg.prefix}
+                        {pkg.code}
+                      </span>
+                      {/* Tanggal dikemas — kosong selama belum Inspeksi & Kemas. */}
+                      <div className="text-[11px] text-gray-500">
+                        Dikemas:{" "}
+                        {pkg.packaged_at ? formatDate(pkg.packaged_at, lang) : <span className="text-gray-400">—</span>}
                       </div>
+                    </div>
+                    <Badge className={`shrink-0 ${STAGE_BADGE[stageKey].tone}`}>{STAGE_BADGE[stageKey].label}</Badge>
+                  </div>
 
-                      {pkg.packaging_type && (
-                        <div className="mt-2 text-xs text-gray-500">
-                          Kemasan: <strong>{pkg.packaging_type.name}</strong> • Expired:{" "}
-                          <strong>{formatDate(pkg.expiry_date, lang)}</strong>
-                        </div>
+                  <div className="mt-3 flex-1 space-y-1 border-t border-gray-100 pt-3 text-xs">
+                    <BmhpContentChips packagings={[pkg.items]} />
+                    <div className="text-[11px] text-gray-500">
+                      Kemasan: <strong>{pkg.packaging_type?.name ?? "-"}</strong>
+                      {pkg.expiry_date && (
+                        <>
+                          {" "}
+                          • Exp: <strong>{formatDate(pkg.expiry_date, lang)}</strong>
+                        </>
                       )}
-
-                      {/* Kemasan void: rinciannya dari JSON `disabled_reason` — alasan,
-                          siklus steril & alasan gagalnya, kemasan packaging ulang. */}
-                      {isVoid && <VoidInfo detail={pkg.disabled_reason} />}
                     </div>
 
-                    <div className="flex items-center justify-end gap-2 md:col-span-4">
-                      {/* Kemasan void sudah digantikan kemasan baru — tanpa aksi. */}
-                      {isVoid ? null : isCompleted ? (
+                    {/* Kemasan void: rinciannya dari JSON `disabled_reason` — alasan,
+                        siklus steril & alasan gagalnya, kemasan packaging ulang. */}
+                    {isVoid && <VoidInfo detail={pkg.disabled_reason} />}
+                  </div>
+
+                  {/* Kemasan void sudah digantikan kemasan baru — tanpa aksi. */}
+                  {!isVoid && (
+                    <div className="mt-3">
+                      {isCompleted ? (
                         <Button
                           type="button"
                           variant="outline"
                           onClick={() => handleViewLabels(pkg)}
-                          className="text-xs text-[#075489] hover:bg-blue-50"
+                          className="w-full text-xs text-[#075489] hover:bg-blue-50"
                         >
                           <Printer className="mr-1.5 h-3.5 w-3.5" />
                           Cetak Label
@@ -463,18 +460,18 @@ export function ProductionBmhpPackagingTab() {
                         <Button
                           type="button"
                           onClick={() => openPackagingModal(pkg)}
-                          className="bg-amber-600 text-xs text-white hover:bg-amber-700"
+                          className="w-full bg-amber-600 text-xs text-white hover:bg-amber-700"
                         >
                           <PackageCheck className="mr-1.5 h-3.5 w-3.5" />
                           Inspeksi & Kemas
                         </Button>
                       )}
                     </div>
-                  </div>
+                  )}
                 </div>
-              </div>
-            )
-          })}
+              )
+            })}
+          </div>
           <Pagination
             currentPage={page}
             totalPages={totalPages}

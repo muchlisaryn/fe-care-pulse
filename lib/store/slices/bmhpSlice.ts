@@ -8,7 +8,6 @@ export type Bmhp = {
   // Satuan merujuk master satuan; `unit` adalah namanya, dikirim server.
   unit_id: number | null
   unit: string | null
-  stock_qty: number
   // Harga satuan (rupiah).
   price: number
   created_at: string

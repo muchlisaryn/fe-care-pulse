@@ -23,6 +23,7 @@ import { Modal } from "@/components/molecules/Modal"
 import { ResultDialog } from "@/components/molecules/ResultDialog"
 import { DateRangeFields } from "@/components/molecules/DateRangeFields"
 import { Pagination } from "@/components/molecules/Pagination"
+import { BmhpContentChips } from "@/components/molecules/BmhpContentChips"
 import { useToast } from "@/components/molecules/ToastProvider"
 import { localeOf, useLanguage } from "@/lib/i18n"
 import { usePagedList } from "@/lib/usePagedList"
@@ -124,8 +125,8 @@ type SterilFeedRow =
 // Chip filter tahap. Warna titiknya = warna aksen kartu tahap itu.
 const STAGE_FILTERS: { key: SterilStage | ""; labelKey: string; dot: string }[] = [
   { key: "", labelKey: "productionBmhp.sterAll", dot: "bg-gray-300" },
-  { key: "belum", labelKey: "productionBmhp.sterPending", dot: "bg-gray-400" },
-  { key: "menunggu", labelKey: "productionBmhp.sterWaiting", dot: "bg-amber-400" },
+  { key: "belum", labelKey: "productionBmhp.sterPending", dot: "bg-sky-500" },
+  { key: "menunggu", labelKey: "productionBmhp.sterWaiting", dot: "bg-indigo-500" },
   { key: "sudah", labelKey: "productionBmhp.sterDone", dot: "bg-emerald-500" },
 ]
 
@@ -138,35 +139,6 @@ function batchPackagings(batch: SterilizationBmhpBatch) {
   ]
 }
 
-/**
- * Isi kemasan sebagai chip "nama · jumlah" (tanpa kode kemasan). `packagings` =
- * label-label per kemasan. Jumlah hanya digabung untuk BMHP yang sama DI DALAM
- * satu kemasan (mis. set-set paket); BMHP berbeda atau kemasan berbeda tetap jadi
- * chip sendiri-sendiri.
- */
-function ContentChips({ packagings }: { packagings: SterilReadyPackaging["items"][] }) {
-  const contents = packagings.flatMap((items) => packagingContents(items))
-  if (contents.length === 0) return <span className="text-xs text-gray-400">—</span>
-  const qty = (it: (typeof contents)[number]) => [it.quantity, it.unit_name].filter(Boolean).join(" ")
-  // Selalu SATU baris supaya tinggi kartu seragam: chip yang tidak muat disembunyikan
-  // & diganti "…" (text-overflow pada chip inline), isi lengkapnya ada di tooltip.
-  return (
-    <div
-      className="truncate text-xs leading-7 text-gray-400"
-      title={contents.map((it) => `${it.name} ${qty(it)}`).join(", ")}
-    >
-      {contents.map((it, i) => (
-        <span
-          key={`${i}|${it.name}|${it.unit_name ?? ""}`}
-          className="mr-1.5 inline-flex max-w-full items-center gap-1.5 whitespace-nowrap rounded-md border border-gray-100 bg-white px-2 py-0.5 align-middle text-xs font-medium leading-5 text-gray-800"
-        >
-          <span className="truncate">{it.name}</span>
-          <span className="shrink-0 font-semibold text-[#075489]">{qty(it)}</span>
-        </span>
-      ))}
-    </div>
-  )
-}
 
 export function ProductionBmhpSterilizationTab() {
   const toast = useToast()
@@ -474,7 +446,7 @@ export function ProductionBmhpSterilizationTab() {
                     : "border-gray-200 bg-white text-gray-600 hover:bg-gray-50"
                 }`}
               >
-                <span className={`h-2 w-2 rounded-full ${f.dot}`} aria-hidden />
+                <span className={`h-3 w-1 rounded-full ${f.dot}`} aria-hidden />
                 {t(f.labelKey)}
                 <span className="text-gray-400">{count ?? "…"}</span>
               </button>
@@ -497,13 +469,12 @@ export function ProductionBmhpSterilizationTab() {
             className="pl-9"
           />
         </div>
-        {/* Maks. 3 hari — sama dengan validasi backend (STERIL_MAX_DAYS). */}
+        {/* Rentang bebas — tanggal akhir tidak ikut digeser saat tanggal awal diubah. */}
         <DateRangeFields
           from={draft.dateFrom}
           to={draft.dateTo}
           onFromChange={(v) => setDraft((d) => ({ ...d, dateFrom: v }))}
           onToChange={(v) => setDraft((d) => ({ ...d, dateTo: v }))}
-          maxDays={3}
         />
         <div className="flex gap-2 sm:col-span-2 lg:col-span-1">
           <Button type="submit" className="flex-1 bg-[#075489] text-white hover:bg-[#075489]/90 lg:flex-none">
@@ -533,7 +504,7 @@ export function ProductionBmhpSterilizationTab() {
               id="select-all"
               checked={selectedPkgIds.size === readyList.length}
               onChange={toggleAll}
-              className="h-4 w-4 rounded border-gray-300 accent-gray-700"
+              className="h-4 w-4 rounded border-gray-300 accent-sky-600"
             />
             <label htmlFor="select-all" className="cursor-pointer text-xs font-semibold text-gray-700">
               Pilih Semua Kemasan Belum Diproses ({selectedPkgIds.size} dipilih)
@@ -858,11 +829,13 @@ export function ProductionBmhpSterilizationTab() {
   )
 }
 
-// Warna kartu per tahap: aksen garis kiri + latar tipis + lencana.
+// Warna kartu per tahap: aksen garis kiri + latar tipis + lencana. Sama dengan
+// tab Pengemasan — siap steril biru langit, proses steril indigo, steril hijau,
+// gagal merah.
 const CARD_TONE = {
-  belum: { card: "border-l-gray-400 bg-gray-50", badge: "bg-gray-200 text-gray-700" },
-  menunggu: { card: "border-l-amber-400 bg-amber-50/40", badge: "bg-amber-100 text-amber-800" },
-  steril: { card: "border-l-emerald-500 bg-emerald-50/30", badge: "bg-emerald-100 text-emerald-800" },
+  belum: { card: "border-l-sky-500 bg-white", badge: "bg-sky-100 text-sky-800" },
+  menunggu: { card: "border-l-indigo-500 bg-white", badge: "bg-indigo-100 text-indigo-800" },
+  steril: { card: "border-l-emerald-500 bg-emerald-50/20", badge: "bg-emerald-100 text-emerald-800" },
   gagal: { card: "border-l-red-500 bg-red-50/30", badge: "bg-red-100 text-red-700" },
 } as const
 
@@ -881,7 +854,7 @@ function ReadyPackagingCard({
     <div
       onClick={onToggle}
       className={`flex cursor-pointer flex-col rounded-xl border border-l-4 p-4 transition-all ${CARD_TONE.belum.card} ${
-        checked ? "border-gray-500 shadow-sm ring-1 ring-gray-400" : "border-gray-200 hover:border-gray-300"
+        checked ? "border-sky-500 shadow-sm ring-1 ring-sky-400" : "border-gray-200 hover:border-gray-300"
       }`}
     >
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -890,7 +863,7 @@ function ReadyPackagingCard({
             type="checkbox"
             checked={checked}
             onChange={() => {}} // ditangani onClick kartu
-            className="h-4 w-4 rounded border-gray-300 accent-gray-700"
+            className="h-4 w-4 rounded border-gray-300 accent-sky-600"
           />
           <div>
             <span className="font-mono text-sm font-bold text-gray-900">
@@ -904,7 +877,7 @@ function ReadyPackagingCard({
       </div>
 
       <div className="mt-3 space-y-1 border-t border-gray-200 pt-3 text-xs">
-        <ContentChips packagings={[pkg.items]} />
+        <BmhpContentChips packagings={[pkg.items]} />
         <div className="text-[11px] text-gray-500">
           Kemasan: <strong>{pkg.packaging_type?.name ?? "-"}</strong>
           {pkg.expiry_date && (
@@ -969,7 +942,7 @@ function BatchCard({
       <div className="mt-3 flex-1 space-y-1 border-t border-gray-100 pt-3 text-xs text-gray-600">
         {/* Isi batch: nama + jumlah saja (tanpa kode kemasan). */}
         <div className="pb-1">
-          <ContentChips packagings={packagings.map((p) => p.items)} />
+          <BmhpContentChips packagings={packagings.map((p) => p.items)} />
         </div>
         <div className="text-[11px]">
           Siklus <strong>{batch.cycle_number ?? "-"}</strong> • <strong>{batch.temperature ? `${batch.temperature}°C` : "-"}</strong>{" "}

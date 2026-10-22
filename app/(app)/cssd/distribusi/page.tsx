@@ -22,7 +22,7 @@ import {
 import api from "@/lib/axios"
 import { useLanguage, localeOf, type Lang } from "@/lib/i18n"
 
-type BmhpOption = { id: number; code: string; name: string; unit: string; stock_qty: number }
+type BmhpOption = { id: number; code: string; name: string; unit: string }
 
 // Item BMHP yang dipilih di form sebelum disubmit.
 type FormItem = {
@@ -107,7 +107,7 @@ export default function DistribusiPage() {
   const roomOptions = rooms.map((r) => ({ value: String(r.id), label: r.name }))
   const bmhpOptions = bmhps.map((b) => ({
     value: String(b.id),
-    label: t("distribution.stockLeft", { name: b.name, qty: b.stock_qty, unit: b.unit }),
+    label: `${b.code} - ${b.name}`,
   }))
 
   function handleAddBmhp() {

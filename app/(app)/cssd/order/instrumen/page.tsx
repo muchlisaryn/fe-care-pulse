@@ -43,6 +43,19 @@ import { useLanguage, localeOf, type Lang } from "@/lib/i18n"
 import api from "@/lib/axios"
 import { statusLabelKey } from "@/lib/orderStatus"
 
+// Satu baris permintaan di modal Detail Order — bentuk seragam untuk baris order
+// instrumen (`request_items`) maupun order BMHP (`bmhp_items`).
+type RequestLine = {
+  id: number
+  type: "satuan" | "paket"
+  quantity: number
+  pkgName: string | null
+  singleName: string | null
+  refId: number | null
+  /** Isi satu paket: nama + jumlah per set. */
+  contents: { id: number | undefined; name: string | undefined; perSet: number }[]
+}
+
 // Satu BUNGKUS fisik pada modal Detail Order: satu nomor label kemasan (barcode_no).
 // Paket 2 set → 2 grup; instrumen satuan sejenis dalam satu bungkus → satu grup.
 type DetailUnitGroup = {
@@ -596,6 +609,41 @@ export default function OrderInstrumenPage() {
       return next
     })
   }
+
+  // Baris permintaan di modal detail. Order instrumen membacanya dari
+  // `request_items`, order BMHP dari `bmhp_items` (tabel order_request_bmhp) —
+  // keduanya diseragamkan dulu supaya tampilannya satu.
+  const requestLines = useMemo<RequestLine[]>(() => {
+    if (!detail) return []
+    if (detail.order_type === "bmhp") {
+      return (detail.bmhp_items ?? []).map((r) => ({
+        id: r.id,
+        type: r.type,
+        quantity: r.quantity,
+        pkgName: r.package_name || r.package_bmhp?.name || null,
+        singleName: r.item_name || r.bmhp?.name || null,
+        refId: r.type === "paket" ? r.package_bmhp_id : r.bmhp_id,
+        contents: (r.package_bmhp?.items ?? []).map((ci) => ({
+          id: ci.bmhp_id,
+          name: ci.bmhp?.name,
+          perSet: ci.qty ?? 1,
+        })),
+      }))
+    }
+    return (detail.request_items ?? []).map((r) => ({
+      id: r.id,
+      type: r.type,
+      quantity: r.quantity,
+      pkgName: r.package_name || r.catalog?.name || null,
+      singleName: r.item_name || r.instrument?.name || null,
+      refId: r.type === "paket" ? r.instrument_catalog_id : r.instrument_id,
+      contents: (r.catalog?.items ?? []).map((ci) => ({
+        id: ci.instrument_id,
+        name: ci.instrument?.name,
+        perSet: ci.quantity ?? 1,
+      })),
+    }))
+  }, [detail])
 
   // Kelompokkan instrumen dipinjam di modal detail per BUNGKUS fisik: satu nomor
   // label kemasan (barcode_no) = satu bungkus = satu set. Paket 2 set tampil sebagai
@@ -1376,22 +1424,19 @@ export default function OrderInstrumenPage() {
             {/* Riwayat Peminjaman: timeline tracking order (dibuat → diterima → dipinjam → dst.) */}
             <OrderTimeline events={detail.timeline} scopeOrderId={detail.id} />
 
-            {detail.request_items && detail.request_items.length > 0 && (
+            {requestLines.length > 0 && (
               <div>
                 <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-400">
                   {t("orderInstrument.requestedItems")}
                 </p>
                 <div className="space-y-2">
-                  {detail.request_items.map((r) => {
-                    const catalogItems = (r.catalog?.items ?? r.package_bmhp?.items ?? []) as any[]
+                  {requestLines.map((r) => {
+                    const catalogItems = r.contents
                     const hasContents = r.type === "paket" && catalogItems.length > 0
                     const open = expandedReq.has(r.id)
-                    const pkgName = r.package_name || r.package_bmhp?.name || r.catalog?.name || t("common.package")
+                    const pkgName = r.pkgName || t("common.package")
                     const singleName =
-                      r.bmhp?.name ||
-                      r.item_name ||
-                      r.instrument?.name ||
-                      t("orderInstrument.instrumentFallback", { id: r.instrument_id ?? r.bmhp_id ?? "?" })
+                      r.singleName || t("orderInstrument.instrumentFallback", { id: r.refId ?? "?" })
                     return (
                       <div key={r.id} className="rounded-lg border border-gray-200">
                         {/* Paket: klik untuk buka/tutup isi paket */}
@@ -1435,8 +1480,8 @@ export default function OrderInstrumenPage() {
                         {r.type === "paket" && open && hasContents && (
                           <ul className="divide-y divide-gray-50 border-t border-gray-100 bg-gray-50/60">
                             {catalogItems.map((ci) => {
-                              const itName = ci.instrument?.name ?? ci.bmhp?.name
-                              const itId = ci.instrument_id ?? ci.bmhp_id ?? ci.id
+                              const itName = ci.name
+                              const itId = ci.id ?? "?"
                               return (
                                 <li
                                   key={itId}
@@ -1449,7 +1494,7 @@ export default function OrderInstrumenPage() {
                                       })}
                                   </span>
                                   <span className="text-xs font-semibold text-gray-700">
-                                    {(ci.quantity ?? ci.qty ?? 1) * r.quantity}
+                                    {ci.perSet * r.quantity}
                                   </span>
                                 </li>
                               )
@@ -1544,10 +1589,10 @@ export default function OrderInstrumenPage() {
         <div className="space-y-2.5">
           {[
             {
-              tipe: "cssd" as const,
+              tipe: "instrumen" as const,
               label: t("orderInstrument.typeCssd"),
               desc: t("orderInstrument.typeCssdDesc"),
-              href: "/cssd/order/instrumen/tambah?type=cssd",
+              href: "/cssd/order/instrumen/tambah?type=instrumen",
               icon: Wrench,
             },
             {

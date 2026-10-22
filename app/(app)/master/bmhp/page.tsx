@@ -26,10 +26,9 @@ import api from "@/lib/axios"
 import { apiErrorMessage } from "@/lib/apiError"
 import { useT } from "@/lib/i18n"
 
-// Kode diketik manual oleh admin — server tidak lagi membuatkannya.
-// stock_qty disimpan sebagai teks supaya angka 0 di depan tidak menempel ("01")
-// saat diketik — dikonversi ke angka hanya ketika dikirim.
-const emptyForm = { code: "", name: "", unit_id: "", stock_qty: "", price: "" }
+// Kode diketik manual oleh admin — server tidak lagi membuatkannya. Master BMHP
+// tidak menyimpan stok: stoknya adalah hasil produksi di Gudang Steril BMHP.
+const emptyForm = { code: "", name: "", unit_id: "", price: "" }
 
 export default function MasterBmhpPage() {
   const dispatch = useAppDispatch()
@@ -97,7 +96,6 @@ export default function MasterBmhpPage() {
       code: row.code,
       name: row.name,
       unit_id: row.unit_id != null ? String(row.unit_id) : "",
-      stock_qty: String(row.stock_qty ?? ""),
       // Isian harga hanya menerima digit — pecahan rupiahnya dibulatkan.
       price: row.price ? String(Math.round(row.price)) : "",
     })
@@ -116,7 +114,6 @@ export default function MasterBmhpPage() {
         code: form.code.trim(),
         name: form.name.trim(),
         unit_id: Number(form.unit_id),
-        stock_qty: Number(form.stock_qty) || 0,
         price: Number(form.price) || 0,
       }
       if (modal === "tambah") {
@@ -173,15 +170,6 @@ export default function MasterBmhpPage() {
           <span className="text-gray-400 text-xs">—</span>
         ),
       className: "w-24",
-    },
-    {
-      header: t("common.stock"),
-      cell: (row) => (
-        <span className={`font-semibold ${row.stock_qty <= 5 ? "text-red-500" : "text-gray-900"}`}>
-          {row.stock_qty}
-        </span>
-      ),
-      className: "w-20",
     },
     {
       header: t("masterBmhp.colPrice"),
@@ -349,33 +337,18 @@ export default function MasterBmhpPage() {
               onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
             />
           </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-1.5">
-              <Label>
-                {t("common.unitOfMeasure")} <span className="text-red-500">*</span>
-              </Label>
-              <SelectSearch
-                options={units}
-                value={form.unit_id}
-                onChange={(v) => setForm((f) => ({ ...f, unit_id: v }))}
-                loading={unitsLoading}
-                placeholder={t("masterBmhp.unitPlaceholder")}
-                searchPlaceholder={t("masterBmhp.unitSearch")}
-              />
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="bmhp-stock">{t("common.stock")}</Label>
-              <Input
-                id="bmhp-stock"
-                type="number"
-                min={0}
-                // Stok boleh pecahan, dua angka di belakang koma.
-                step="0.01"
-                value={form.stock_qty}
-                placeholder="0"
-                onChange={(e) => setForm((f) => ({ ...f, stock_qty: e.target.value }))}
-              />
-            </div>
+          <div className="space-y-1.5">
+            <Label>
+              {t("common.unitOfMeasure")} <span className="text-red-500">*</span>
+            </Label>
+            <SelectSearch
+              options={units}
+              value={form.unit_id}
+              onChange={(v) => setForm((f) => ({ ...f, unit_id: v }))}
+              loading={unitsLoading}
+              placeholder={t("masterBmhp.unitPlaceholder")}
+              searchPlaceholder={t("masterBmhp.unitSearch")}
+            />
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="bmhp-price">{t("masterBmhp.colPrice")}</Label>
