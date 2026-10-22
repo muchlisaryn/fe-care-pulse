@@ -10,14 +10,14 @@ import type { LucideIcon } from "lucide-react"
  * harus sama-sama mudah dibaca. `danger` disediakan untuk keadaan yang benar
  * memerlukan tindakan — bukan sekadar variasi warna.
  */
-const toneMap = {
+export const STAT_TONE_CLASSES = {
   default: "bg-[#075489]/8 text-[#075489]",
   success: "bg-[#0d8b7d]/10 text-[#0d8b7d]",
   warning: "bg-[#b45309]/10 text-[#b45309]",
   danger: "bg-red-50 text-[#b91c1c]",
 } as const
 
-export type StatCardTone = keyof typeof toneMap
+export type StatCardTone = keyof typeof STAT_TONE_CLASSES
 
 type StatCardProps = {
   title: string
@@ -60,7 +60,7 @@ export function StatCard({
             {value}
           </p>
         </div>
-        <div className={cn("flex h-11 w-11 shrink-0 items-center justify-center rounded-xl", toneMap[tone])}>
+        <div className={cn("flex h-11 w-11 shrink-0 items-center justify-center rounded-xl", STAT_TONE_CLASSES[tone])}>
           <Icon className="h-5 w-5" />
         </div>
       </div>
