@@ -10,8 +10,6 @@ import {
   AlertTriangle,
   Loader2,
   ZoomIn,
-  Settings,
-  ClipboardList,
 } from "lucide-react"
 import { Button } from "@/components/atoms/Button"
 import { Input } from "@/components/atoms/Input"
@@ -84,6 +82,15 @@ function defaultDateRange(): { from: string; to: string } {
  */
 const PRODUKSI_TABS: ProduksiTab[] = ["produksi", "cleaning", "packaging", "sterilization"]
 
+// Tahap pipeline sterilisasi — chip & warnanya sama dengan Sterilisasi BMHP.
+type SterStage = "" | "belum" | "menunggu" | "sudah"
+const STER_STAGE_FILTERS: { key: SterStage; labelKey: string; dot: string }[] = [
+  { key: "", labelKey: "production.sterStageAll", dot: "bg-gray-300" },
+  { key: "belum", labelKey: "production.sterStagePending", dot: "bg-sky-500" },
+  { key: "menunggu", labelKey: "production.sterStageWaiting", dot: "bg-indigo-500" },
+  { key: "sudah", labelKey: "production.sterStageDone", dot: "bg-emerald-500" },
+]
+
 function ProduksiCssdPage() {
   const searchParams = useSearchParams()
   const router = useRouter()
@@ -152,8 +159,9 @@ function ProduksiCssdPage() {
   const [pkgView, setPkgView] = useState<"pending" | "history">("pending")
   // Sub-tampilan pada tab Cleaning: proses cleaning vs riwayat cleaning.
   const [cleanView, setCleanView] = useState<"proses" | "history">("proses")
-  // Sub-tampilan pada tab Sterilisasi: proses steril / validasi hasil / gagal steril / riwayat.
-  const [sterView, setSterView] = useState<"proses" | "history">("proses")
+  // Chip tahap pada tab Sterilisasi — disamakan dengan Sterilisasi BMHP:
+  // semua / belum diproses / menunggu validasi / sudah diproses.
+  const [sterStage, setSterStage] = useState<SterStage>("")
 
   // Data pipeline (tahap Cleaning/Packaging/Sterilization) — sama seperti dulu di
   // Tracking Order, kini dipantau dari halaman Produksi.
@@ -247,29 +255,23 @@ function ProduksiCssdPage() {
         ),
     )
   }, [sterilizePipeline, q])
-  // Pisahkan pipeline sterilisasi: siap-steril (tray, akan dibatch) & menunggu validasi.
-  const sterProses = useMemo(
-    () => sterilizationItems.filter((o) => o.kind === "ready" && o.reprocess !== true),
-    [sterilizationItems],
-  )
-  // Validasi Hasil: batch STR yang masih diproses + unit gagal steril (antre re-proses)
-  // — tab "Gagal Steril" dihapus, datanya digabung ke sini.
-  const sterValidasi = useMemo(
-    () =>
-      sterilizationItems.filter(
-        (o) => (o.kind === "batch" && o.sterilization?.status === "diproses") || o.reprocess === true,
-      ),
-    [sterilizationItems],
-  )
-  const sterHistory = useMemo(
-    () => sterilizationItems.filter((o) => o.kind === "batch" && o.sterilization?.status !== "diproses"),
-    [sterilizationItems],
-  )
-  // Proses Sterilisasi & Validasi Hasil kini SATU daftar: yang belum diproses
-  // (siap-steril) di atas, disusul batch yang menunggu validasi. Keduanya dibedakan
-  // warna garis kiri kartunya (merah / kuning), bukan lagi tab terpisah.
-  const sterBerjalan = useMemo(() => [...sterProses, ...sterValidasi], [sterProses, sterValidasi])
-  const sterActive = sterView === "history" ? sterHistory : sterBerjalan
+  // Pipeline sterilisasi dibagi per tahap, sama seperti Sterilisasi BMHP:
+  // belum diproses = label siap-steril + unit gagal yang antre re-proses (keduanya
+  // bisa dicentang ke batch), menunggu = batch STR yang masih diproses,
+  // sudah = batch yang sudah divalidasi (steril / gagal).
+  const sterByStage = useMemo(() => {
+    const belum = sterilizationItems.filter((o) => o.kind === "ready")
+    const menunggu = sterilizationItems.filter(
+      (o) => o.kind === "batch" && o.sterilization?.status === "diproses",
+    )
+    const sudah = sterilizationItems.filter(
+      (o) => o.kind === "batch" && o.sterilization?.status !== "diproses",
+    )
+    return { belum, menunggu, sudah, "": [...belum, ...menunggu, ...sudah] }
+  }, [sterilizationItems])
+  const sterActive = sterByStage[sterStage]
+  // Mode scan memilih label siap-steril, jadi hanya tersedia saat label itu tampil.
+  const sterScanAvailable = sterStage === "" || sterStage === "belum"
 
   // Pagination tahap pipeline (tab non-produksi). Slice ber-tipe spesifik dihitung
   // di JSX agar props tiap Tab tidak ber-tipe union. Untuk tab Packaging & Sterilisasi,
@@ -456,7 +458,7 @@ function ProduksiCssdPage() {
     // Selalu buka sub-tampilan pertama tiap ganti tab (mis. Proses Cleaning, bukan History).
     setCleanView("proses")
     setPkgView("pending")
-    setSterView("proses")
+    setSterStage("")
     // Bersihkan sisa pencarian & pindaian: kata kunci tab lama tidak relevan di tab
     // baru, dan mode scan hanya berlaku di tahap Sterilisasi.
     setSearch("")
@@ -723,13 +725,13 @@ function ProduksiCssdPage() {
                     }
                     className={
                       "pl-9 " +
-                      (tab === "sterilization" && sterView === "proses" ? "pr-28 " : "") +
+                      (tab === "sterilization" && sterScanAvailable ? "pr-28 " : "") +
                       (scanMode ? "cursor-not-allowed bg-gray-100 text-gray-400 placeholder:text-gray-400" : "")
                     }
                   />
-                  {/* Tombol mode scan di DALAM kolom — hanya saat sub-tab Proses Steril,
-                      karena di situlah label kemasan dipindai untuk dipilih. */}
-                  {tab === "sterilization" && sterView === "proses" && (
+                  {/* Tombol mode scan di DALAM kolom — hanya saat label siap-steril
+                      tampil, karena di situlah label kemasan dipindai untuk dipilih. */}
+                  {tab === "sterilization" && sterScanAvailable && (
                     <button
                       type="button"
                       onClick={() => {
@@ -844,36 +846,36 @@ function ProduksiCssdPage() {
               ))}
             </div>
           )}
-          {/* Sub-tampilan tab Sterilisasi: Proses Steril / Validasi Hasil / History. */}
+          {/* Chip tahap tab Sterilisasi (warna = warna kartu) — sama dengan Sterilisasi BMHP. */}
           {tab === "sterilization" && (
-            <div className="mb-4 flex max-w-full gap-2 overflow-x-auto text-sm [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-              {([
-                { key: "proses" as const, icon: Settings, label: t("production.viewSterilizationProcess"), count: sterBerjalan.length },
-                { key: "history" as const, icon: ClipboardList, label: t("production.viewHistory"), count: sterHistory.length },
-              ]).map((v) => (
-                <button
-                  key={v.key}
-                  type="button"
-                  onClick={() => {
-                    setSterView(v.key)
-                    setPage(1)
-                    // Scan hanya relevan di Proses Steril — matikan saat pindah sub-tab lain.
-                    if (v.key !== "proses") {
-                      setScanMode(false)
-                      setScanInput("")
-                    }
-                  }}
-                  className={
-                    "inline-flex shrink-0 items-center gap-2 whitespace-nowrap rounded-xl border px-4 py-2 font-medium transition-colors " +
-                    (sterView === v.key
-                      ? "border-[#075489] bg-[#075489] text-white shadow-sm"
-                      : "border-gray-200 bg-gray-50 text-gray-600 hover:bg-gray-100")
-                  }
-                >
-                  <v.icon className="h-4 w-4 shrink-0" />
-                  {v.label} ({v.count})
-                </button>
-              ))}
+            <div className="mb-4 flex flex-wrap gap-2">
+              {STER_STAGE_FILTERS.map((f) => {
+                const activeChip = sterStage === f.key
+                return (
+                  <button
+                    key={f.key || "all"}
+                    type="button"
+                    onClick={() => {
+                      setSterStage(f.key)
+                      setPage(1)
+                      // Scan hanya relevan saat label siap-steril tampil.
+                      if (f.key !== "" && f.key !== "belum") {
+                        setScanMode(false)
+                        setScanInput("")
+                      }
+                    }}
+                    className={`inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-semibold transition-colors ${
+                      activeChip
+                        ? "border-[#075489] bg-[#075489]/10 text-[#075489]"
+                        : "border-gray-200 bg-white text-gray-600 hover:bg-gray-50"
+                    }`}
+                  >
+                    <span className={`h-3 w-1 rounded-full ${f.dot}`} aria-hidden />
+                    {t(f.labelKey)}
+                    <span className="text-gray-400">{sterByStage[f.key].length}</span>
+                  </button>
+                )
+              })}
             </div>
           )}
           {pipelineLoading ? (
@@ -887,7 +889,7 @@ function ProduksiCssdPage() {
                     ? t("production.emptyPackagingHistory")
                     : t("production.emptyPackagingPending")
                   : tab === "sterilization"
-                    ? sterView === "history"
+                    ? sterStage === "sudah"
                       ? t("production.emptySterHistory")
                       : t("production.emptySterReady")
                     : tab === "cleaning"

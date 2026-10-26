@@ -290,7 +290,7 @@ export function DataTable<T extends object>({
                       <dt className="shrink-0 pt-0.5 text-[11px] font-medium uppercase tracking-wide text-gray-400">
                         {col.header}
                       </dt>
-                      <dd className="min-w-0 text-right text-sm font-medium text-gray-800">
+                      <dd className="min-w-0 break-words text-right text-sm font-medium text-gray-800">
                         {col.cell(row, i)}
                       </dd>
                     </div>

@@ -21,6 +21,7 @@ import { useUserOptions } from "@/lib/useUserOptions"
 import { apiErrorMessage } from "@/lib/apiError"
 import { setOrderFlash } from "@/lib/orderFlash"
 import {
+  BMHP_ORDER_ENABLED,
   emptyPatientGroup,
   totalQtyOf,
   type AddMode,
@@ -37,7 +38,8 @@ function TambahOrderInstrumenContent() {
   const dispatch = useAppDispatch()
   const t = useT()
 
-  const orderType: OrderType = searchParams.get("type") === "bmhp" ? "bmhp" : "instrumen"
+  const orderType: OrderType =
+    BMHP_ORDER_ENABLED && searchParams.get("type") === "bmhp" ? "bmhp" : "instrumen"
   const isBmhp = orderType === "bmhp"
 
   const rooms = useAppSelector((s) => s.rooms.options)

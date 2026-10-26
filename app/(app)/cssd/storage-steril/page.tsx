@@ -1,12 +1,8 @@
 "use client"
 
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { useSearchParams } from "next/navigation"
 import {
-  Warehouse,
   Search,
-  CalendarClock,
-  AlertTriangle,
   MapPin,
   Boxes,
   ChevronDown,
@@ -20,8 +16,8 @@ import { Button } from "@/components/atoms/Button"
 import { Badge } from "@/components/atoms/Badge"
 import { Select } from "@/components/atoms/Select"
 import { Card } from "@/components/molecules/Card"
-import { StatCard } from "@/components/molecules/StatCard"
 import { PageHeader } from "@/components/molecules/PageHeader"
+import { CardSectionHeader } from "@/components/molecules/CardSectionHeader"
 import { Modal } from "@/components/molecules/Modal"
 import { ResultDialog } from "@/components/molecules/ResultDialog"
 import { LoadMoreSentinel } from "@/components/molecules/LoadMoreSentinel"
@@ -32,15 +28,12 @@ import {
   fetchStorageIncoming,
   fetchProductionStorageIncoming,
   fetchStorageInventory,
-  fetchStorageSummary,
   type StorageIncomingOrder,
   type StorageIncomingUnit,
   type StorageInventoryRow,
 } from "@/lib/store/slices/storageSlice"
 import { useLanguage, localeOf, type Lang } from "@/lib/i18n"
 import api from "@/lib/axios"
-
-type StorageTab = "simpan" | "inventaris"
 
 // Kelompok unit pada modal simpan ke rak. Satu grup = satu BUNGKUS steril
 // (satu nomor label kemasan) = satu benda yang ditaruh di satu lokasi rak.
@@ -95,14 +88,11 @@ function errMsg(e: unknown, t: (key: string) => string): string {
   return x.response?.data?.message ?? t("common.somethingWrong")
 }
 
-const STORAGE_TABS: StorageTab[] = ["simpan", "inventaris"]
-
 function StorageSterilPage() {
   const dispatch = useAppDispatch()
   // `t` = teks antarmuka; `tn` = label yang datang dari server (alasan tolak, dll).
   const { t, tn, lang } = useLanguage()
-  const searchParams = useSearchParams()
-  const { incoming, productionIncoming, inventory, summary } = useAppSelector((s) => s.storage)
+  const { incoming, productionIncoming, inventory } = useAppSelector((s) => s.storage)
 
   // Gabungan order steril + batch produksi steril (yang belum tersimpan penuh)
   // untuk daftar "Perlu Disimpan". Order sudah otomatis keluar saat digudang;
@@ -112,23 +102,8 @@ function StorageSterilPage() {
     [incoming.items, productionIncoming.items],
   )
 
-  // Tab aktif disinkronkan ke URL (?tab=inventaris) agar bisa di-deep-link & bertahan
-  // saat refresh. Tab default "simpan" (URL tanpa query).
-  const tabParam = searchParams.get("tab")
-  const [tab, setTab] = useState<StorageTab>(
-    STORAGE_TABS.includes(tabParam as StorageTab) ? (tabParam as StorageTab) : "simpan",
-  )
-  function changeTab(next: StorageTab) {
-    setTab(next)
-    // history.replaceState (bukan router) → URL berubah seketika tanpa navigasi server.
-    window.history.replaceState(
-      null,
-      "",
-      next === "simpan" ? "/cssd/storage-steril" : `/cssd/storage-steril?tab=${next}`,
-    )
-  }
-  // Pencarian dijalankan di SERVER (data dimuat bertahap, jadi tak bisa disaring
-  // di klien): `searchInput` draft di kotak isian, `search` yang sudah dikirim.
+  // Pencarian inventaris dijalankan di SERVER (data dimuat bertahap, jadi tak bisa
+  // disaring di klien): `searchInput` draft di kotak isian, `search` yang sudah dikirim.
   const [searchInput, setSearchInput] = useState("")
   const [search, setSearch] = useState("")
   // Inventaris: pengelompokan + status lipat per grup.
@@ -188,53 +163,50 @@ function StorageSterilPage() {
   // jadi disaring lokal & langsung saat diketik (live search) — tanpa tombol Cari.
   const [modalSearch, setModalSearch] = useState("")
 
-  // Muat data tab yang sedang terbuka: HALAMAN PERTAMA daftarnya + angka kartu
-  // statistik (dari endpoint ringkasan, bukan menghitung baris di klien — daftarnya
-  // dimuat bertahap). Halaman berikutnya menyusul lewat pengamat scroll di dasar
-  // daftar. Tidak ada cache: isi gudang berubah oleh petugas lain, jadi tiap tab
-  // dibuka datanya selalu diambil ulang dari server.
-  const loadTab = useCallback(() => {
-    dispatch(fetchStorageSummary())
-    if (tab === "simpan") {
-      dispatch(fetchStorageIncoming({ page: 1, search }))
-      dispatch(fetchProductionStorageIncoming({ page: 1, search }))
-      return
-    }
+  // Tata letak disamakan dengan Gudang Steril BMHP: "Perlu Disimpan" & "Inventaris
+  // Gudang" tampil bersamaan (bukan tab), jadi keduanya dimuat sekaligus. Pencarian
+  // hanya berlaku untuk inventaris. Tidak ada cache: isi gudang berubah oleh petugas
+  // lain, jadi tiap halaman dibuka datanya selalu diambil ulang dari server.
+  const loadIncoming = useCallback(() => {
+    dispatch(fetchStorageIncoming({ page: 1, search: "" }))
+    dispatch(fetchProductionStorageIncoming({ page: 1, search: "" }))
+  }, [dispatch])
+  const loadInventory = useCallback(() => {
     dispatch(fetchStorageInventory({ page: 1, search }))
-  }, [dispatch, tab, search])
+  }, [dispatch, search])
 
   useEffect(() => {
-    loadTab()
-  }, [loadTab])
+    loadIncoming()
+  }, [loadIncoming])
+  useEffect(() => {
+    loadInventory()
+  }, [loadInventory])
 
-  // Ambil halaman berikutnya daftar tab aktif. Untuk tab "Perlu Disimpan" ada dua
-  // sumber (order & batch produksi) — order dihabiskan dulu, baru batch produksi.
-  const loadMore = useCallback(() => {
-    if (tab === "simpan") {
-      if (incoming.loading || incoming.loadingMore || productionIncoming.loadingMore) return
-      if (incoming.page < incoming.lastPage) {
-        dispatch(fetchStorageIncoming({ page: incoming.page + 1, search }))
-      } else if (productionIncoming.page < productionIncoming.lastPage) {
-        dispatch(fetchProductionStorageIncoming({ page: productionIncoming.page + 1, search }))
-      }
-      return
+  // Halaman berikutnya "Perlu Disimpan" — dua sumber (order & batch produksi):
+  // order dihabiskan dulu, baru batch produksi.
+  const incomingHasMore =
+    incoming.page < incoming.lastPage || productionIncoming.page < productionIncoming.lastPage
+  const loadMoreIncoming = useCallback(() => {
+    if (incoming.loading || incoming.loadingMore || productionIncoming.loadingMore) return
+    if (incoming.page < incoming.lastPage) {
+      dispatch(fetchStorageIncoming({ page: incoming.page + 1, search: "" }))
+    } else if (productionIncoming.page < productionIncoming.lastPage) {
+      dispatch(fetchProductionStorageIncoming({ page: productionIncoming.page + 1, search: "" }))
     }
+  }, [dispatch, incoming, productionIncoming])
+
+  // Halaman berikutnya inventaris.
+  const hasMore = inventory.page < inventory.lastPage
+  const loadingMore = inventory.loadingMore
+  const loadMore = useCallback(() => {
     if (inventory.loading || inventory.loadingMore) return
     if (inventory.page < inventory.lastPage) {
       dispatch(fetchStorageInventory({ page: inventory.page + 1, search }))
     }
-  }, [dispatch, tab, search, incoming, productionIncoming, inventory])
+  }, [dispatch, search, inventory])
 
-  // Masih ada halaman berikutnya untuk tab aktif?
-  const hasMore =
-    tab === "simpan"
-      ? incoming.page < incoming.lastPage || productionIncoming.page < productionIncoming.lastPage
-      : inventory.page < inventory.lastPage
-  const loadingMore =
-    tab === "simpan" ? incoming.loadingMore || productionIncoming.loadingMore : inventory.loadingMore
-
-  // Pengamat scroll: begitu penanda di dasar daftar terlihat, halaman berikutnya
-  // diambil otomatis (infinite scroll). rootMargin → dimuat sedikit lebih awal.
+  // Pengamat scroll inventaris: begitu penanda di dasar daftar terlihat, halaman
+  // berikutnya diambil otomatis (infinite scroll). rootMargin → dimuat sedikit lebih awal.
   const sentinelRef = useRef<HTMLDivElement | null>(null)
   useEffect(() => {
     const el = sentinelRef.current
@@ -441,10 +413,9 @@ function StorageSterilPage() {
           : { variant: "success", description: t("storage.storedCount", { n: savedNow }) },
       )
       closeModal()
-      // Unit pindah dari "Perlu Disimpan" ke "Inventaris": muat ulang tab yang
-      // sedang terbuka. Tab satunya ikut segar sendiri karena selalu di-fetch
-      // ulang saat dibuka.
-      loadTab()
+      // Unit pindah dari "Perlu Disimpan" ke "Inventaris": muat ulang keduanya.
+      loadIncoming()
+      loadInventory()
     } catch (e) {
       setError(errMsg(e, t))
     } finally {
@@ -669,85 +640,14 @@ function StorageSterilPage() {
         subtitle={t("storage.subtitle")}
       />
 
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-        <StatCard title={t("storage.statTotal")} value={`${summary.total}`} icon={Warehouse} />
-        <StatCard title={t("storage.statAlert")} value={`${summary.alert}`} icon={CalendarClock} positive={false} />
-        <StatCard title={t("storage.statExpired")} value={`${summary.expired}`} icon={AlertTriangle} positive={false} />
-      </div>
-
-      <Card className="p-0">
-        <div className="space-y-3 border-b border-gray-100 px-5 py-4">
-          <div className="flex gap-5 overflow-x-auto border-b border-gray-200 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-            {(
-              [
-                // Angka dari server (total keseluruhan), bukan jumlah baris yang
-                // kebetulan sudah dimuat — daftarnya bertambah sambil di-scroll.
-                // null = tabnya belum pernah dibuka, jadi angkanya belum diketahui.
-                {
-                  key: "simpan",
-                  label: t("storage.tabToStore"),
-                  count: incoming.loaded ? incoming.total + productionIncoming.total : null,
-                },
-                { key: "inventaris", label: t("storage.tabInventory"), count: summary.total },
-              ] as { key: StorageTab; label: string; count: number | null }[]
-            ).map((t) => {
-              const activeT = tab === t.key
-              return (
-                <button
-                  key={t.key}
-                  type="button"
-                  onClick={() => changeTab(t.key)}
-                  className={
-                    "relative -mb-px flex shrink-0 items-center gap-2 whitespace-nowrap border-b-2 px-1 pb-2.5 pt-1 text-sm transition-colors " +
-                    (activeT
-                      ? "border-[#075489] font-semibold text-[#075489]"
-                      : "border-transparent font-medium text-gray-500 hover:text-gray-800")
-                  }
-                >
-                  {t.label}
-                  {t.count !== null && (
-                    <span
-                      className={
-                        "rounded-full px-1.5 py-0.5 text-xs font-semibold " +
-                        (activeT ? "bg-[#075489]/10 text-[#075489]" : "bg-gray-100 text-gray-500")
-                      }
-                    >
-                      {t.count}
-                    </span>
-                  )}
-                </button>
-              )
-            })}
-          </div>
-
-          <form onSubmit={handleSearch} className="flex w-full gap-2">
-            <div className="relative flex-1">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 pointer-events-none" />
-              <Input
-                placeholder={
-                  tab === "simpan"
-                    ? t("storage.searchIncoming")
-                    : t("storage.searchInventory")
-                }
-                value={searchInput}
-                onChange={(e) => setSearchInput(e.target.value)}
-                className="pl-9"
-              />
-            </div>
-            <Button type="submit" className="bg-[#075489] hover:bg-[#075489]/90 text-white shrink-0">
-              {t("common.search")}
-            </Button>
-          </form>
-        </div>
-
-        {tab === "simpan" ? (
-          incoming.loading || (!incoming.loaded && !productionIncoming.loaded) ? (
-            <div className="py-16 text-center text-sm text-gray-400">{t("common.loading")}</div>
-          ) : incomingAll.length === 0 ? (
-            <div className="py-16 text-center text-sm text-gray-400">
-              {q ? t("storage.noMatchingBatch") : t("storage.noIncoming")}
-            </div>
-          ) : (
+      {/* Perlu Disimpan — kartunya hanya tampil bila ada batch yang perlu disimpan
+          (tata letak sama dengan Gudang Steril BMHP). */}
+      {incomingAll.length > 0 && (
+        <Card className="p-0">
+          <CardSectionHeader
+            title={t("storage.tabToStore")}
+            count={incoming.total + productionIncoming.total}
+          />
             <div className="space-y-2 p-4">
               {incomingAll.map((order) => (
                 <div
@@ -788,28 +688,48 @@ function StorageSterilPage() {
                   </div>
                 </div>
               ))}
-              {/* Penanda dasar daftar: memicu pengambilan halaman berikutnya. */}
-              <LoadMoreSentinel ref={sentinelRef} hasMore={hasMore} loading={loadingMore} onLoadMore={loadMore} />
+              <LoadMoreSentinel
+                hasMore={incomingHasMore}
+                loading={incoming.loadingMore || productionIncoming.loadingMore}
+                onLoadMore={loadMoreIncoming}
+              />
             </div>
-          )
-        ) : inventory.loading ? (
+        </Card>
+      )}
+
+      {/* Inventaris Gudang */}
+      <Card className="p-0">
+        <CardSectionHeader title={t("storage.tabInventory")} count={null} />
+        {/* Pengelompokan + pencarian — hanya untuk inventaris gudang. */}
+        <div className="border-b border-gray-100 px-5 py-3">
+          <form onSubmit={handleSearch} className="flex w-full flex-col gap-2 sm:flex-row">
+            <Select
+              value={groupBy}
+              onChange={(e) => setGroupBy(e.target.value as "rak" | "batch")}
+              className="sm:w-48"
+              aria-label={t("storage.groupBy")}
+            >
+              <option value="rak">{t("storage.byRack")}</option>
+              <option value="batch">{t("storage.byBatch")}</option>
+            </Select>
+            <div className="relative flex-1">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 pointer-events-none" />
+              <Input
+                placeholder={t("storage.searchInventory")}
+                value={searchInput}
+                onChange={(e) => setSearchInput(e.target.value)}
+                className="pl-9"
+              />
+            </div>
+            <Button type="submit" className="bg-[#075489] hover:bg-[#075489]/90 text-white shrink-0">
+              {t("common.search")}
+            </Button>
+          </form>
+        </div>
+        {inventory.loading ? (
           <div className="py-16 text-center text-sm text-gray-400">{t("common.loading")}</div>
         ) : (
           <div className="space-y-3 p-4">
-            {/* Toolbar: pengelompokan agar tidak menampilkan terlalu banyak baris.
-                Selalu tampil (juga saat hasilnya kosong) agar pilihan pengelompokan
-                tetap bisa diubah. */}
-            <div className="flex flex-wrap justify-end gap-2">
-              <Select
-                value={groupBy}
-                onChange={(e) => setGroupBy(e.target.value as "rak" | "batch")}
-                className="w-auto"
-              >
-                <option value="rak">{t("storage.byRack")}</option>
-                <option value="batch">{t("storage.byBatch")}</option>
-              </Select>
-            </div>
-
             {inventory.items.length === 0 ? (
               <div className="py-16 text-center text-sm text-gray-400">
                 {q ? t("storage.noMatchingInstrument") : t("storage.noInventory")}
@@ -1238,8 +1158,8 @@ function StorageSterilPage() {
 }
 
 /**
- * Bungkus dengan Suspense karena `useSearchParams` (baca tab dari URL) memaksa
- * client-side rendering hingga boundary terdekat saat prerender.
+ * Bungkus dengan Suspense agar komponen klien di bawahnya punya boundary sendiri
+ * saat prerender.
  */
 export default function StorageSterilPageWrapper() {
   return (

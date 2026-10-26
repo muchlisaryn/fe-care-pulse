@@ -38,6 +38,7 @@ import { fetchIncomingCount, fetchPendingTransferCount } from "@/lib/store/slice
 import { invalidateMonitoring } from "@/lib/store/slices/monitoringSlice"
 import { fetchRoomOptions } from "@/lib/store/slices/roomSlice"
 import { apiErrorMessage } from "@/lib/apiError"
+import { BMHP_ORDER_ENABLED } from "@/lib/orderRequest"
 import { takeOrderFlash } from "@/lib/orderFlash"
 import { useLanguage, localeOf, type Lang } from "@/lib/i18n"
 import api from "@/lib/axios"
@@ -899,16 +900,6 @@ export default function OrderInstrumenPage() {
               <Button type="submit" className="bg-[#075489] hover:bg-[#075489]/90 text-white shrink-0">
                 {t("common.search")}
               </Button>
-              {(dateFrom || dateTo) && (
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() => dispatch(setOrderDateRange({ from: "", to: "" }))}
-                  className="shrink-0"
-                >
-                  {t("common.reset")}
-                </Button>
-              )}
             </div>
           </form>
         </div>
@@ -1601,24 +1592,41 @@ export default function OrderInstrumenPage() {
               desc: t("orderInstrument.typeBmhpDesc"),
               href: "/cssd/order/instrumen/tambah?type=bmhp",
               icon: Package,
+              disabled: !BMHP_ORDER_ENABLED,
             },
-          ].map(({ tipe, label, desc, href, icon: Ikon }) => (
-            <Link
-              key={tipe}
-              href={href}
-              onClick={() => setPilihJenis(false)}
-              className="flex items-center gap-3 rounded-xl border border-[#075489]/25 bg-[#075489]/5 px-4 py-3 transition-colors hover:border-[#075489] hover:bg-[#075489]/10"
-            >
-              <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-[#075489] text-white">
-                <Ikon className="h-5 w-5" />
-              </span>
-              <div className="min-w-0 flex-1">
-                <p className="font-medium text-[#075489]">{label}</p>
-                {desc && <p className="text-xs text-slate-500">{desc}</p>}
+          ].map(({ tipe, label, desc, href, icon: Ikon, disabled }) =>
+            disabled ? (
+              <div
+                key={tipe}
+                aria-disabled="true"
+                className="flex cursor-not-allowed items-center gap-3 rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 opacity-60"
+              >
+                <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-gray-400 text-white">
+                  <Ikon className="h-5 w-5" />
+                </span>
+                <div className="min-w-0 flex-1">
+                  <p className="font-medium text-gray-500">{label}</p>
+                  <p className="text-xs text-slate-500">{t("orderInstrument.typeUnavailable")}</p>
+                </div>
               </div>
-              <ChevronRight className="h-4 w-4 shrink-0 text-[#075489]/60" />
-            </Link>
-          ))}
+            ) : (
+              <Link
+                key={tipe}
+                href={href}
+                onClick={() => setPilihJenis(false)}
+                className="flex items-center gap-3 rounded-xl border border-[#075489]/25 bg-[#075489]/5 px-4 py-3 transition-colors hover:border-[#075489] hover:bg-[#075489]/10"
+              >
+                <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-[#075489] text-white">
+                  <Ikon className="h-5 w-5" />
+                </span>
+                <div className="min-w-0 flex-1">
+                  <p className="font-medium text-[#075489]">{label}</p>
+                  {desc && <p className="text-xs text-slate-500">{desc}</p>}
+                </div>
+                <ChevronRight className="h-4 w-4 shrink-0 text-[#075489]/60" />
+              </Link>
+            ),
+          )}
         </div>
       </Modal>
 

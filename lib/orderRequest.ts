@@ -7,6 +7,12 @@
  * satu daftar tunggal milik halaman.
  */
 
+/**
+ * Order BMHP sementara dimatikan: pilihannya tampil nonaktif di modal jenis order dan
+ * `tambah?type=bmhp` jatuh ke order instrumen. Ubah ke `true` untuk membukanya lagi.
+ */
+export const BMHP_ORDER_ENABLED = false
+
 /** Jenis permintaan: instrumen satuan atau paket (katalog tipe `paket`). */
 export type AddMode = "satuan" | "paket"
 

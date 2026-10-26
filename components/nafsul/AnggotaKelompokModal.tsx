@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import { FileSpreadsheet, Printer, Search } from "lucide-react";
 import { api, apiBlob, ApiError } from "@/lib/nafsul/api";
 import type { Anggota, KetuaKelompok, Paginated } from "@/lib/nafsul/types";
@@ -57,6 +58,7 @@ export default function AnggotaKelompokModal({
 
 function IsiModal({ ketua }: { ketua: KetuaKelompok }) {
   const { t, lang } = useLanguage();
+  const router = useRouter();
   const [data, setData] = useState<Paginated<Anggota> | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -316,6 +318,8 @@ function IsiModal({ ketua }: { ketua: KetuaKelompok }) {
           columns={kolom}
           data={data?.data ?? []}
           rowNumberOffset={((data?.current_page ?? 1) - 1) * PER_PAGE}
+          // Ubah membuka halaman edit anggota yang sama dengan daftar anggota.
+          onEdit={(a) => router.push(`/nafsul/master/anggota/${a.id}/edit`)}
           emptyMessage={
             dicari
               ? t("nafsulAnggota.modalNoMatch")

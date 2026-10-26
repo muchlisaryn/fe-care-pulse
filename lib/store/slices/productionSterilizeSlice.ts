@@ -16,12 +16,14 @@ export type ProdSterilizeUnit = {
   // Nomor label fisik dari packaging_item. Baris pada kartu dikelompokkan per
   // nomor ini: satu barcode = satu kemasan/label.
   barcode_no: string | null
+  // Hasil validasi per unit: "berhasil" / "gagal"; null = belum divalidasi.
+  result?: "berhasil" | "gagal" | null
 }
 
 // Batch sterilisasi terbaru sebuah PKG (saat status "sterilisasi" = menunggu validasi).
 export type ProdSterilizeBatch = {
   id: number
-  code: string // STR-NNN
+  code: string // {kode mesin}-{ddmmyy}-{urut}
   machine: string | null
   method: string | null
   cycle_number: string | null

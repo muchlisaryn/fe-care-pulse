@@ -67,20 +67,21 @@ export default function AnggotaListPage() {
         title={t("nafsulAnggota.title")}
         subtitle={t("nafsulAnggota.subtitle")}
         action={
-          <div className="flex flex-wrap gap-2">
+          // Mobile: dua tombol berbagi lebar penuh di bawah judul.
+          <div className="grid grid-cols-2 gap-2 sm:flex sm:shrink-0">
             {/* Gabung Anggota berdampingan dengan Tambah Anggota, tapi bergaya
                 sekunder: ia dipakai sesekali untuk membereskan data ganda,
                 bukan pekerjaan harian seperti mendaftarkan anggota baru. */}
             <Button
               variant="outline"
               onClick={() => setGabungTerbuka(true)}
-              className="flex items-center gap-1.5"
+              className="flex items-center justify-center gap-1.5 whitespace-nowrap"
             >
-              <Combine className="h-4 w-4" />
+              <Combine className="h-4 w-4 shrink-0" />
               {t("gabungAnggota.title")}
             </Button>
 
-            <Button asChild className="bg-[#075489] hover:bg-[#075489]/90 text-white">
+            <Button asChild className="justify-center whitespace-nowrap bg-[#075489] hover:bg-[#075489]/90 text-white">
               <Link href="/nafsul/master/anggota/baru">{t("nafsulAnggota.addMember")}</Link>
             </Button>
           </div>

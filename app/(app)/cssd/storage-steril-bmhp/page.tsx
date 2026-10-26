@@ -15,6 +15,7 @@ import { Button } from "@/components/atoms/Button"
 import { Badge } from "@/components/atoms/Badge"
 import { Card } from "@/components/molecules/Card"
 import { PageHeader } from "@/components/molecules/PageHeader"
+import { CardSectionHeader } from "@/components/molecules/CardSectionHeader"
 import { Modal } from "@/components/molecules/Modal"
 import { ResultDialog } from "@/components/molecules/ResultDialog"
 import { LoadMoreSentinel } from "@/components/molecules/LoadMoreSentinel"
@@ -96,31 +97,6 @@ function formatDate(value: string | null, lang: Lang) {
 function errMsg(e: unknown, t: (key: string) => string): string {
   const x = e as { response?: { data?: { message?: string } } }
   return x.response?.data?.message ?? t("common.somethingWrong")
-}
-
-/** Judul bagian di halaman (Perlu Disimpan / Inventaris Gudang) + jumlah + aksi opsional. */
-function SectionHeader({
-  title,
-  count,
-  children,
-}: {
-  title: string
-  count: number | null
-  children?: React.ReactNode
-}) {
-  return (
-    <div className="flex flex-wrap items-center justify-between gap-2 border-b border-gray-100 px-5 py-3">
-      <h2 className="flex items-center gap-2 text-sm font-semibold text-gray-900">
-        {title}
-        {count !== null && (
-          <span className="rounded-full bg-[#075489]/10 px-1.5 py-0.5 text-sm font-semibold text-[#075489]">
-            {count}
-          </span>
-        )}
-      </h2>
-      {children}
-    </div>
-  )
 }
 
 /** Kode siklus sterilisasi (mis. AUT01-191026-03) tempat BMHP ini disteril. */
@@ -607,7 +583,7 @@ function StorageSterilBmhpPage() {
       {/* Perlu Disimpan — kartunya hanya tampil bila ada batch yang perlu disimpan. */}
       {incomingAll.length > 0 && (
       <Card className="p-0">
-        <SectionHeader title={t("storageBmhp.tabToStore")} count={incoming.total} />
+        <CardSectionHeader title={t("storageBmhp.tabToStore")} count={incoming.total} />
             <div className="space-y-2 p-4">
               {incomingAll.map((batch) => (
                 <div
@@ -662,7 +638,7 @@ function StorageSterilBmhpPage() {
 
       {/* Inventaris Gudang */}
       <Card className="p-0">
-        <SectionHeader title={t("storageBmhp.tabInventory")} count={null} />
+        <CardSectionHeader title={t("storageBmhp.tabInventory")} count={null} />
         {/* Filter rak + pencarian — hanya untuk inventaris gudang. */}
         <div className="border-b border-gray-100 px-5 py-3">
           <form onSubmit={handleSearch} className="flex w-full flex-col gap-2 sm:flex-row">

@@ -13,7 +13,6 @@ import {
   Download,
   PackageCheck,
   RotateCcw,
-  Sparkles,
   TrendingUp,
   Wallet,
   Warehouse,
@@ -297,19 +296,9 @@ export default function DashboardPage() {
     alertParts.push(t("dashboard.alertPendingReceipts", { receipts: angka(pendingReceipts) }))
   }
 
-  const bannerTitle = loading
-    ? t("dashboard.loadingTitle")
-    : alertParts.length > 0
-      ? t("dashboard.alertTitle")
-      : t("dashboard.alertTitleClear")
-  const bannerDescription = loading
-    ? t("common.loading")
-    : alertParts.length > 0
-      ? alertParts.join(" ")
-      : t("dashboard.alertAllClear")
-  // Kalau salah satu modul gagal dimuat, bilah ini disembunyikan: kalimat "semua
-  // beres" tidak boleh muncul hanya karena bagian yang bermasalah tidak punya data.
-  const tampilkanBanner = !gagalSemua && (loading || (!!cssd && !!nafsul))
+  // Bilah hanya muncul bila ada order/kuitansi yang tertunda — tidak ada lagi
+  // bilah "semua beres" saat semuanya sudah tertangani.
+  const tampilkanBanner = !gagalSemua && !loading && alertParts.length > 0
 
   function muatUlang() {
     setPercobaan((n) => n + 1)
@@ -406,10 +395,10 @@ export default function DashboardPage() {
 
       {tampilkanBanner && (
         <InsightBanner
-          title={bannerTitle}
-          description={bannerDescription}
-          icon={alertParts.length > 0 ? AlertTriangle : Sparkles}
-          tone={alertParts.length > 0 ? "warning" : "info"}
+          title={t("dashboard.alertTitle")}
+          description={alertParts.join(" ")}
+          icon={AlertTriangle}
+          tone="warning"
         />
       )}
 
