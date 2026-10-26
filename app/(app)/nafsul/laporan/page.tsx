@@ -398,12 +398,15 @@ export default function NafsulLaporanPage() {
             bersama lewat satu tombol Cari. */}
         <form
           onSubmit={cari}
-          className="flex flex-col gap-3 border-b border-gray-100 px-5 py-4 lg:flex-row lg:flex-wrap lg:items-end"
+          // Grid bertingkat: 1 kolom di ponsel, 2 kolom di tablet (pencarian
+          // selebar penuh), satu baris di desktop. Sebelumnya flex-col sampai `lg`,
+          // jadi di tablet tiap isian menumpuk dengan lebar yang tidak seragam.
+          className="grid grid-cols-1 gap-3 border-b border-gray-100 px-4 py-4 sm:grid-cols-2 sm:px-5 lg:grid-cols-[minmax(0,1fr)_10.5rem_10.5rem_11rem_auto_auto] lg:items-end"
         >
           <Isian
             label={t("common.search")}
             htmlFor="laporan-cari"
-            className="min-w-[240px] flex-1"
+            className="sm:col-span-2 lg:col-span-1"
           >
             <div className="relative">
               {/* Kaca pembesar berganti pemintal selama permintaan berjalan:
@@ -437,7 +440,7 @@ export default function NafsulLaporanPage() {
           {/* Tanpa label di atasnya: pilihan kosongnya sudah berbunyi "Cara
               Bayar", jadi label terpisah hanya mengulang kata yang sama persis
               tepat di atasnya. */}
-          <div className="w-full sm:w-48">
+          <div className="sm:col-span-2 lg:col-span-1">
             <Select
               aria-label={t("nafsulTransaksi.allMethods")}
               value={formMetode}
@@ -455,7 +458,7 @@ export default function NafsulLaporanPage() {
 
           <Button
             type="submit"
-            className="w-full justify-center bg-[#075489] text-white hover:bg-[#075489]/90 sm:w-auto"
+            className="w-full justify-center bg-[#075489] text-white hover:bg-[#075489]/90"
           >
             <Search className="h-4 w-4" />
             {t("common.search")}
@@ -472,13 +475,13 @@ export default function NafsulLaporanPage() {
             variant="outline"
             onClick={exportExcel}
             disabled={exporting || memuat || blocks.length === 0}
-            className="w-full justify-center sm:w-auto lg:ml-auto"
+            className="w-full justify-center"
           >
             <Sheet className="h-4 w-4" />
             {exporting ? t("nafsulLaporan.exporting") : t("nafsulLaporan.exportExcel")}
           </Button>
 
-          {galat && <p className="w-full text-sm text-red-600">{galat}</p>}
+          {galat && <p className="col-span-full text-sm text-red-600">{galat}</p>}
         </form>
 
         {memuat ? (
@@ -505,7 +508,7 @@ export default function NafsulLaporanPage() {
             {search || method ? t("nafsulLaporan.noResult") : t("nafsulLaporan.noData")}
           </div>
         ) : (
-          <div className="space-y-8 px-5 py-5">
+          <div className="space-y-8 px-4 py-5 sm:px-5">
             {truncated && (
               <p className="rounded-lg bg-amber-50 px-4 py-3 text-sm text-amber-800">
                 {t("nafsulLaporan.recapTruncated")}
@@ -708,13 +711,82 @@ function BlokRekap({
     if (!dibuka) void ambilRincian(k)
   }
 
+  // Isi sel "Ketua" — dipakai tabel desktop & kartu ponsel.
+  const ketua = (k: RekapKuitansi) =>
+    k.transaction_type === "pribadi" ? (
+      <span className="text-slate-500">{t("nafsulTransaksi.personal")}</span>
+    ) : (
+      k.group_leader_name || <Kosong />
+    )
+
+  const rincianKuitansi = (k: RekapKuitansi) => (
+    <TabelAnggota
+      rows={rincian[k.uuid]}
+      loading={memuat.has(k.uuid)}
+      error={galat[k.uuid]}
+      onRetry={() => void ambilRincian(k)}
+    />
+  )
+
   return (
     <section className="space-y-0">
+      {/* Ponsel: satu kartu per kuitansi — tabel 5 kolom berlebar minimum 820px
+          memaksa geser ke samping, dan rinciannya (tabel kedua yang juga
+          digeser) bertumpuk di dalamnya. */}
+      <div className="space-y-2 md:hidden">
+        {block.rows.map((k) => {
+          const dibuka = terbuka.has(k.uuid)
+
+          return (
+            <div key={k.key} className="overflow-hidden rounded-lg border border-gray-200 bg-white">
+              <button
+                type="button"
+                onClick={() => alihkan(k)}
+                aria-expanded={dibuka}
+                className="flex w-full items-start gap-2 px-3 py-2.5 text-left hover:bg-gray-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#075489]"
+              >
+                <ChevronRight
+                  className={`mt-0.5 h-4 w-4 shrink-0 text-gray-500 transition-transform ${
+                    dibuka ? "rotate-90" : ""
+                  }`}
+                />
+                <div className="min-w-0 flex-1 space-y-1">
+                  <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-0.5">
+                    <span className="break-all font-mono text-xs text-gray-700">
+                      {k.transaction_number}
+                    </span>
+                    <span className="shrink-0 text-xs text-gray-500">{tanggal(k.date)}</span>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-1.5 text-xs">
+                    <span className="rounded bg-gray-100 px-1.5 py-0.5 font-medium text-gray-700">
+                      {t(`nafsulLaporan.typeShort_${k.transaction_type}`)}
+                    </span>
+                    <span className="rounded bg-gray-100 px-1.5 py-0.5 text-gray-700">
+                      {t(`nafsulTransaksi.method_${block.payment_method}`)}
+                    </span>
+                  </div>
+                  <p className="break-words text-sm text-gray-800">{ketua(k)}</p>
+                </div>
+              </button>
+
+              {dibuka && (
+                <div className="border-t border-gray-200 bg-gray-50/70 px-3 py-3">
+                  {rincianKuitansi(k)}
+                </div>
+              )}
+            </div>
+          )
+        })}
+      </div>
+
       {/* Judul blok TIDAK dicetak di layar. Ia tetap ditulis ke berkas .xlsx —
           baris judul yang digabung di puncak tiap tab adalah bentuk lembar yang
           dipakai Binroh selama ini, sedangkan di layar tabelnya sudah cukup
-          dikenali dari kolom Cara Bayar-nya sendiri. */}
-      <div className="overflow-x-auto rounded-t-lg border-x border-t border-gray-200">
+          dikenali dari kolom Cara Bayar-nya sendiri.
+
+          Bingkainya utuh di keempat sisi: dulu hanya atas & samping, sehingga
+          bawah tabel terbuka tanpa garis. */}
+      <div className="hidden overflow-x-auto rounded-lg border border-gray-200 md:block">
         <table className="w-full min-w-[820px] text-sm">
           <thead>
             <tr className={KEPALA}>
@@ -783,15 +855,7 @@ function BlokRekap({
                     <td className={`${SEL} text-center text-gray-700`}>
                       {t(`nafsulTransaksi.method_${block.payment_method}`)}
                     </td>
-                    <td className={`${SEL} text-gray-800`}>
-                      {k.transaction_type === "pribadi" ? (
-                        <span className="text-slate-500">
-                          {t("nafsulTransaksi.personal")}
-                        </span>
-                      ) : (
-                        k.group_leader_name || <Kosong />
-                      )}
-                    </td>
+                    <td className={`${SEL} text-gray-800`}>{ketua(k)}</td>
                   </tr>
 
                   {/* Rincian dirender bersyarat, BUKAN disembunyikan lewat
@@ -803,12 +867,7 @@ function BlokRekap({
                           kolomnya sendiri dan tidak boleh terikat lebar kolom
                           kuitansi di atasnya. */}
                       <td colSpan={KOLOM_KUITANSI.length} className="px-4 py-3">
-                        <TabelAnggota
-                          rows={rincian[k.uuid]}
-                          loading={memuat.has(k.uuid)}
-                          error={galat[k.uuid]}
-                          onRetry={() => void ambilRincian(k)}
-                        />
+                        {rincianKuitansi(k)}
                       </td>
                     </tr>
                   )}
@@ -881,7 +940,28 @@ function TabelAnggota({
   }
 
   return (
-    <div className="overflow-hidden rounded-lg border border-gray-200 bg-white">
+    <>
+    {/* Ponsel: satu baris anggota = satu kartu kecil (nama, no. anggota, nominal). */}
+    <div className="divide-y divide-gray-100 overflow-hidden rounded-lg border border-gray-200 bg-white md:hidden">
+      {rows.map((row) => (
+        <div key={row.key} className="space-y-1.5 px-3 py-2.5 text-sm">
+          <div className="flex flex-wrap items-baseline justify-between gap-x-2">
+            <span className="min-w-0 break-words font-medium text-gray-900">
+              {row.member_name || <Kosong />}
+            </span>
+            <span className="font-mono text-xs text-gray-500">{row.member_number || <Kosong />}</span>
+          </div>
+          <div className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-0.5 text-xs">
+            <span className="text-gray-400">{t("nafsulLaporan.colAmountPaid")}</span>
+            <CurrencyCell value={row.amount} className="text-gray-900" />
+            <span className="text-gray-400">{t("nafsulLaporan.colMemberDeduction")}</span>
+            <CurrencyCell value={row.deduction} className="text-gray-600" />
+          </div>
+        </div>
+      ))}
+    </div>
+
+    <div className="hidden overflow-hidden rounded-lg border border-gray-200 bg-white md:block">
       {/* Pembungkus penggulir tersendiri: `overflow-hidden` di atasnya menjaga
           sudut membulat, tapi ia MEMOTONG tabel yang lebih lebar dari layar
           alih-alih membiarkannya digulir. */}
@@ -917,5 +997,6 @@ function TabelAnggota({
         </table>
       </div>
     </div>
+    </>
   )
 }
