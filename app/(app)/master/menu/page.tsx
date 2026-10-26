@@ -199,8 +199,10 @@ export default function MasterMenuPage() {
     const parents = menuGroups.flatMap((g) => g.menus ?? [])
     setParentOptions([
       { value: "", label: t("masterMenu.optionNoneRoot") },
+      // Hanya dropdown (tanpa URL) yang bisa menampung sub-menu — menu link langsung
+      // seperti Dashboard tidak menampilkan sub-menunya di sidebar.
       ...parents
-        .filter((m) => m.parent_id === null && m.id !== currentEditId)
+        .filter((m) => m.parent_id === null && !m.url && m.id !== currentEditId)
         .sort((a, b) => a.sort_order - b.sort_order)
         .map((m) => ({ value: String(m.id), label: tn(m.name) })),
     ])
@@ -251,6 +253,10 @@ export default function MasterMenuPage() {
     }
   }
 
+  // Menu utama berbentuk link langsung (seperti Dashboard): URL terisi & tidak
+  // punya sub-menu. Selain itu ia dropdown.
+  const parentIsLink = form.is_parent && !editHasChildren && form.url.trim() !== ""
+
   async function handleSave() {
     if (!form.name.trim()) return
     setSaving(true)
@@ -260,10 +266,13 @@ export default function MasterMenuPage() {
             name: form.name,
             title_menu_id: form.title_menu_id ?? undefined,
             sort_order: form.sort_order,
-            is_open: form.is_open,
             icon: form.icon || undefined,
             parent_id: null,
-            url: null,
+            // Link langsung (mis. Dashboard) menyimpan URL; dropdown tidak punya URL
+            // dan "terbuka otomatis" hanya berlaku untuknya.
+            url: parentIsLink ? form.url.trim() : null,
+            is_open: parentIsLink ? false : form.is_open,
+            open_sidebar: parentIsLink ? form.open_sidebar : undefined,
           }
         : {
             name: form.name,
@@ -506,8 +515,8 @@ export default function MasterMenuPage() {
                   setForm((p) => ({
                     ...p,
                     is_parent: v,
-                    // Saat jadi parent: kosongkan URL & parent menu.
-                    ...(v ? { url: "", parent_id: null } : {}),
+                    // Saat jadi parent: kosongkan parent menu (URL tetap boleh diisi).
+                    ...(v ? { parent_id: null } : {}),
                   }))
                 }
                 disabled={editHasChildren}
@@ -545,16 +554,6 @@ export default function MasterMenuPage() {
                     onChange={(e) => setForm((p) => ({ ...p, sort_order: Number(e.target.value) }))}
                   />
                 </div>
-                <div className="flex items-center justify-between rounded-lg border border-gray-200 px-4 py-3">
-                  <div>
-                    <p className="text-sm font-medium text-gray-700">{t("masterMenu.autoOpen")}</p>
-                    <p className="text-xs text-gray-400 mt-0.5">{t("masterMenu.autoOpenHint")}</p>
-                  </div>
-                  <Switch
-                    checked={form.is_open}
-                    onChange={(v) => setForm((p) => ({ ...p, is_open: v }))}
-                  />
-                </div>
                 <div className="space-y-1.5">
                   <Label htmlFor="menu-icon">Icon</Label>
                   <Input
@@ -564,6 +563,49 @@ export default function MasterMenuPage() {
                     onChange={(e) => setForm((p) => ({ ...p, icon: e.target.value }))}
                   />
                 </div>
+                {/* Menu utama ada dua bentuk (lihat grup Dashboard):
+                    - link langsung (Dashboard, Dashboard CSSD): punya URL, tanpa sub-menu;
+                    - dropdown: tanpa URL, berisi sub-menu.
+                    Menu yang sudah punya sub-menu pasti dropdown → URL disembunyikan. */}
+                {!editHasChildren && (
+                  <div className="space-y-1.5">
+                    <Label htmlFor="menu-parent-url">URL</Label>
+                    <Input
+                      id="menu-parent-url"
+                      placeholder={t("masterMenu.urlPlaceholder")}
+                      value={form.url}
+                      onChange={(e) => setForm((p) => ({ ...p, url: e.target.value }))}
+                    />
+                    <p className="text-xs text-gray-400">{t("masterMenu.parentUrlHint")}</p>
+                  </div>
+                )}
+                {/* "Terbuka otomatis" hanya berarti untuk dropdown (ada yang dibuka). */}
+                {parentIsLink ? null : (
+                  <div className="flex items-center justify-between rounded-lg border border-gray-200 px-4 py-3">
+                    <div>
+                      <p className="text-sm font-medium text-gray-700">{t("masterMenu.autoOpen")}</p>
+                      <p className="text-xs text-gray-400 mt-0.5">{t("masterMenu.autoOpenHint")}</p>
+                    </div>
+                    <Switch
+                      checked={form.is_open}
+                      onChange={(v) => setForm((p) => ({ ...p, is_open: v }))}
+                    />
+                  </div>
+                )}
+                {parentIsLink && (
+                  <div className="flex items-center justify-between rounded-lg border border-gray-200 px-4 py-3">
+                    <div>
+                      <p className="text-sm font-medium text-gray-700">{t("masterMenu.openSidebar")}</p>
+                      <p className="text-xs text-gray-400 mt-0.5">
+                        {t("masterMenu.openSidebarHint")}
+                      </p>
+                    </div>
+                    <Switch
+                      checked={form.open_sidebar}
+                      onChange={(v) => setForm((p) => ({ ...p, open_sidebar: v }))}
+                    />
+                  </div>
+                )}
               </>
             ) : (
               <>
