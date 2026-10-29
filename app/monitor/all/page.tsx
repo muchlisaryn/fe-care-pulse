@@ -7,6 +7,7 @@ import { setCredentials } from "@/lib/store/slices/authSlice"
 import { loadAuth } from "@/lib/auth"
 import api from "@/lib/axios"
 import { useLanguage, localeOf, type Lang } from "@/lib/i18n"
+import { Footer } from "@/components/molecules/Footer"
 
 type BoardLine = { jenis: "Paket" | "Satuan"; name: string; qty: number }
 
@@ -241,6 +242,7 @@ export default function MonitorAllPage() {
           ))
         )}
       </div>
+      <Footer variant="dark" className="py-0.5 text-[10px]" />
     </div>
   )
 }

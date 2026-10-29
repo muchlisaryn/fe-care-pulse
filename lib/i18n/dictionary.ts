@@ -98,6 +98,7 @@ export const dictionary = {
       inactive: "Inactive",
       minutesShort: "min",
       print: "Print",
+      copyright: "© {year} {name}. All rights reserved.",
     },
     header: {
       viewProfile: "View Profile",
@@ -2689,6 +2690,7 @@ export const dictionary = {
       inactive: "Nonaktif",
       minutesShort: "mnt",
       print: "Cetak",
+      copyright: "© {year} {name}. Hak cipta dilindungi undang-undang.",
     },
     header: {
       viewProfile: "Lihat Profil",

@@ -4,6 +4,7 @@ import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { Logo } from "@/components/atoms/Logo"
 import { Button } from "@/components/atoms/Button"
+import { Footer } from "@/components/molecules/Footer"
 import { useT } from "@/lib/i18n"
 
 export default function NotFound() {
@@ -49,9 +50,7 @@ export default function NotFound() {
         </div>
       </div>
 
-      <div className="absolute bottom-6 text-xs text-gray-400">
-        &copy; {new Date().getFullYear()} MedAssist. All rights reserved.
-      </div>
+      <Footer className="absolute bottom-6 left-0 right-0" />
     </div>
   )
 }

@@ -4,6 +4,7 @@ import { useState, useEffect, useRef } from "react"
 import { usePathname, useRouter } from "next/navigation"
 import { Header } from "@/components/molecules/Header"
 import { Sidebar } from "@/components/molecules/Sidebar"
+import { Footer } from "@/components/molecules/Footer"
 import { useAppDispatch, useAppSelector } from "@/lib/store/hooks"
 import { setCredentials, fetchMe, setHydrated } from "@/lib/store/slices/authSlice"
 import { fetchIncomingCount, fetchPendingTransferCount } from "@/lib/store/slices/notifSlice"
@@ -217,6 +218,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
             selebar isinya. */}
         <main className="min-w-0 flex-1 overflow-y-auto bg-gray-50 p-4 sm:p-6">{children}</main>
       </div>
+      <Footer className="border-t border-gray-200 bg-white py-1.5" />
     </div>
   )
 }
