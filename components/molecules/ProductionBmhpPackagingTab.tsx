@@ -1,16 +1,11 @@
 "use client"
 
-import { useMemo, useRef, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import {
   PackageCheck,
   Printer,
-  Search,
   Loader2,
-  Calendar,
   CheckCircle2,
-  Tag,
-  Clock,
-  RotateCcw,
   AlertTriangle,
 } from "lucide-react"
 import { Button } from "@/components/atoms/Button"
@@ -19,14 +14,13 @@ import { Input } from "@/components/atoms/Input"
 import { Label } from "@/components/atoms/Label"
 import { SelectSearch } from "@/components/atoms/SelectSearch"
 import { Modal } from "@/components/molecules/Modal"
-import { DateRangeFields } from "@/components/molecules/DateRangeFields"
 import { Pagination } from "@/components/molecules/Pagination"
 import { BmhpContentChips } from "@/components/molecules/BmhpContentChips"
 import { Barcode } from "@/components/atoms/Barcode"
 import { useToast } from "@/components/molecules/ToastProvider"
 import { useLanguage, localeOf, type Lang } from "@/lib/i18n"
 import { usePagedList } from "@/lib/usePagedList"
-import { rentangSemingguTerakhir } from "@/lib/dateRange"
+import type { BmhpPipelineFilter } from "@/lib/bmhpPackaging"
 import { FAILURE_REASONS } from "@/lib/bmhpSterilization"
 import api from "@/lib/axios"
 
@@ -83,17 +77,7 @@ export type PackagingBmhpRecord = {
 
 type PackagingStage = "belum" | "siap" | "sterilisasi" | "steril" | "gagal"
 
-// Warna kartu per tahap: garis kiri tebal + latar tipis. Palet sama dengan tab
-// Sterilisasi — siap steril biru langit, proses steril indigo.
-const STAGE_TONE: Record<PackagingStage, string> = {
-  belum: "border-gray-200 border-l-amber-400 bg-white",
-  siap: "border-gray-200 border-l-sky-500 bg-white",
-  sterilisasi: "border-gray-200 border-l-indigo-500 bg-white",
-  steril: "border-gray-200 border-l-emerald-500 bg-emerald-50/20",
-  gagal: "border-red-200 border-l-red-500 bg-red-50/30",
-}
-
-// Lencana tahap di pojok kartu — warnanya mengikuti garis kiri kartu.
+// Lencana tahap di pojok kartu — status tetap terbaca tanpa aksen garis tepi.
 const STAGE_BADGE: Record<PackagingStage, { label: string; tone: string }> = {
   belum: { label: "Belum dikemas", tone: "bg-amber-100 text-amber-800" },
   siap: { label: "Siap steril", tone: "bg-sky-100 text-sky-800" },
@@ -130,14 +114,14 @@ function VoidInfo({ detail }: { detail: PackagingBmhpRecord["disabled_reason"] }
   )
 }
 
-// Chip filter tahap (`?stage=` di backend). Warna garisnya = warna garis kiri kartu.
+// Chip filter tahap (`?stage=` di backend) — tanpa penanda warna tahap.
 type StageFilter = "" | "belum" | "proses" | "steril" | "gagal"
-const STAGE_FILTERS: { key: StageFilter; label: string; dot: string }[] = [
-  { key: "", label: "Semua", dot: "bg-gray-300" },
-  { key: "belum", label: "Belum dikemas", dot: "bg-amber-400" },
-  { key: "proses", label: "Proses sterilisasi", dot: "bg-sky-500" },
-  { key: "steril", label: "Berhasil steril", dot: "bg-emerald-500" },
-  { key: "gagal", label: "Gagal steril", dot: "bg-red-500" },
+const STAGE_FILTERS: { key: StageFilter; label: string }[] = [
+  { key: "", label: "Semua" },
+  { key: "belum", label: "Belum dikemas" },
+  { key: "proses", label: "Proses sterilisasi" },
+  { key: "steril", label: "Berhasil steril" },
+  { key: "gagal", label: "Gagal steril" },
 ]
 
 // Tanggal dari API berupa ISO (2026-11-19T00:00:00.000000Z) — tampilkan tanggalnya
@@ -149,22 +133,14 @@ function formatDate(value: string | null | undefined, lang: Lang) {
   return d.toLocaleDateString(localeOf(lang), { day: "2-digit", month: "short", year: "numeric" })
 }
 
-export function ProductionBmhpPackagingTab() {
+type Props = {
+  /** Filter pencarian & rentang tanggal dari halaman (sama seperti Produksi CSSD). */
+  filter: BmhpPipelineFilter
+}
+
+export function ProductionBmhpPackagingTab({ filter }: Props) {
   const toast = useToast()
   const { t, lang } = useLanguage()
-
-  // Filter: `draft` = isi form; baru diterapkan (`filter`) saat form Cari disubmit.
-  // Rentang tanggal (tgl kemasan dibuat) bawaannya seminggu terakhir.
-  const [defaultFilter] = useState(() => {
-    const { from, to } = rentangSemingguTerakhir()
-    return { search: "", dateFrom: from, dateTo: to }
-  })
-  const [draft, setDraft] = useState(defaultFilter)
-  const [filter, setFilter] = useState(defaultFilter)
-  const isFiltered =
-    filter.search !== defaultFilter.search ||
-    filter.dateFrom !== defaultFilter.dateFrom ||
-    filter.dateTo !== defaultFilter.dateTo
 
   // Filter tahap dari chip — langsung diterapkan saat diklik.
   const [stage, setStage] = useState<StageFilter>("")
@@ -181,6 +157,11 @@ export function ProductionBmhpPackagingTab() {
       },
       () => toast.error("Gagal memuat daftar antrean pengemasan BMHP."),
     )
+
+  // Filter berubah dari halaman → kembali ke halaman pertama daftar.
+  useEffect(() => {
+    setPage(1)
+  }, [filter.search, filter.dateFrom, filter.dateTo, setPage])
 
   // Master jenis kemasan — baru diambil saat modal pengemasan pertama kali dibuka.
   const [packagingTypes, setPackagingTypes] = useState<
@@ -225,20 +206,8 @@ export function ProductionBmhpPackagingTab() {
     }
   }
 
-  function handleSearch(e: React.FormEvent) {
-    e.preventDefault()
-    setFilter(draft)
-    setPage(1)
-  }
-
   function changeStage(next: StageFilter) {
     setStage(next)
-    setPage(1)
-  }
-
-  function resetFilter() {
-    setDraft(defaultFilter)
-    setFilter(defaultFilter)
     setPage(1)
   }
 
@@ -326,45 +295,6 @@ export function ProductionBmhpPackagingTab() {
 
   return (
     <div className="space-y-6">
-      {/* Header bar & Search */}
-      <form
-        onSubmit={handleSearch}
-        className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-[minmax(0,1fr)_10.5rem_10.5rem_auto] lg:items-end"
-      >
-        <div className="relative sm:col-span-2 lg:col-span-1">
-          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
-          <Input
-            value={draft.search}
-            onChange={(e) => setDraft((d) => ({ ...d, search: e.target.value }))}
-            placeholder="Cari kode batch, produksi, atau item..."
-            className="pl-9"
-          />
-        </div>
-        <DateRangeFields
-          from={draft.dateFrom}
-          to={draft.dateTo}
-          onFromChange={(v) => setDraft((d) => ({ ...d, dateFrom: v }))}
-          onToChange={(v) => setDraft((d) => ({ ...d, dateTo: v }))}
-        />
-        <div className="flex gap-2 sm:col-span-2 lg:col-span-1">
-          <Button type="submit" className="flex-1 bg-[#075489] text-white hover:bg-[#075489]/90 lg:flex-none">
-            {t("common.search")}
-          </Button>
-          {isFiltered && (
-            <Button
-              type="button"
-              onClick={resetFilter}
-              variant="outline"
-              title={t("common.reset")}
-              aria-label={t("common.reset")}
-              className="shrink-0 text-gray-600"
-            >
-              <RotateCcw className="h-4 w-4" />
-            </Button>
-          )}
-        </div>
-      </form>
-
       {/* Filter tahap — sekaligus keterangan warna garis kiri kartu. Langsung
           diterapkan saat diklik (bukan lewat tombol Cari). */}
       <div className="flex flex-wrap gap-2">
@@ -373,13 +303,12 @@ export function ProductionBmhpPackagingTab() {
             key={f.key || "all"}
             type="button"
             onClick={() => changeStage(f.key)}
-            className={`inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-semibold transition-colors ${
+            className={`inline-flex items-center rounded-full border px-3 py-1.5 text-xs font-semibold transition-colors ${
               stage === f.key
                 ? "border-[#075489] bg-[#075489]/10 text-[#075489]"
                 : "border-gray-200 bg-white text-gray-600 hover:bg-gray-50"
             }`}
           >
-            <span className={`h-3 w-1 rounded-full ${f.dot}`} aria-hidden />
             {f.label}
           </button>
         ))}
@@ -407,7 +336,7 @@ export function ProductionBmhpPackagingTab() {
               return (
                 <div
                   key={pkg.id}
-                  className={`flex flex-col rounded-xl border border-l-4 p-4 transition hover:shadow-sm ${STAGE_TONE[stageKey]} ${
+                  className={`flex flex-col rounded-xl border border-gray-200 bg-white p-4 transition hover:shadow-sm ${
                     isVoid ? "opacity-75" : ""
                   }`}
                 >

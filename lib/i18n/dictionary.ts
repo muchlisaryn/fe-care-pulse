@@ -269,6 +269,10 @@ export const dictionary = {
     },
     productionBmhp: {
       title: "BMHP Production",
+      subtitle:
+        "Start BMHP production & monitor the stages: Inspection & Packaging → Sterilization",
+      searchPackaging: "Search batch code, production, or item...",
+      searchSterilization: "Search batch code / packaging code / machine...",
       sterAll: "All",
       sterPending: "Not Processed",
       sterWaiting: "Awaiting Validation",
@@ -2856,6 +2860,10 @@ export const dictionary = {
     },
     productionBmhp: {
       title: "Produksi BMHP",
+      subtitle:
+        "Mulai produksi BMHP & pantau tahapannya: Inspeksi & Pengemasan → Sterilisasi",
+      searchPackaging: "Cari kode batch, produksi, atau item...",
+      searchSterilization: "Cari kode batch / kode kemasan / mesin...",
       sterAll: "Semua",
       sterPending: "Belum Diproses",
       sterWaiting: "Menunggu Validasi",

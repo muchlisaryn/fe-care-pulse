@@ -9,7 +9,6 @@ import {
   Loader2,
   CheckCircle2,
   PackagePlus,
-  FileText,
 } from "lucide-react"
 import { Button } from "@/components/atoms/Button"
 import { Input } from "@/components/atoms/Input"
@@ -19,7 +18,6 @@ import { Badge } from "@/components/atoms/Badge"
 import { SelectSearch } from "@/components/atoms/SelectSearch"
 import { Card } from "@/components/molecules/Card"
 import { useToast } from "@/components/molecules/ToastProvider"
-import { useLanguage } from "@/lib/i18n"
 import api from "@/lib/axios"
 
 export type CandidateBmhp = {
@@ -66,7 +64,6 @@ type Props = {
 
 export function ProductionBmhpNewTab({ onSuccess }: Props) {
   const toast = useToast()
-  const { t } = useLanguage()
 
   const [loading, setLoading] = useState(true)
   const [bmhps, setBmhps] = useState<CandidateBmhp[]>([])
@@ -90,7 +87,7 @@ export function ProductionBmhpNewTab({ onSuccess }: Props) {
         const data = res.data?.data
         setBmhps(data?.bmhps ?? [])
         setPackages(data?.packages ?? [])
-      } catch (err) {
+      } catch {
         toast.error("Gagal memuat daftar master BMHP & Paket.")
       } finally {
         setLoading(false)
@@ -249,69 +246,81 @@ export function ProductionBmhpNewTab({ onSuccess }: Props) {
   }
 
   return (
-    <div className="space-y-6">
-      {/* Box Input Tambah Item */}
-      <div className="rounded-xl border border-gray-200 bg-gray-50/50 p-5">
-        <div className="mb-4 flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <PackagePlus className="h-5 w-5 text-[#075489]" />
-            <h3 className="text-sm font-semibold text-gray-900">Pilih BMHP yang Akan Diproduksi</h3>
-          </div>
-
-          {/* Mode Switcher */}
-          <div className="inline-flex rounded-lg border border-gray-200 bg-white p-1 shadow-sm">
-            <button
-              type="button"
-              onClick={() => {
-                setAddMode("satuan")
-                setSelectedRefId("")
-              }}
-              className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-all ${
-                addMode === "satuan"
-                  ? "bg-[#075489] text-white shadow-sm"
-                  : "text-gray-600 hover:text-gray-900"
-              }`}
-            >
-              <Package className="h-3.5 w-3.5" />
-              BMHP Satuan
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                setAddMode("paket")
-                setSelectedRefId("")
-              }}
-              className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-all ${
-                addMode === "paket"
-                  ? "bg-[#075489] text-white shadow-sm"
-                  : "text-gray-600 hover:text-gray-900"
-              }`}
-            >
-              <Boxes className="h-3.5 w-3.5" />
-              Paket BMHP
-            </button>
-          </div>
+    <div className="grid grid-cols-1 gap-6 lg:grid-cols-5">
+      {/* Panel tambah item — mengikuti layout form Produksi CSSD. */}
+      <Card className="space-y-4 p-5 lg:col-span-2">
+        <div className="flex items-center gap-2">
+          <PackagePlus className="h-5 w-5 text-[#075489]" />
+          <h2 className="text-sm font-semibold text-gray-800">Tambah BMHP yang Diproduksi</h2>
         </div>
 
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-12 md:items-end">
-          <div className="md:col-span-8">
-            <Label htmlFor="item-select">
-              {addMode === "satuan" ? "Nama BMHP Satuan" : "Nama Paket BMHP"}
-            </Label>
-            <SelectSearch
-              value={selectedRefId}
-              onChange={(val) => setSelectedRefId(val)}
-              options={selectOptions}
-              placeholder={
-                addMode === "satuan"
-                  ? "Pilih atau cari BMHP satuan..."
-                  : "Pilih atau cari paket BMHP..."
-              }
-            />
-          </div>
+        {/* Mode satuan / paket */}
+        <div className="flex gap-2">
+          {(
+            [
+              { key: "satuan" as const, label: "BMHP Satuan", icon: Package },
+              { key: "paket" as const, label: "Paket BMHP", icon: Boxes },
+            ]
+          ).map((m) => {
+            const Icon = m.icon
+            return (
+              <button
+                key={m.key}
+                type="button"
+                onClick={() => {
+                  setAddMode(m.key)
+                  setSelectedRefId("")
+                }}
+                className={
+                  "flex flex-1 items-center justify-center gap-1.5 rounded-md border px-3 py-1.5 text-xs font-medium " +
+                  (addMode === m.key
+                    ? "border-[#075489] bg-[#075489]/8 text-[#075489]"
+                    : "border-gray-200 text-gray-500 hover:bg-gray-50")
+                }
+              >
+                <Icon className="h-3.5 w-3.5" />
+                {m.label}
+              </button>
+            )
+          })}
+        </div>
 
-          <div className="md:col-span-2">
-            <Label htmlFor="qty-input">Jumlah Produksi</Label>
+        <div className="space-y-1.5">
+          <Label htmlFor="item-select">
+            {addMode === "satuan" ? "Nama BMHP Satuan" : "Nama Paket BMHP"}
+          </Label>
+          <SelectSearch
+            value={selectedRefId}
+            onChange={(val) => setSelectedRefId(val)}
+            options={selectOptions}
+            placeholder={
+              addMode === "satuan"
+                ? "Pilih atau cari BMHP satuan..."
+                : "Pilih atau cari paket BMHP..."
+            }
+          />
+        </div>
+
+        {/* Rincian isi paket (informasi) */}
+        {currentSelectedPackage && currentSelectedPackage.items?.length > 0 && (
+          <div className="rounded-lg border border-gray-100 bg-gray-50 px-3 py-2 text-xs">
+            <span className="font-semibold text-gray-600">Rincian isi paket (per 1 set):</span>
+            <div className="mt-1.5 flex flex-wrap gap-1.5">
+              {currentSelectedPackage.items.map((it) => (
+                <span
+                  key={it.id}
+                  className="rounded bg-white px-1.5 py-0.5 text-gray-600 ring-1 ring-gray-200"
+                >
+                  {it.bmhp?.name ?? "BMHP"} × {it.qty} {it.bmhp?.unit ?? "Pcs"}
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
+
+        <div className="flex items-end gap-2">
+          <div className="w-24 space-y-1.5">
+            <Label htmlFor="qty-input">Jumlah</Label>
             <Input
               id="qty-input"
               type="number"
@@ -320,148 +329,112 @@ export function ProductionBmhpNewTab({ onSuccess }: Props) {
               onChange={(e) => setQuantity(Math.max(1, parseInt(e.target.value) || 1))}
             />
           </div>
-
-          <div className="md:col-span-2">
-            <Button
-              type="button"
-              onClick={handleAddLine}
-              className="w-full bg-[#075489] text-white hover:bg-[#064775]"
-            >
-              <Plus className="mr-1.5 h-4 w-4" />
-              Tambah
-            </Button>
-          </div>
+          <Button
+            type="button"
+            onClick={handleAddLine}
+            disabled={!selectedRefId}
+            className="bg-[#075489] text-white hover:bg-[#075489]/90"
+          >
+            <Plus className="mr-1.5 h-4 w-4" />
+            Tambah
+          </Button>
         </div>
+      </Card>
 
-        {/* Preview isi paket jika sedang memilih paket */}
-        {currentSelectedPackage && currentSelectedPackage.items?.length > 0 && (
-          <div className="mt-4 rounded-lg border border-blue-100 bg-blue-50/70 p-3.5 text-xs text-blue-900">
-            <span className="font-semibold">Rincian Komponen Paket (per 1 set):</span>
-            <div className="mt-1.5 flex flex-wrap gap-2">
-              {currentSelectedPackage.items.map((it) => (
-                <span
-                  key={it.id}
-                  className="inline-flex items-center rounded-md bg-white px-2 py-1 font-medium text-blue-800 shadow-sm"
-                >
-                  {it.bmhp?.name ?? "BMHP"} × {it.qty} {it.bmhp?.unit ?? "Pcs"}
-                </span>
-              ))}
-            </div>
-          </div>
-        )}
-      </div>
-
-      {/* Tabel Rincian Batch Produksi */}
-      <div className="space-y-3">
-        <div className="flex items-center justify-between">
-          <h3 className="text-sm font-semibold text-gray-900">
-            Daftar Item dalam Batch Produksi ({lines.length})
-          </h3>
+      {/* Daftar baris + submit — kartu kanan seperti Produksi CSSD. */}
+      <Card className="flex flex-col p-5 lg:col-span-3">
+        <div className="mb-4 flex items-center justify-between">
+          <h2 className="text-sm font-semibold text-gray-800">Daftar Produksi</h2>
           {lines.length > 0 && (
-            <button
-              type="button"
-              onClick={() => setLines([])}
-              className="text-xs text-red-600 hover:underline"
-            >
-              Kosongkan Semua
-            </button>
+            <span className="inline-flex items-center rounded-full bg-[#075489]/10 px-2.5 py-1 text-xs font-semibold text-[#075489]">
+              {lines.length} jenis
+            </span>
           )}
         </div>
 
         {lines.length === 0 ? (
-          <div className="rounded-xl border border-dashed border-gray-200 py-10 text-center text-sm text-gray-400">
-            Belum ada item BMHP yang ditambahkan ke batch ini.
+          <div className="flex flex-1 flex-col items-center justify-center gap-3 rounded-xl border border-dashed border-gray-200 bg-gray-50/50 py-14 text-center">
+            <p className="text-sm text-gray-400">
+              Belum ada BMHP. Tambahkan dari panel kiri.
+            </p>
           </div>
         ) : (
-          <div className="overflow-hidden rounded-xl border border-gray-200 bg-white">
-            <table className="w-full border-collapse text-left text-sm">
-              <thead className="border-b border-gray-200 bg-gray-50/75 text-xs font-semibold text-gray-600">
-                <tr>
-                  <th className="px-4 py-3">Tipe</th>
-                  <th className="px-4 py-3">Kode & Nama</th>
-                  <th className="px-4 py-3">Isi Komponen</th>
-                  <th className="px-4 py-3 text-center">Jumlah</th>
-                  <th className="px-4 py-3 text-center">Aksi</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-100">
-                {lines.map((line) => (
-                  <tr key={line.id} className="hover:bg-gray-50/50">
-                    <td className="px-4 py-3">
-                      <Badge
-                        variant={line.type === "paket" ? "default" : "info"}
-                        className={
-                          line.type === "paket"
-                            ? "bg-purple-100 text-purple-700 hover:bg-purple-100"
-                            : "bg-blue-50 text-blue-700"
-                        }
-                      >
-                        {line.type === "paket" ? "Paket" : "Satuan"}
-                      </Badge>
-                    </td>
-                    <td className="px-4 py-3">
-                      <div className="font-medium text-gray-900">{line.name}</div>
+          <div className="space-y-2.5">
+            {lines.map((line, i) => {
+              const isPaket = line.type === "paket"
+              return (
+                <div
+                  key={line.id}
+                  className={
+                    "group relative overflow-hidden rounded-xl border bg-white shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md " +
+                    (isPaket ? "border-[#4ba69d]/30" : "border-[#075489]/20")
+                  }
+                >
+                  {/* Aksen warna kiri sesuai tipe (paket = teal, satuan = biru). */}
+                  <span
+                    className={"absolute inset-y-0 left-0 w-1 " + (isPaket ? "bg-[#4ba69d]" : "bg-[#075489]")}
+                  />
+                  <div className="flex items-center gap-3 py-2.5 pl-4 pr-3">
+                    <span
+                      className={
+                        "flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-xs font-bold text-white " +
+                        (isPaket ? "bg-[#4ba69d]" : "bg-[#075489]")
+                      }
+                    >
+                      {i + 1}
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="truncate text-sm font-semibold text-gray-800">{line.name}</span>
+                        <Badge variant={isPaket ? "info" : "default"}>
+                          {isPaket ? "Paket" : "Satuan"}
+                        </Badge>
+                      </div>
                       <div className="text-xs text-gray-400">{line.code}</div>
-                    </td>
-                    <td className="px-4 py-3 text-xs text-gray-500">
-                      {line.type === "paket" && line.items ? (
-                        <div className="space-y-0.5">
+
+                      {isPaket && line.items && line.items.length > 0 && (
+                        <div className="mt-1.5 flex flex-wrap items-center gap-1">
+                          <span className="inline-flex items-center gap-1 text-[11px] text-gray-400">
+                            <Package className="h-3 w-3" /> Berisi:
+                          </span>
                           {line.items.map((it) => (
-                            <div key={it.id}>
-                              • {it.bmhp?.name ?? "BMHP"} × {it.qty * line.quantity}{" "}
-                              {it.bmhp?.unit ?? "Pcs"}
-                            </div>
+                            <span
+                              key={it.id}
+                              className="rounded-md bg-[#4ba69d]/10 px-1.5 py-0.5 text-[11px] font-medium text-[#4ba69d] ring-1 ring-[#4ba69d]/20"
+                            >
+                              {it.bmhp?.name ?? "BMHP"} ×{it.qty * line.quantity}
+                            </span>
                           ))}
                         </div>
-                      ) : (
-                        <span>
-                          {line.quantity} {line.unit}
-                        </span>
                       )}
-                    </td>
-                    <td className="px-4 py-3 text-center">
-                      <div className="inline-flex items-center gap-2">
-                        <button
-                          type="button"
-                          onClick={() => handleUpdateQty(line.id, line.quantity - 1)}
-                          className="flex h-7 w-7 items-center justify-center rounded border border-gray-200 bg-white text-gray-600 hover:bg-gray-50"
-                        >
-                          -
-                        </button>
-                        <span className="w-10 text-center font-semibold text-gray-900">
-                          {line.quantity}
-                        </span>
-                        <button
-                          type="button"
-                          onClick={() => handleUpdateQty(line.id, line.quantity + 1)}
-                          className="flex h-7 w-7 items-center justify-center rounded border border-gray-200 bg-white text-gray-600 hover:bg-gray-50"
-                        >
-                          +
-                        </button>
-                      </div>
-                    </td>
-                    <td className="px-4 py-3 text-center">
+                    </div>
+                    <div className="flex shrink-0 items-center gap-1.5">
+                      <Input
+                        type="number"
+                        min={1}
+                        value={line.quantity}
+                        onChange={(e) => handleUpdateQty(line.id, Number(e.target.value) || 1)}
+                        className="h-9 w-16 text-center font-semibold"
+                      />
+                      <span className="w-6 text-[11px] text-gray-400">{isPaket ? "set" : "unit"}</span>
                       <button
                         type="button"
                         onClick={() => handleRemoveLine(line.id)}
-                        className="rounded p-1.5 text-gray-400 transition hover:bg-red-50 hover:text-red-600"
+                        className="rounded-md p-1.5 text-gray-400 transition-colors hover:bg-red-50 hover:text-red-600"
                         title="Hapus baris"
                       >
                         <Trash2 className="h-4 w-4" />
                       </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+                    </div>
+                  </div>
+                </div>
+              )
+            })}
           </div>
         )}
-      </div>
 
-      {/* Catatan & Tombol Eksekusi */}
-      <div className="rounded-xl border border-gray-200 bg-white p-5 space-y-4">
-        <div>
-          <Label htmlFor="production-note">Catatan Produksi (Opsional)</Label>
+        <div className="mt-4 space-y-1.5">
+          <Label htmlFor="production-note">Catatan (opsional)</Label>
           <Textarea
             id="production-note"
             rows={2}
@@ -471,22 +444,22 @@ export function ProductionBmhpNewTab({ onSuccess }: Props) {
           />
         </div>
 
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between border-t border-gray-100 pt-4">
+        <div className="mt-4 flex flex-col gap-3 border-t border-gray-100 pt-4 sm:flex-row sm:items-center sm:justify-between">
           <div className="text-xs text-gray-500">
             Setelah tombol ditekan, batch langsung masuk ke antrean{" "}
-            <strong>Inspeksi & Pengemasan</strong>.
+            <strong>Inspeksi &amp; Pengemasan</strong>.
           </div>
 
           <Button
             type="button"
             onClick={handleSubmit}
             disabled={submitting || lines.length === 0}
-            className="bg-[#075489] text-white hover:bg-[#064775]"
+            className="bg-[#4ba69d] text-white shadow-sm hover:bg-[#4ba69d]/90"
           >
             {submitting ? (
               <>
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                Menyimpan...
+                Memproses...
               </>
             ) : (
               <>
@@ -496,7 +469,7 @@ export function ProductionBmhpNewTab({ onSuccess }: Props) {
             )}
           </Button>
         </div>
-      </div>
+      </Card>
     </div>
   )
 }

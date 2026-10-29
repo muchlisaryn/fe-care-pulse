@@ -2,16 +2,13 @@
 
 import { useEffect, useMemo, useRef, useState } from "react"
 import {
-  Search,
   Loader2,
   CheckCircle2,
   XCircle,
   Play,
   Check,
   Flame,
-  Layers,
   AlertTriangle,
-  RotateCcw,
 } from "lucide-react"
 import { Button } from "@/components/atoms/Button"
 import { Badge } from "@/components/atoms/Badge"
@@ -21,15 +18,13 @@ import { Select } from "@/components/atoms/Select"
 import { SelectSearch } from "@/components/atoms/SelectSearch"
 import { Modal } from "@/components/molecules/Modal"
 import { ResultDialog } from "@/components/molecules/ResultDialog"
-import { DateRangeFields } from "@/components/molecules/DateRangeFields"
 import { Pagination } from "@/components/molecules/Pagination"
 import { BmhpContentChips } from "@/components/molecules/BmhpContentChips"
 import { useToast } from "@/components/molecules/ToastProvider"
 import { localeOf, useLanguage } from "@/lib/i18n"
 import { usePagedList } from "@/lib/usePagedList"
-import { packagingContents } from "@/lib/bmhpPackaging"
+import { packagingContents, type BmhpPipelineFilter } from "@/lib/bmhpPackaging"
 import { FAILURE_REASONS } from "@/lib/bmhpSterilization"
-import { tanggalLokal } from "@/lib/dateRange"
 import api from "@/lib/axios"
 
 type SterilizerMachineOption = { id: number; name: string; temperature?: number; duration_minutes?: number }
@@ -122,12 +117,12 @@ type SterilFeedRow =
   | { kind: "packaging"; status: "belum"; packaging: SterilReadyPackaging; batch: null }
   | { kind: "batch"; status: "menunggu" | "sudah"; packaging: null; batch: SterilizationBmhpBatch }
 
-// Chip filter tahap. Warna titiknya = warna aksen kartu tahap itu.
-const STAGE_FILTERS: { key: SterilStage | ""; labelKey: string; dot: string }[] = [
-  { key: "", labelKey: "productionBmhp.sterAll", dot: "bg-gray-300" },
-  { key: "belum", labelKey: "productionBmhp.sterPending", dot: "bg-sky-500" },
-  { key: "menunggu", labelKey: "productionBmhp.sterWaiting", dot: "bg-indigo-500" },
-  { key: "sudah", labelKey: "productionBmhp.sterDone", dot: "bg-emerald-500" },
+// Chip filter tahap — tanpa penanda warna tahap.
+const STAGE_FILTERS: { key: SterilStage | ""; labelKey: string }[] = [
+  { key: "", labelKey: "productionBmhp.sterAll" },
+  { key: "belum", labelKey: "productionBmhp.sterPending" },
+  { key: "menunggu", labelKey: "productionBmhp.sterWaiting" },
+  { key: "sudah", labelKey: "productionBmhp.sterDone" },
 ]
 
 /** Kemasan unik dalam satu batch — satu item batch = satu label, jadi kemasan paket muncul berulang per set. */
@@ -140,25 +135,17 @@ function batchPackagings(batch: SterilizationBmhpBatch) {
 }
 
 
-export function ProductionBmhpSterilizationTab() {
+type Props = {
+  /** Filter pencarian & rentang tanggal dari halaman (sama seperti Produksi CSSD). */
+  filter: BmhpPipelineFilter
+}
+
+export function ProductionBmhpSterilizationTab({ filter }: Props) {
   const toast = useToast()
   const { t } = useLanguage()
 
   // Satu daftar untuk ketiga tahap; `stage` menyaring satu tahap saja (chip filter).
   const [stage, setStage] = useState<SterilStage | "">("")
-  // Filter: `draft` = isi form; baru diterapkan (`filter`) saat form Cari disubmit.
-  // Rentang tanggal bawaannya hari ini saja — kemasan: tgl dikemas, batch: tgl
-  // steril (atau dibuat bila belum divalidasi).
-  const [defaultFilter] = useState(() => {
-    const today = tanggalLokal(new Date())
-    return { search: "", dateFrom: today, dateTo: today }
-  })
-  const [draft, setDraft] = useState(defaultFilter)
-  const [filter, setFilter] = useState(defaultFilter)
-  const isFiltered =
-    filter.search !== defaultFilter.search ||
-    filter.dateFrom !== defaultFilter.dateFrom ||
-    filter.dateTo !== defaultFilter.dateTo
   const filterParams = {
     search: filter.search || undefined,
     date_from: filter.dateFrom || undefined,
@@ -184,6 +171,11 @@ export function ProductionBmhpSterilizationTab() {
     () => rows.flatMap((r) => (r.kind === "packaging" ? [r.packaging] : [])),
     [rows],
   )
+
+  // Filter berubah dari halaman → kembali ke halaman pertama daftar.
+  useEffect(() => {
+    setPage(1)
+  }, [filter.search, filter.dateFrom, filter.dateTo, setPage])
 
   // Jumlah di chip filter — dihitung server, bukan dari daftar yang baru termuat
   // sebagian.
@@ -219,20 +211,6 @@ export function ProductionBmhpSterilizationTab() {
     setSelectedPkgIds(new Set())
   }
 
-  function handleSearch(e: React.FormEvent) {
-    e.preventDefault()
-    setSelectedPkgIds(new Set())
-    setFilter(draft)
-    setPage(1)
-  }
-
-  function resetFilter() {
-    setSelectedPkgIds(new Set())
-    setDraft(defaultFilter)
-    setFilter(defaultFilter)
-    setPage(1)
-  }
-
   // Master mesin sterilisator — baru diambil saat modal Mulai Sterilisasi dibuka.
   const [machines, setMachines] = useState<SterilizerMachineOption[]>([])
   const [machinesLoading, setMachinesLoading] = useState(false)
@@ -244,13 +222,13 @@ export function ProductionBmhpSterilizationTab() {
   // Modal Mulai Sterilisasi
   const [startModalOpen, setStartModalOpen] = useState(false)
   const [selectedMachineId, setSelectedMachineId] = useState<string>("")
-  const [method, setMethod] = useState<string>("uap")
+  const [method] = useState<string>("uap")
   const [cycleNumber, setCycleNumber] = useState<string>("")
   const [temperature, setTemperature] = useState<string>("")
   const [durationMinutes, setDurationMinutes] = useState<string>("")
   const [bioIndicatorLot, setBioIndicatorLot] = useState<string>("")
   const [chemIndicatorLot, setChemIndicatorLot] = useState<string>("")
-  const [sterilNote, setSterilNote] = useState<string>("")
+  const [sterilNote] = useState<string>("")
   const [submittingBatch, setSubmittingBatch] = useState(false)
 
   // Modal Validasi Hasil
@@ -425,75 +403,32 @@ export function ProductionBmhpSterilizationTab() {
 
   return (
     <div className="space-y-6">
-      {/* Chip filter tahap (warna = warna kartu), lalu search + rentang tanggal */}
-      <div>
-        <div className="flex flex-wrap gap-2">
-          {STAGE_FILTERS.map((f) => {
-            const activeChip = stage === f.key
-            const count = summary
-              ? f.key
-                ? summary[f.key]
-                : summary.belum + summary.menunggu + summary.sudah
-              : null
-            return (
-              <button
-                key={f.key || "all"}
-                type="button"
-                onClick={() => changeStage(f.key)}
-                className={`inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-semibold transition-colors ${
-                  activeChip
-                    ? "border-[#075489] bg-[#075489]/10 text-[#075489]"
-                    : "border-gray-200 bg-white text-gray-600 hover:bg-gray-50"
-                }`}
-              >
-                <span className={`h-3 w-1 rounded-full ${f.dot}`} aria-hidden />
-                {t(f.labelKey)}
-                <span className="text-gray-400">{count ?? "…"}</span>
-              </button>
-            )
-          })}
-        </div>
-
-      </div>
-
-      <form
-        onSubmit={handleSearch}
-        className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-[minmax(0,1fr)_10.5rem_10.5rem_auto] lg:items-end"
-      >
-        <div className="relative sm:col-span-2 lg:col-span-1">
-          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
-          <Input
-            value={draft.search}
-            onChange={(e) => setDraft((d) => ({ ...d, search: e.target.value }))}
-            placeholder="Cari kode batch / kode kemasan / mesin..."
-            className="pl-9"
-          />
-        </div>
-        {/* Rentang bebas — tanggal akhir tidak ikut digeser saat tanggal awal diubah. */}
-        <DateRangeFields
-          from={draft.dateFrom}
-          to={draft.dateTo}
-          onFromChange={(v) => setDraft((d) => ({ ...d, dateFrom: v }))}
-          onToChange={(v) => setDraft((d) => ({ ...d, dateTo: v }))}
-        />
-        <div className="flex gap-2 sm:col-span-2 lg:col-span-1">
-          <Button type="submit" className="flex-1 bg-[#075489] text-white hover:bg-[#075489]/90 lg:flex-none">
-            {t("common.search")}
-          </Button>
-          {isFiltered && (
-            <Button
+      {/* Chip filter tahap. Search & tanggal ada di halaman. */}
+      <div className="flex flex-wrap gap-2">
+        {STAGE_FILTERS.map((f) => {
+          const activeChip = stage === f.key
+          const count = summary
+            ? f.key
+              ? summary[f.key]
+              : summary.belum + summary.menunggu + summary.sudah
+            : null
+          return (
+            <button
+              key={f.key || "all"}
               type="button"
-              onClick={resetFilter}
-              variant="outline"
-              title={t("common.reset")}
-              aria-label={t("common.reset")}
-              className="shrink-0 text-gray-600"
+              onClick={() => changeStage(f.key)}
+              className={`inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-semibold transition-colors ${
+                activeChip
+                  ? "border-[#075489] bg-[#075489]/10 text-[#075489]"
+                  : "border-gray-200 bg-white text-gray-600 hover:bg-gray-50"
+              }`}
             >
-              <RotateCcw className="h-4 w-4" />
-            </Button>
-          )}
-        </div>
-      </form>
+              {t(f.labelKey)}
+              <span className="text-gray-400">{count ?? "…"}</span>
+            </button>
+          )
+        })}
+      </div>
 
       {/* Bar aksi: kemasan belum diproses dicentang lalu dimasukkan ke satu batch. */}
       {readyList.length > 0 && (
@@ -504,7 +439,7 @@ export function ProductionBmhpSterilizationTab() {
               id="select-all"
               checked={selectedPkgIds.size === readyList.length}
               onChange={toggleAll}
-              className="h-4 w-4 rounded border-gray-300 accent-sky-600"
+              className="h-4 w-4 rounded border-gray-300 accent-[#075489]"
             />
             <label htmlFor="select-all" className="cursor-pointer text-xs font-semibold text-gray-700">
               Pilih Semua Kemasan Belum Diproses ({selectedPkgIds.size} dipilih)
@@ -829,14 +764,10 @@ export function ProductionBmhpSterilizationTab() {
   )
 }
 
-// Warna kartu per tahap: aksen garis kiri + latar tipis + lencana. Sama dengan
-// tab Pengemasan — siap steril biru langit, proses steril indigo, steril hijau,
-// gagal merah.
+// Kartu & lencana netral — status cukup dibaca dari teksnya, tanpa warna tahap.
 const CARD_TONE = {
-  belum: { card: "border-l-sky-500 bg-white", badge: "bg-sky-100 text-sky-800" },
-  menunggu: { card: "border-l-indigo-500 bg-white", badge: "bg-indigo-100 text-indigo-800" },
-  steril: { card: "border-l-emerald-500 bg-emerald-50/20", badge: "bg-emerald-100 text-emerald-800" },
-  gagal: { card: "border-l-red-500 bg-red-50/30", badge: "bg-red-100 text-red-700" },
+  card: "border-gray-200 bg-white",
+  badge: "bg-gray-100 text-gray-700",
 } as const
 
 /** Kemasan siap steril (tahap "Belum Diproses") — klik kartu untuk mencentang. */
@@ -853,8 +784,8 @@ function ReadyPackagingCard({
   return (
     <div
       onClick={onToggle}
-      className={`flex cursor-pointer flex-col rounded-xl border border-l-4 p-4 transition-all ${CARD_TONE.belum.card} ${
-        checked ? "border-sky-500 shadow-sm ring-1 ring-sky-400" : "border-gray-200 hover:border-gray-300"
+      className={`flex cursor-pointer flex-col rounded-xl border p-4 transition-all ${CARD_TONE.card} ${
+        checked ? "shadow-sm ring-1 ring-[#075489]/40" : "hover:border-gray-300"
       }`}
     >
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -863,7 +794,7 @@ function ReadyPackagingCard({
             type="checkbox"
             checked={checked}
             onChange={() => {}} // ditangani onClick kartu
-            className="h-4 w-4 rounded border-gray-300 accent-sky-600"
+            className="h-4 w-4 rounded border-gray-300 accent-[#075489]"
           />
           <div>
             <span className="font-mono text-sm font-bold text-gray-900">
@@ -873,7 +804,7 @@ function ReadyPackagingCard({
             <div className="text-[11px] text-gray-500">Dari Produksi: {pkg.production?.code ?? "-"}</div>
           </div>
         </div>
-        <Badge className={CARD_TONE.belum.badge}>{t("productionBmhp.sterPending")}</Badge>
+        <Badge className={CARD_TONE.badge}>{t("productionBmhp.sterPending")}</Badge>
       </div>
 
       <div className="mt-3 space-y-1 border-t border-gray-200 pt-3 text-xs">
@@ -904,7 +835,6 @@ function BatchCard({
 }) {
   const { t } = useLanguage()
   const isProcessing = batch.status === "diproses"
-  const tone = isProcessing ? CARD_TONE.menunggu : batch.status === "selesai" ? CARD_TONE.steril : CARD_TONE.gagal
   const badgeLabel = isProcessing
     ? t("productionBmhp.sterWaiting")
     : batch.status === "selesai"
@@ -925,7 +855,7 @@ function BatchCard({
           onOpen()
         }
       }}
-      className={`flex cursor-pointer flex-col rounded-xl border border-l-4 border-gray-200 p-4 transition hover:shadow-md focus:outline-none focus-visible:ring-2 focus-visible:ring-[#075489]/30 ${tone.card}`}
+      className={`flex cursor-pointer flex-col rounded-xl border p-4 transition hover:shadow-md focus:outline-none focus-visible:ring-2 focus-visible:ring-[#075489]/30 ${CARD_TONE.card}`}
     >
       <div className="flex items-start justify-between gap-3">
         {/* Judul = kode batch; kode kemasan di dalamnya ada di tooltip. */}
@@ -936,7 +866,7 @@ function BatchCard({
           </span>
           <div className="text-[11px] text-gray-500">Mesin: {batch.machine_name ?? "-"}</div>
         </div>
-        <Badge className={`shrink-0 ${tone.badge}`}>{badgeLabel}</Badge>
+        <Badge className={`shrink-0 ${CARD_TONE.badge}`}>{badgeLabel}</Badge>
       </div>
 
       <div className="mt-3 flex-1 space-y-1 border-t border-gray-100 pt-3 text-xs text-gray-600">
@@ -967,7 +897,7 @@ function BatchCard({
               e.stopPropagation() // jangan ikut membuka modal detail
               onValidate()
             }}
-            className="w-full bg-emerald-600 text-xs text-white hover:bg-emerald-700"
+            className="w-full bg-[#075489] text-xs text-white hover:bg-[#075489]/90"
           >
             <CheckCircle2 className="mr-1.5 h-3.5 w-3.5" />
             Validasi Hasil
@@ -1084,7 +1014,6 @@ function BatchDetailModal({ batch, onClose }: { batch: SterilizationBmhpBatch | 
 
   const isProcessing = batch.status === "diproses"
   const isFailed = batch.status === "gagal"
-  const tone = isProcessing ? CARD_TONE.menunggu : isFailed ? CARD_TONE.gagal : CARD_TONE.steril
   const statusLabel = isProcessing ? "Menunggu Validasi" : isFailed ? "Gagal Steril" : "Steril"
   const reasonLabel = FAILURE_REASONS.find((r) => r.value === batch.failure_reason)?.label ?? batch.failure_reason
 
@@ -1116,7 +1045,7 @@ function BatchDetailModal({ batch, onClose }: { batch: SterilizationBmhpBatch | 
               <strong>{batch.duration_minutes ? `${batch.duration_minutes} mnt` : "-"}</strong>
             </div>
           </div>
-          <Badge className={tone.badge}>{statusLabel}</Badge>
+          <Badge className={CARD_TONE.badge}>{statusLabel}</Badge>
         </div>
 
         {batch.status === "selesai" && (

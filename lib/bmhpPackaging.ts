@@ -9,6 +9,13 @@ type PackagingItemLike = {
 
 export type PackagingContent = { name: string; quantity: number; unit_name: string | null }
 
+/** Filter pipeline BMHP (pengemasan & sterilisasi) — dipegang halaman, bukan tab. */
+export type BmhpPipelineFilter = {
+  search: string
+  dateFrom: string
+  dateTo: string
+}
+
 /**
  * Isi SATU kemasan BMHP, dihitung dari label-labelnya (bukan dari seluruh item
  * produksi — satu produksi bisa terpecah ke beberapa kemasan, satu per BMHP/paket).
